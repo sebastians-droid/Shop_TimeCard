@@ -14,7 +14,18 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Textarea } from '@/components/ui/textarea';
 import { useAllEquipmentAssets, useCreateShopTimeEntry, useShopEmployeeList, useShopTimeEntryList, useUpdateShopTimeEntry } from '@/hooks/use-shop-data';
 import type { EquipmentAsset } from '@/models/equipment-asset';
+import { NoLunchCheckbox } from '@/components/no-lunch-checkbox';
 import { mapShopEmployees, type AppShopEmployee } from '@/lib/shop-employees';
+import {
+  applyNoLunchMarker,
+  formatDuration,
+  getDayPayMinutes,
+  getEntryPaidMinutes,
+  getPtoHours,
+  isPtoEntry,
+  roundClockInUpToQuarterHour,
+  stripNoLunchMarker,
+} from '@/lib/time-rules';
 import { ShopTimeEntryPTOTypeKeyToLabel, type ShopTimeEntry, type ShopTimeEntryPTOTimeKey, type ShopTimeEntryPTOTypeKey } from '@/models/shop-time-entry';
 
 type PtoHours = 4 | 8;
@@ -37,32 +48,13 @@ type AssetPickerProps = {
 const getNowIso = () => new Date().toISOString();
 const getWorkDate = (dateTime: string) => format(new Date(dateTime), 'yyyy-MM-dd');
 const PTO_TIME_KEY_BY_HOURS: Record<PtoHours, ShopTimeEntryPTOTimeKey> = { 4: 'PTOTimeKey04', 8: 'PTOTimeKey18' };
-const roundMinutesUpToQuarterHour = (minutes: number) => Math.ceil(Math.max(0, minutes) / 15) * 15;
 const getAssetDisplayName = (asset?: EquipmentAsset | Pick<EquipmentAsset, 'id' | 'asset'> | null) => asset?.asset || 'Unassigned asset';
 const getEntryJobNumber = (entry: ShopTimeEntry) => entry.jobNumber ?? '';
-const getPtoHours = (entry: ShopTimeEntry) => {
-  if (entry.pTOTimeKey === 'PTOTimeKey04') return 4;
-  if (entry.pTOTimeKey === 'PTOTimeKey18') return 8;
-  if (entry.jobNumber !== 'PTO' && !entry.timeEntry.toLowerCase().includes(' - pto')) return 0;
-  return Math.round(entry.hours ?? 0);
-};
-const isPtoEntry = (entry: ShopTimeEntry) => getPtoHours(entry) > 0 || entry.jobNumber === 'PTO' || entry.timeEntry.toLowerCase().includes(' - pto');
 
 const getPtoClockInIso = (date: Date) => {
   const ptoDate = startOfDay(date);
   ptoDate.setHours(8, 0, 0, 0);
   return ptoDate.toISOString();
-};
-const getDurationMinutes = (entry: ShopTimeEntry) => {
-  if (isPtoEntry(entry)) return getPtoHours(entry) * 60;
-  if (typeof entry.hours === 'number' && entry.clockOut) return roundMinutesUpToQuarterHour(Math.round(entry.hours * 60));
-  const start = entry.clockIn ? new Date(entry.clockIn) : new Date();
-  const end = entry.clockOut ? new Date(entry.clockOut) : new Date();
-  return roundMinutesUpToQuarterHour(Math.round((end.getTime() - start.getTime()) / 60000));
-};
-const getDuration = (entry: ShopTimeEntry) => {
-  const minutes = getDurationMinutes(entry);
-  return `${Math.floor(minutes / 60)}h ${minutes % 60}m`;
 };
 
 
@@ -160,6 +152,7 @@ export default function HomePage() {
   const [editingNotes, setEditingNotes] = useState<string>('');
   const returnToSignInTimer = useRef<number | undefined>(undefined);
   const [clockInConfirmation, setClockInConfirmation] = useState<ClockInConfirmation | undefined>(undefined);
+  const [noLunchDraft, setNoLunchDraft] = useState(false);
 
 
   const { data: shopEmployees = [], isLoading: employeesLoading, isError: employeesFailed, error: employeesError, refetch: refetchEmployees } = useShopEmployeeList();
@@ -183,7 +176,8 @@ export default function HomePage() {
     return employeeEntries.filter((entry: ShopTimeEntry) => entry.clockIn?.startsWith(today));
   }, [employeeEntries, selectedEmployee, selectedEmployeeId]);
   const employeeActiveEntry = employeeTodayEntries.find((entry: ShopTimeEntry) => !entry.clockOut && !isPtoEntry(entry));
-  const totalHoursToday = useMemo(() => (employeeTodayEntries.reduce((total: number, entry: ShopTimeEntry) => total + getDurationMinutes(entry), 0) / 60).toFixed(1), [employeeTodayEntries]);
+  const todayPay = useMemo(() => getDayPayMinutes(employeeTodayEntries), [employeeTodayEntries]);
+  const noLunch = employeeTodayEntries.some((entry: ShopTimeEntry) => !isPtoEntry(entry)) ? todayPay.noLunch : noLunchDraft;
 
 
   const resetEntryForm = () => {
@@ -205,6 +199,7 @@ export default function HomePage() {
       return;
     }
     setSelectedEmployeeId(matchedEmployee.id);
+    setNoLunchDraft(false);
     resetEntryForm();
     toast.success(`Verified ${matchedEmployee.employeeName}.`);
   };
@@ -217,6 +212,7 @@ export default function HomePage() {
     setClockInConfirmation(undefined);
     setEmployeeCode('');
     setSelectedEmployeeId('');
+    setNoLunchDraft(false);
     resetEntryForm();
     setShowPtoForm(false);
   };
@@ -230,12 +226,34 @@ export default function HomePage() {
     }
   };
 
+  const handleNoLunchChange = async (checked: boolean) => {
+    setNoLunchDraft(checked);
+    const laborEntries = employeeTodayEntries.filter((entry: ShopTimeEntry) => !isPtoEntry(entry));
+    if (laborEntries.length === 0) return;
+    try {
+      await Promise.all(
+        laborEntries.map((entry: ShopTimeEntry) =>
+          updateTimeEntry.mutateAsync({
+            id: entry.id,
+            changedFields: { notes: applyNoLunchMarker(entry.notes, checked) },
+          }),
+        ),
+      );
+      toast.success(checked ? 'No lunch saved for today.' : '30-minute lunch will be deducted today.');
+    } catch (error: unknown) {
+      setNoLunchDraft(!checked);
+      toast.error(error instanceof Error ? error.message : 'Unable to update lunch setting.');
+    }
+  };
+
   const handleClockIn = async () => {
     if (!selectedEmployee) {
       toast.error('Verify your employee code before clocking in.');
       return;
     }
-    const clockIn = getNowIso();
+    const nowIso = getNowIso();
+    const isFirstLaborClockIn = !employeeTodayEntries.some((entry: ShopTimeEntry) => !isPtoEntry(entry));
+    const clockIn = isFirstLaborClockIn ? roundClockInUpToQuarterHour(nowIso) : nowIso;
     const selectedAssetForEntry = selectedAssetId ? selectedAsset : undefined;
     const manualDivision = division.trim();
     const manualJobNumber = jobNumber.trim();
@@ -247,8 +265,17 @@ export default function HomePage() {
     const selectedAssetName = selectedAssetForEntry ? getAssetDisplayName(selectedAssetForEntry) : '';
     const fallbackLabel = [manualDivision ? `Division ${manualDivision}` : '', manualJobNumber ? `Job ${manualJobNumber}` : ''].filter((value: string) => value).join(' · ');
     const entryLabel = selectedAssetName ? [selectedAssetName, manualJobNumber ? `Job ${manualJobNumber}` : ''].filter((value: string) => value).join(' · ') : fallbackLabel || 'Time entry';
+    const closedActiveEntry = employeeActiveEntry ? { ...employeeActiveEntry, clockOut: clockIn } : undefined;
+    const dayAfterClose = closedActiveEntry
+      ? employeeTodayEntries.map((entry: ShopTimeEntry) => (entry.id === closedActiveEntry.id ? closedActiveEntry : entry))
+      : employeeTodayEntries;
     try {
-      if (employeeActiveEntry) await updateTimeEntry.mutateAsync({ id: employeeActiveEntry.id, changedFields: { clockOut: clockIn, hours: getDurationMinutes({ ...employeeActiveEntry, clockOut: clockIn }) / 60 } });
+      if (closedActiveEntry) {
+        await updateTimeEntry.mutateAsync({
+          id: closedActiveEntry.id,
+          changedFields: { clockOut: clockIn, hours: getEntryPaidMinutes(dayAfterClose, closedActiveEntry) / 60 },
+        });
+      }
       await createTimeEntry.mutateAsync({
         timeEntry: `${selectedEmployee.employeeName} - ${entryLabel}`,
         employee: { id: selectedEmployee.id, autoNumber: selectedEmployee.autoNumber },
@@ -259,7 +286,7 @@ export default function HomePage() {
         jobNumber: manualJobNumber || undefined,
         clockIn,
         workDate: getWorkDate(clockIn),
-        notes: notes.trim() || undefined,
+        notes: applyNoLunchMarker(notes.trim() || undefined, noLunch),
       });
       resetEntryForm();
       setClockInConfirmation({
@@ -319,8 +346,10 @@ export default function HomePage() {
 
   const handleClockOut = async (entry: ShopTimeEntry) => {
     const clockOut = getNowIso();
+    const updatedEntry = { ...entry, clockOut };
+    const dayEntries = employeeTodayEntries.map((row: ShopTimeEntry) => (row.id === entry.id ? updatedEntry : row));
     try {
-      await updateTimeEntry.mutateAsync({ id: entry.id, changedFields: { clockOut, hours: getDurationMinutes({ ...entry, clockOut }) / 60 } });
+      await updateTimeEntry.mutateAsync({ id: entry.id, changedFields: { clockOut, hours: getEntryPaidMinutes(dayEntries, updatedEntry) / 60 } });
       toast.success('Clocked out successfully.');
     } catch (error: unknown) {
       toast.error(error instanceof Error ? error.message : 'Unable to clock out.');
@@ -332,12 +361,12 @@ export default function HomePage() {
     setEditingAssetId(entry.asset?.id ?? '');
     setEditingAssetRecord(entry.asset);
     setEditingNotesEntryId('');
-    setEditingNotes(entry.notes ?? '');
+    setEditingNotes(stripNoLunchMarker(entry.notes));
   };
   const handleSaveEditAsset = async (entry: ShopTimeEntry) => {
     const newAsset = editingAssetId ? editingAssetRecord ?? assets.find((asset: EquipmentAsset) => asset.id === editingAssetId) : undefined;
     try {
-      await updateTimeEntry.mutateAsync({ id: entry.id, changedFields: { timeEntry: `${entry.employee ?? selectedEmployee?.employeeName ?? 'Employee'} - ${[newAsset ? getAssetDisplayName(newAsset) : getTimeEntryAssetName(entry, assets), getEntryJobNumber(entry) ? `Job ${getEntryJobNumber(entry)}` : ''].filter((value: string) => value).join(' · ')}`, asset: newAsset ? { id: newAsset.id, asset: getAssetDisplayName(newAsset) } : entry.asset, assetDivision: newAsset ? newAsset.divisionCode : entry.assetDivision, jobNumber: getEntryJobNumber(entry) || undefined, notes: editingNotes.trim() || undefined } });
+      await updateTimeEntry.mutateAsync({ id: entry.id, changedFields: { timeEntry: `${entry.employee ?? selectedEmployee?.employeeName ?? 'Employee'} - ${[newAsset ? getAssetDisplayName(newAsset) : getTimeEntryAssetName(entry, assets), getEntryJobNumber(entry) ? `Job ${getEntryJobNumber(entry)}` : ''].filter((value: string) => value).join(' · ')}`, asset: newAsset ? { id: newAsset.id, asset: getAssetDisplayName(newAsset) } : entry.asset, assetDivision: newAsset ? newAsset.divisionCode : entry.assetDivision, jobNumber: getEntryJobNumber(entry) || undefined, notes: applyNoLunchMarker(editingNotes.trim() || undefined, noLunch) } });
       setEditingEntryId('');
       setEditingAssetId('');
       setEditingAssetRecord(undefined);
@@ -350,7 +379,7 @@ export default function HomePage() {
   };
   const handleSaveEditNotes = async (entry: ShopTimeEntry) => {
     try {
-      await updateTimeEntry.mutateAsync({ id: entry.id, changedFields: { notes: editingNotes.trim() || undefined } });
+      await updateTimeEntry.mutateAsync({ id: entry.id, changedFields: { notes: applyNoLunchMarker(editingNotes.trim() || undefined, noLunch) } });
       setEditingNotesEntryId('');
       setEditingNotes('');
       toast.success('Notes updated.');
@@ -399,6 +428,9 @@ export default function HomePage() {
         <section className="grid gap-6">
           <Card className="bg-card text-card-foreground shadow-sm">
             <CardHeader><div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between"><div><CardTitle className="text-xl">{selectedEmployee.employeeName}</CardTitle><p className="mt-1 text-sm text-muted-foreground">Employee {selectedEmployee.employeeCode} · {format(new Date(), 'EEEE, MMM d')}</p></div><div className="flex flex-wrap gap-2"><Button type="button" variant="outline" onClick={() => void handleReloadTables()} disabled={assetsLoading || entriesLoading}><RefreshCw className="mr-2 h-4 w-4" /> Reload tables</Button><Button type="button" variant="outline" onClick={handleResetEmployee}>Change employee</Button></div></div></CardHeader>
+            <CardContent>
+              <NoLunchCheckbox checked={noLunch} disabled={updateTimeEntry.isPending} onCheckedChange={(checked: boolean) => void handleNoLunchChange(checked)} />
+            </CardContent>
           </Card>
 
 
@@ -417,11 +449,11 @@ export default function HomePage() {
                       ) : (
                         <div className="space-y-1"><div className="flex flex-wrap items-center gap-2">{isPtoEntry(entry) ? <Badge variant="secondary">PTO</Badge> : null}{entry.pTOTypeKey ? <Badge variant="outline">{ShopTimeEntryPTOTypeKeyToLabel[entry.pTOTypeKey]}</Badge> : null}<p className="text-sm text-muted-foreground">{isPtoEntry(entry) ? 'Paid time off' : 'Asset'}</p></div><p className="text-lg font-semibold">{getTimeEntryAssetName(entry, assets)}</p><p className="text-sm text-muted-foreground">{isPtoEntry(entry) ? `${getPtoHours(entry) || Math.round(entry.hours ?? 0)} hours submitted` : `Division ${entry.assetDivision ?? '—'} · Job ${getEntryJobNumber(entry) || '—'}`}</p></div>
                       )}
-                      {editingNotesEntryId === entry.id ? <div className="mt-3 space-y-2"><Label htmlFor={`notes-${entry.id}`}>Notes</Label><Textarea id={`notes-${entry.id}`} value={editingNotes} onChange={(event: React.ChangeEvent<HTMLTextAreaElement>) => setEditingNotes(event.target.value)} placeholder="Add notes for this time entry" /></div> : entry.notes && editingEntryId !== entry.id ? <p className="mt-3 rounded-md bg-muted p-3 text-sm text-muted-foreground">{entry.notes}</p> : null}
+                      {editingNotesEntryId === entry.id ? <div className="mt-3 space-y-2"><Label htmlFor={`notes-${entry.id}`}>Notes</Label><Textarea id={`notes-${entry.id}`} value={editingNotes} onChange={(event: React.ChangeEvent<HTMLTextAreaElement>) => setEditingNotes(event.target.value)} placeholder="Add notes for this time entry" /></div> : stripNoLunchMarker(entry.notes) && editingEntryId !== entry.id ? <p className="mt-3 rounded-md bg-muted p-3 text-sm text-muted-foreground">{stripNoLunchMarker(entry.notes)}</p> : null}
                     </div>
                     <div className="flex flex-col gap-2 sm:items-end">
-                      <div className="space-y-2 text-left sm:text-right"><div><p className="text-sm text-muted-foreground">Clock in</p><p className="text-lg font-semibold">{entry.clockIn ? format(new Date(entry.clockIn), 'p') : '—'}</p></div><div><p className="text-sm text-muted-foreground">Clock out</p><p className="text-lg font-semibold">{entry.clockOut ? format(new Date(entry.clockOut), 'p') : '—'}</p></div><div><p className="text-xs text-muted-foreground">Duration</p><p className="text-sm font-medium text-foreground">{getDuration(entry)}</p></div></div>
-                      {!entry.clockOut && !isPtoEntry(entry) ? <Button type="button" variant="secondary" onClick={() => void handleClockOut(entry)} disabled={updateTimeEntry.isPending}>Clock out</Button> : editingEntryId === entry.id ? <div className="flex gap-2"><Button type="button" size="icon" aria-label="Save timecard" onClick={() => void handleSaveEditAsset(entry)} disabled={updateTimeEntry.isPending}><Check className="h-4 w-4" /></Button><Button type="button" size="icon" variant="outline" aria-label="Cancel edit" onClick={() => setEditingEntryId('')}><X className="h-4 w-4" /></Button></div> : editingNotesEntryId === entry.id ? <div className="flex gap-2"><Button type="button" size="icon" aria-label="Save notes" onClick={() => void handleSaveEditNotes(entry)} disabled={updateTimeEntry.isPending}><Check className="h-4 w-4" /></Button><Button type="button" size="icon" variant="outline" aria-label="Cancel notes edit" onClick={() => setEditingNotesEntryId('')}><X className="h-4 w-4" /></Button></div> : <div className="flex flex-wrap items-center justify-end gap-2"><Badge variant="outline">Complete</Badge>{!isPtoEntry(entry) ? <Button type="button" variant="outline" onClick={() => handleStartEditAsset(entry)}>Edit timecard</Button> : null}<Button type="button" variant="outline" onClick={() => { setEditingNotesEntryId(entry.id); setEditingNotes(entry.notes ?? ''); }}>{entry.notes ? 'Edit notes' : 'Add notes'}</Button></div>}
+                      <div className="space-y-2 text-left sm:text-right"><div><p className="text-sm text-muted-foreground">Clock in</p><p className="text-lg font-semibold">{entry.clockIn ? format(new Date(entry.clockIn), 'p') : '—'}</p></div><div><p className="text-sm text-muted-foreground">Clock out</p><p className="text-lg font-semibold">{entry.clockOut ? format(new Date(entry.clockOut), 'p') : '—'}</p></div><div><p className="text-xs text-muted-foreground">Duration</p><p className="text-sm font-medium text-foreground">{formatDuration(getEntryPaidMinutes(employeeTodayEntries, entry))}</p></div></div>
+                      {!entry.clockOut && !isPtoEntry(entry) ? <Button type="button" variant="secondary" onClick={() => void handleClockOut(entry)} disabled={updateTimeEntry.isPending}>Clock out</Button> : editingEntryId === entry.id ? <div className="flex gap-2"><Button type="button" size="icon" aria-label="Save timecard" onClick={() => void handleSaveEditAsset(entry)} disabled={updateTimeEntry.isPending}><Check className="h-4 w-4" /></Button><Button type="button" size="icon" variant="outline" aria-label="Cancel edit" onClick={() => setEditingEntryId('')}><X className="h-4 w-4" /></Button></div> : editingNotesEntryId === entry.id ? <div className="flex gap-2"><Button type="button" size="icon" aria-label="Save notes" onClick={() => void handleSaveEditNotes(entry)} disabled={updateTimeEntry.isPending}><Check className="h-4 w-4" /></Button><Button type="button" size="icon" variant="outline" aria-label="Cancel notes edit" onClick={() => setEditingNotesEntryId('')}><X className="h-4 w-4" /></Button></div> : <div className="flex flex-wrap items-center justify-end gap-2"><Badge variant="outline">Complete</Badge>{!isPtoEntry(entry) ? <Button type="button" variant="outline" onClick={() => handleStartEditAsset(entry)}>Edit timecard</Button> : null}<Button type="button" variant="outline" onClick={() => { setEditingNotesEntryId(entry.id); setEditingNotes(stripNoLunchMarker(entry.notes)); }}>{stripNoLunchMarker(entry.notes) ? 'Edit notes' : 'Add notes'}</Button></div>}
                     </div>
                   </div>
                 </div>
@@ -445,7 +477,7 @@ export default function HomePage() {
           </Card>
         </section>
       )}
-      <Card className="border-l-4 border-l-primary bg-card text-card-foreground shadow-sm"><CardContent className="flex flex-col gap-3 p-4 sm:flex-row sm:items-center sm:justify-between"><div className="min-w-0"><p className="font-semibold">Daily equipment timecard</p><p className="mt-1 text-sm text-muted-foreground">Today’s rounded asset time and PTO at a glance.</p></div><div className="grid grid-cols-3 gap-2 text-center sm:min-w-80"><div className="rounded-md bg-muted px-3 py-2 text-muted-foreground"><p className="text-xs">Entries</p><p className="text-lg font-semibold text-foreground">{employeeTodayEntries.length}</p></div><div className="rounded-md bg-muted px-3 py-2 text-muted-foreground"><p className="text-xs">Hours</p><p className="text-lg font-semibold text-foreground">{selectedEmployee ? totalHoursToday : '0.0'}</p></div><div className="rounded-md bg-muted px-3 py-2 text-muted-foreground"><p className="text-xs">Status</p><p className="text-sm font-semibold text-foreground">{employeeActiveEntry ? 'Clocked in' : 'Ready'}</p></div></div></CardContent></Card>
+      <Card className="border-l-4 border-l-primary bg-card text-card-foreground shadow-sm"><CardContent className="flex flex-col gap-3 p-4 sm:flex-row sm:items-center sm:justify-between"><div className="min-w-0"><p className="font-semibold">Daily equipment timecard</p><p className="mt-1 text-sm text-muted-foreground">{todayPay.lunchDeducted ? '30-minute lunch deducted. Asset time is rounded to the nearest 15 minutes.' : todayPay.noLunch ? 'No lunch deducted. Asset time is rounded to the nearest 15 minutes.' : 'Today’s rounded asset time and PTO at a glance.'}</p></div><div className="grid grid-cols-3 gap-2 text-center sm:min-w-80"><div className="rounded-md bg-muted px-3 py-2 text-muted-foreground"><p className="text-xs">Entries</p><p className="text-lg font-semibold text-foreground">{employeeTodayEntries.length}</p></div><div className="rounded-md bg-muted px-3 py-2 text-muted-foreground"><p className="text-xs">Hours</p><p className="text-lg font-semibold text-foreground">{selectedEmployee ? (todayPay.totalMinutes / 60).toFixed(1) : '0.0'}</p></div><div className="rounded-md bg-muted px-3 py-2 text-muted-foreground"><p className="text-xs">Status</p><p className="text-sm font-semibold text-foreground">{employeeActiveEntry ? 'Clocked in' : 'Ready'}</p></div></div></CardContent></Card>
     </main>
   );
 }

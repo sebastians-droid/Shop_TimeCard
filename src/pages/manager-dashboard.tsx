@@ -15,7 +15,18 @@ import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover
 import { useAllEquipmentAssets, useDeleteShopTimeEntry, useShopEmployeeList, useShopTimeEntryList, useUpdateShopTimeEntry } from '@/hooks/use-shop-data';
 import type { EquipmentAsset } from '@/models/equipment-asset';
 import { mapShopEmployees, type AppShopEmployee } from '@/lib/shop-employees';
+import {
+  applyNoLunchMarker,
+  formatDuration,
+  getDayPayMinutes,
+  getEntryPaidMinutes,
+  getPtoHours,
+  isPtoEntry,
+  lunchCsvLabel,
+  stripNoLunchMarker,
+} from '@/lib/time-rules';
 import { ShopTimeEntryPTOTypeKeyToLabel, type ShopTimeEntry, type ShopTimeEntryPTOTimeKey } from '@/models/shop-time-entry';
+import { NoLunchCheckbox } from '@/components/no-lunch-checkbox';
 import { useUser } from '@/hooks/use-user';
 
 type EditableEntry = {
@@ -34,6 +45,8 @@ type EmployeeDailySummary = {
   entries: ShopTimeEntry[];
   activeCount: number;
   totalMinutes: number;
+  noLunch: boolean;
+  lunchDeducted: boolean;
 };
 
 type AssetPickerProps = {
@@ -78,31 +91,7 @@ const getEntryDivision = (entry: ShopTimeEntry, assets: EquipmentAsset[]) => {
   return String(entry.assetDivision ?? matchedAsset?.divisionCode ?? '');
 };
 
-const roundMinutesUpToQuarterHour = (minutes: number) => Math.ceil(Math.max(0, minutes) / 15) * 15;
 const PTO_TIME_KEY_BY_HOURS: Record<4 | 8, ShopTimeEntryPTOTimeKey> = { 4: 'PTOTimeKey04', 8: 'PTOTimeKey18' };
-const getPtoHours = (entry: ShopTimeEntry) => {
-  if (entry.pTOTimeKey === 'PTOTimeKey04') return 4;
-  if (entry.pTOTimeKey === 'PTOTimeKey18') return 8;
-  if (entry.jobNumber !== 'PTO' && !entry.timeEntry.toLowerCase().includes(' - pto')) return 0;
-  return Math.round(entry.hours ?? 0);
-};
-const isPtoEntry = (entry: ShopTimeEntry) => getPtoHours(entry) > 0 || entry.jobNumber === 'PTO' || entry.timeEntry.toLowerCase().includes(' - pto');
-const getDurationMinutes = (entry: ShopTimeEntry) => {
-  if (isPtoEntry(entry)) return getPtoHours(entry) * 60;
-  if (typeof entry.hours === 'number' && entry.clockOut) {
-    return roundMinutesUpToQuarterHour(Math.round(entry.hours * 60));
-  }
-
-  const start = entry.clockIn ? new Date(entry.clockIn) : new Date();
-  const end = entry.clockOut ? new Date(entry.clockOut) : new Date();
-  return roundMinutesUpToQuarterHour(Math.round((end.getTime() - start.getTime()) / 60000));
-};
-
-const formatDuration = (minutes: number) => {
-  const hours = Math.floor(minutes / 60);
-  const remainingMinutes = minutes % 60;
-  return `${hours}h ${remainingMinutes}m`;
-};
 
 const formatTimeForInput = (dateTime?: string) => {
   if (!dateTime) {
@@ -135,11 +124,7 @@ const mergeDateAndTime = (existingDateTime: string, timeValue: string) => {
 
 const getEntryWorkDateKey = (entry: ShopTimeEntry) => (entry.clockIn ? format(new Date(entry.clockIn), 'yyyy-MM-dd') : 'No clock-in date');
 
-const formatHoursAndMinutes = (minutes: number) => {
-  const hours = Math.floor(minutes / 60);
-  const remainingMinutes = minutes % 60;
-  return `${hours}h ${remainingMinutes}m`;
-};
+const formatHoursAndMinutes = (minutes: number) => formatDuration(minutes);
 
 const formatCsvCell = (value: string | number) => `\"${String(value).replace(/\"/g, '\"\"')}\"`;
 
@@ -231,11 +216,7 @@ const createZipBlob = (files: { name: string; content: string }[]) => {
   return new Blob([new Uint8Array(zipBytes)], { type: 'application/zip' });
 };
 
-const getEmployeeNotes = (notes?: string) =>
-  (notes ?? '')
-    .replace(/\s*Auto-clocked out when starting next asset\.?/gi, '')
-    .replace(/\s*Auto-clocked out\.?/gi, '')
-    .trim();
+const getEmployeeNotes = (notes?: string) => stripNoLunchMarker(notes);
 
 function AssetPicker({ assets, value, onChange, currentAsset }: AssetPickerProps) {
   const [search, setSearch] = useState<string>('');
@@ -325,15 +306,25 @@ export default function ManagerDashboardPage() {
         entries: [] as ShopTimeEntry[],
         activeCount: 0,
         totalMinutes: 0,
+        noLunch: false,
+        lunchDeducted: false,
       };
 
       current.entries.push(entry);
       current.activeCount += entry.clockOut ? 0 : 1;
-      current.totalMinutes += getDurationMinutes(entry);
       summaries.set(employeeKey, current);
     });
 
     return Array.from(summaries.values())
+      .map((summary: EmployeeDailySummary) => {
+        const pay = getDayPayMinutes(summary.entries);
+        return {
+          ...summary,
+          totalMinutes: pay.totalMinutes,
+          noLunch: pay.noLunch,
+          lunchDeducted: pay.lunchDeducted,
+        };
+      })
       .filter((summary: EmployeeDailySummary) => {
         const query = search.trim().toLowerCase();
         return !query || summary.employeeName.toLowerCase().includes(query) || summary.employeeNumber.toLowerCase().includes(query);
@@ -352,7 +343,16 @@ export default function ManagerDashboardPage() {
       .sort((a: ShopTimeEntry, b: ShopTimeEntry) => new Date(a.clockIn ?? '').getTime() - new Date(b.clockIn ?? '').getTime());
   }, [exportWeekRange, timeEntries]);
 
-  const weeklyPayrollMinutes = weeklyEntries.reduce((total: number, entry: ShopTimeEntry) => total + getDurationMinutes(entry), 0);
+  const weeklyPayrollMinutes = useMemo(() => {
+    const groups = new Map<string, ShopTimeEntry[]>();
+    weeklyEntries.forEach((entry: ShopTimeEntry) => {
+      const key = `${getEntryEmployeeKey(entry)}|${getEntryWorkDateKey(entry)}`;
+      const current = groups.get(key) ?? [];
+      current.push(entry);
+      groups.set(key, current);
+    });
+    return [...groups.values()].reduce((total: number, dayEntries: ShopTimeEntry[]) => total + getDayPayMinutes(dayEntries).totalMinutes, 0);
+  }, [weeklyEntries]);
 
 
   const handleToggleEmployee = (employeeKey: string) => {
@@ -398,6 +398,10 @@ export default function ManagerDashboardPage() {
     const clockOut = editValues.clockOutTime ? mergeDateAndTime(entry.clockIn, editValues.clockOutTime) : undefined;
     const label = selectedAsset ? getAssetDisplayName(selectedAsset) : manualJobNumber || (manualDivision ? `Division ${manualDivision}` : getEntryAssetName(entry, assets) || 'Time entry');
     const notes = entry.notes ?? '';
+    const updatedEntry = { ...entry, clockIn, clockOut };
+    const dayEntries = selectedDayEntries
+      .filter((row: ShopTimeEntry) => getEntryEmployeeKey(row) === getEntryEmployeeKey(entry))
+      .map((row: ShopTimeEntry) => (row.id === entry.id ? updatedEntry : row));
 
     try {
       await updateTimeEntry.mutateAsync({
@@ -411,7 +415,7 @@ export default function ManagerDashboardPage() {
           clockOut,
           division: !selectedAsset && manualDivision ? Number(manualDivision) : undefined,
           jobNumber: manualJobNumber || undefined,
-          hours: clockOut ? getDurationMinutes({ ...entry, clockIn, clockOut }) / 60 : undefined,
+          hours: clockOut ? getEntryPaidMinutes(dayEntries, updatedEntry) / 60 : undefined,
           pTOTimeKey: isPtoEntry(entry) && (getPtoHours(entry) === 4 || getPtoHours(entry) === 8) ? PTO_TIME_KEY_BY_HOURS[getPtoHours(entry) as 4 | 8] : entry.pTOTimeKey,
           workDate: format(new Date(clockIn), 'yyyy-MM-dd'),
         },
@@ -444,13 +448,34 @@ export default function ManagerDashboardPage() {
     }
   };
 
+  const handleNoLunchChange = async (summary: EmployeeDailySummary, checked: boolean) => {
+    const laborEntries = summary.entries.filter((entry: ShopTimeEntry) => !isPtoEntry(entry));
+    if (laborEntries.length === 0) {
+      toast.info('Clock time for this employee first, then lunch can be overridden.');
+      return;
+    }
+    try {
+      await Promise.all(
+        laborEntries.map((entry: ShopTimeEntry) =>
+          updateTimeEntry.mutateAsync({
+            id: entry.id,
+            changedFields: { notes: applyNoLunchMarker(entry.notes, checked) },
+          }),
+        ),
+      );
+      toast.success(checked ? `No lunch saved for ${summary.employeeName}.` : `Lunch deduction restored for ${summary.employeeName}.`);
+    } catch (error: unknown) {
+      toast.error(error instanceof Error ? error.message : 'Unable to update lunch setting.');
+    }
+  };
+
   const handleExportWeeklyPayroll = () => {
     if (weeklyEntries.length === 0) {
       toast.info(`No time entries are available for ${formatWeekRangeLabel(exportWeekDate)}.`);
       return;
     }
 
-    const headerRow = ['Employee', 'Employee Number', 'Work Date', 'Punch In', 'Punch Out', 'Hours', 'PTO Time', 'PTO Type', 'Division', 'Asset', 'Job Number', 'Status', 'Notes'].map(formatCsvCell).join(',');
+    const headerRow = ['Employee', 'Employee Number', 'Work Date', 'Punch In', 'Punch Out', 'Hours', 'Lunch', 'PTO Time', 'PTO Type', 'Division', 'Asset', 'Job Number', 'Status', 'Notes'].map(formatCsvCell).join(',');
     const entriesByEmployee = new Map<string, ShopTimeEntry[]>();
 
     weeklyEntries.forEach((entry: ShopTimeEntry) => {
@@ -475,18 +500,26 @@ export default function ManagerDashboardPage() {
       const { employeeName, employeeNumber, entries } = employeeGroup;
       const csvRows: string[] = [headerRow];
       const sortedEntries = [...entries].sort((a: ShopTimeEntry, b: ShopTimeEntry) => new Date(a.clockIn ?? '').getTime() - new Date(b.clockIn ?? '').getTime());
-
+      const entriesByDay = new Map<string, ShopTimeEntry[]>();
+      sortedEntries.forEach((entry: ShopTimeEntry) => {
+        const dayKey = getEntryWorkDateKey(entry);
+        const dayEntries = entriesByDay.get(dayKey) ?? [];
+        dayEntries.push(entry);
+        entriesByDay.set(dayKey, dayEntries);
+      });
 
       sortedEntries.forEach((entry: ShopTimeEntry) => {
         const clockInDate = entry.clockIn ? new Date(entry.clockIn) : null;
         const clockOutDate = entry.clockOut ? new Date(entry.clockOut) : null;
+        const dayEntries = entriesByDay.get(getEntryWorkDateKey(entry)) ?? [entry];
         csvRows.push([
           employeeName,
           employeeNumber,
           getEntryWorkDateKey(entry),
           clockInDate ? format(clockInDate, 'M/d/yyyy p') : '',
           clockOutDate ? format(clockOutDate, 'M/d/yyyy p') : '',
-          formatHoursAndMinutes(getDurationMinutes(entry)),
+          formatHoursAndMinutes(getEntryPaidMinutes(dayEntries, entry)),
+          isPtoEntry(entry) ? '' : lunchCsvLabel(dayEntries),
           isPtoEntry(entry) ? `${getPtoHours(entry)} hours` : '',
           entry.pTOTypeKey ? ShopTimeEntryPTOTypeKeyToLabel[entry.pTOTypeKey] : '',
           getEntryDivision(entry, assets) || 'Unassigned',
@@ -687,16 +720,18 @@ export default function ManagerDashboardPage() {
                     <button type="button" className="flex w-full flex-col gap-3 p-4 text-left sm:flex-row sm:items-center sm:justify-between">
                       <div>
                         <h2 className="text-lg font-semibold">{summary.employeeName}</h2>
-                        <p className="text-sm text-muted-foreground">Employee {summary.employeeNumber} · {summary.entries.length} entries · {formatDuration(summary.totalMinutes)}</p>
+                        <p className="text-sm text-muted-foreground">Employee {summary.employeeNumber} · {summary.entries.length} entries · {formatDuration(summary.totalMinutes)}{summary.noLunch ? ' · No lunch' : summary.lunchDeducted ? ' · Lunch 0.5h' : ''}</p>
                       </div>
                       <div className="flex items-center gap-2">
                         <Badge variant={summary.activeCount > 0 ? 'default' : 'outline'}>{summary.activeCount > 0 ? 'Active now' : 'Complete'}</Badge>
+                        {summary.noLunch ? <Badge variant="secondary">No lunch</Badge> : null}
                         <ChevronDown className={`h-5 w-5 transition-transform ${isOpen ? 'rotate-180' : ''}`} />
                       </div>
                     </button>
                   </CollapsibleTrigger>
                   <CollapsibleContent>
                     <div className="space-y-3 border-t border-border p-4">
+                      <NoLunchCheckbox checked={summary.noLunch} disabled={updateTimeEntry.isPending} onCheckedChange={(checked: boolean) => void handleNoLunchChange(summary, checked)} />
                       {summary.entries.map((entry: ShopTimeEntry) => {
                         const isEditing = editingEntryId === entry.id;
                         return (
@@ -745,7 +780,7 @@ export default function ManagerDashboardPage() {
                                 </div>
                                 <div className="space-y-2">
                                   <Label>Duration</Label>
-                                  <p className="font-semibold">{formatDuration(getDurationMinutes(entry))}</p>
+                                  <p className="font-semibold">{formatDuration(getEntryPaidMinutes(summary.entries, entry))}</p>
                                 </div>
                               </div>
 
