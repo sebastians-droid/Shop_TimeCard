@@ -2,7 +2,7 @@
   "name": "shop-timecard-api",
   "private": true,
   "version": "1.0.0",
-  "main": "src/functions/api.js",
+  "main": "src/functions/*.js",
   "engines": {
     "node": "20"
   },

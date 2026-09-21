@@ -13,37 +13,9 @@ async function azureHandler(request) {
   }
 }
 
-app.http('health', {
-  methods: ['GET'],
+app.http('api', {
+  methods: ['GET', 'POST', 'PATCH', 'DELETE', 'OPTIONS'],
   authLevel: 'anonymous',
-  route: 'health',
-  handler: azureHandler,
-});
-
-app.http('me', {
-  methods: ['GET'],
-  authLevel: 'anonymous',
-  route: 'me',
-  handler: azureHandler,
-});
-
-app.http('employees', {
-  methods: ['GET'],
-  authLevel: 'anonymous',
-  route: 'employees',
-  handler: azureHandler,
-});
-
-app.http('assets', {
-  methods: ['GET'],
-  authLevel: 'anonymous',
-  route: 'assets',
-  handler: azureHandler,
-});
-
-app.http('timeEntries', {
-  methods: ['GET', 'POST', 'PATCH', 'DELETE'],
-  authLevel: 'anonymous',
-  route: 'time-entries/{id?}',
+  route: '{*path}',
   handler: azureHandler,
 });

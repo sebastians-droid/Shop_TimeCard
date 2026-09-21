@@ -58,6 +58,9 @@ async function handleRequest(request) {
   try {
     const pathname = apiPath(request.url);
     const method = (request.method || 'GET').toUpperCase();
+    if (method === 'OPTIONS') {
+      return json(204, {});
+    }
     if (method === 'GET' && pathname === '/api/health') {
       return json(200, await diagnose());
     }
