@@ -20,19 +20,20 @@ function readErrorMessage(data: unknown, status: number): string {
 }
 
 async function apiFetch<T>(path: string, init?: RequestInit): Promise<T> {
+  const method = (init?.method || 'GET').toUpperCase();
+  const headers = new Headers(init?.headers);
+  if (method !== 'GET' && method !== 'HEAD' && !headers.has('Content-Type')) {
+    headers.set('Content-Type', 'application/json');
+  }
   const response = await fetch(path, {
     ...init,
-    credentials: 'include',
-    redirect: 'manual',
-    headers: {
-      'Content-Type': 'application/json',
-      ...(init?.headers ?? {}),
-    },
+    credentials: 'same-origin',
+    headers,
   });
-  if (response.status === 0 || response.type === 'opaqueredirect' || response.status === 302) {
+  const text = await response.text();
+  if (response.redirected && /\/\.auth\//i.test(response.url)) {
     throw new Error('Not signed in. Refresh the page and sign in with Microsoft 365.');
   }
-  const text = await response.text();
   let data: unknown = {};
   try {
     data = text ? JSON.parse(text) : {};
