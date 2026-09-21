@@ -2,23 +2,23 @@ const { app } = require('@azure/functions');
 const { handleRequest } = require('../shared/handlers');
 
 async function azureHandler(request) {
-  const headers = new Headers();
-  for (const [key, value] of request.headers) {
-    headers.set(key, value);
+  try {
+    return await handleRequest(request);
+  } catch (error) {
+    return {
+      status: error.status || 500,
+      jsonBody: { error: error.message || 'Unexpected error' },
+      headers: { 'Content-Type': 'application/json' },
+    };
   }
-  const url = request.url.startsWith('http') ? request.url : `https://timecard/${request.url.replace(/^\//, '')}`;
-  const incoming = new Request(url, {
-    method: request.method,
-    headers,
-    body: ['GET', 'HEAD'].includes(request.method) ? undefined : await request.text(),
-  });
-  const result = await handleRequest(incoming);
-  return {
-    status: result.status,
-    jsonBody: result.jsonBody,
-    headers: result.headers,
-  };
 }
+
+app.http('health', {
+  methods: ['GET'],
+  authLevel: 'anonymous',
+  route: 'health',
+  handler: azureHandler,
+});
 
 app.http('me', {
   methods: ['GET'],

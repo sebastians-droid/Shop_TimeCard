@@ -128,7 +128,16 @@ async function dataverseFetch(method, urlPath, body) {
     body: body ? JSON.stringify(body) : undefined,
   });
   const text = await response.text();
-  const data = text ? JSON.parse(text) : {};
+  let data = {};
+  try {
+    data = text ? JSON.parse(text) : {};
+  } catch {
+    const error = new Error(
+      `Dataverse ${method} failed (${response.status}). ${text.replace(/\s+/g, ' ').slice(0, 240) || 'Empty response'}`,
+    );
+    error.status = response.status;
+    throw error;
+  }
   if (!response.ok) {
     const message =
       data.error?.message ||
@@ -160,21 +169,20 @@ function toNumber(value) {
 
 function mapShopEmployee(row) {
   const related = row.swank_Employee || {};
+  const name =
+    related.swank_name ||
+    row.swank_employeename ||
+    row['_swank_employee_value@OData.Community.Display.V1.FormattedValue'];
   return {
     id: row.swank_shopemployeeid,
     autoNumber: row.swank_autonumber || '',
     empNum: toNumber(row.swank_empnum ?? related.swank_empnum),
-    employee: related.swank_name
+    employee: name
       ? {
           id: related.swank_employeeid || row._swank_employee_value,
-          name1: related.swank_name,
+          name1: name,
         }
-      : row.swank_employeename
-        ? {
-            id: row._swank_employee_value,
-            name1: row.swank_employeename,
-          }
-        : undefined,
+      : undefined,
   };
 }
 
@@ -252,10 +260,21 @@ function timeEntryPayload(record, { isCreate }) {
 }
 
 async function listEmployees() {
-  const rows = await listAll(
-    '/swank_shopemployees?$select=swank_shopemployeeid,swank_autonumber,swank_empnum,_swank_employee_value&$expand=swank_Employee($select=swank_employeeid,swank_name,swank_empnum)&$filter=statecode eq 0&$orderby=swank_autonumber',
-  );
-  return rows.map(mapShopEmployee).filter((row) => typeof row.empNum === 'number');
+  try {
+    const rows = await listAll(
+      '/swank_shopemployees?$select=swank_shopemployeeid,swank_autonumber,swank_empnum,_swank_employee_value&$expand=swank_Employee($select=swank_employeeid,swank_name,swank_empnum)&$filter=statecode eq 0&$orderby=swank_autonumber',
+    );
+    return rows.map(mapShopEmployee).filter((row) => typeof row.empNum === 'number');
+  } catch (error) {
+    try {
+      const rows = await listAll(
+        '/swank_shopemployees?$select=swank_shopemployeeid,swank_autonumber,swank_empnum,_swank_employee_value&$filter=statecode eq 0',
+      );
+      return rows.map(mapShopEmployee).filter((row) => typeof row.empNum === 'number');
+    } catch {
+      throw error;
+    }
+  }
 }
 
 async function listAssets() {
@@ -294,8 +313,30 @@ async function deleteTimeEntry(id) {
   await dataverseFetch('DELETE', `/swank_shoptimeentries(${id})`);
 }
 
+async function diagnose() {
+  const cfg = loadConfig();
+  const result = {
+    hasOrgUrl: Boolean(cfg.orgUrl),
+    hasTenantId: Boolean(cfg.tenantId),
+    hasClientId: Boolean(cfg.clientId),
+    hasClientSecret: Boolean(cfg.clientSecret),
+    tokenOk: false,
+    employeeCount: null,
+    error: null,
+  };
+  try {
+    await getToken();
+    result.tokenOk = true;
+    result.employeeCount = (await listEmployees()).length;
+  } catch (error) {
+    result.error = error.message || String(error);
+  }
+  return result;
+}
+
 module.exports = {
   loadConfig,
+  diagnose,
   listEmployees,
   listAssets,
   listTimeEntries,

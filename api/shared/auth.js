@@ -10,15 +10,32 @@ function decodePrincipal(headerValue) {
   }
 }
 
+function headerGet(request, name) {
+  if (!request?.headers) return '';
+  if (typeof request.headers.get === 'function') {
+    return request.headers.get(name) || request.headers.get(name.toLowerCase()) || '';
+  }
+  return request.headers[name] || request.headers[name.toLowerCase()] || '';
+}
+
 function getUser(request) {
   const principal = decodePrincipal(
-    request.headers.get('x-ms-client-principal') || request.headers.get('X-MS-CLIENT-PRINCIPAL'),
+    headerGet(request, 'x-ms-client-principal') || headerGet(request, 'X-MS-CLIENT-PRINCIPAL'),
   );
   const cfg = loadConfig();
   const isProduction = process.env.AZURE_FUNCTIONS_ENVIRONMENT === 'Production' || Boolean(process.env.WEBSITE_SITE_NAME);
   const skipAuth = process.env.DATAVERSE_LOCAL_SKIP_AUTH === '1' || !isProduction;
 
   if (!principal) {
+    const headerEmail = headerGet(request, 'x-ms-client-principal-name').toLowerCase();
+    if (headerEmail) {
+      return {
+        userId: headerGet(request, 'x-ms-client-principal-id'),
+        email: headerEmail,
+        name: headerEmail,
+        isManager: cfg.managerEmails.includes(headerEmail),
+      };
+    }
     if (!skipAuth) return null;
     const email = (process.env.DEV_USER_EMAIL || cfg.managerEmails[0] || 'local-dev@swankco.com').toLowerCase();
     return {

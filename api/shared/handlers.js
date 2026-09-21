@@ -1,4 +1,5 @@
 const {
+  diagnose,
   listEmployees,
   listAssets,
   listTimeEntries,
@@ -23,18 +24,37 @@ function errorResponse(error) {
 
 async function readJson(request) {
   try {
-    return (await request.json()) || {};
+    if (typeof request.json === 'function') {
+      return (await request.json()) || {};
+    }
   } catch {
-    return {};
+    // fall through
   }
+  return {};
+}
+
+function apiPath(requestUrl) {
+  const raw = String(requestUrl || '');
+  let pathname = '/';
+  try {
+    pathname = new URL(raw, 'https://timecard.local').pathname;
+  } catch {
+    pathname = raw.split('?')[0] || '/';
+  }
+  pathname = pathname.replace(/\/$/, '') || '/';
+  if (pathname === '/api' || pathname.startsWith('/api/')) return pathname;
+  return `/api${pathname.startsWith('/') ? pathname : `/${pathname}`}`;
 }
 
 async function handleRequest(request) {
-  const url = new URL(request.url);
-  const pathname = url.pathname.replace(/\/$/, '') || '/';
-  const method = request.method.toUpperCase();
-
   try {
+    const pathname = apiPath(request.url);
+    const method = (request.method || 'GET').toUpperCase();
+    if (method === 'GET' && pathname === '/api/health') {
+      requireUser(request);
+      return json(200, await diagnose());
+    }
+
     if (method === 'GET' && pathname === '/api/me') {
       const user = requireUser(request);
       return json(200, user);
@@ -74,7 +94,7 @@ async function handleRequest(request) {
       return json(204, {});
     }
 
-    return json(404, { error: 'Not found' });
+    return json(404, { error: `Not found: ${method} ${pathname}` });
   } catch (error) {
     return errorResponse(error);
   }
