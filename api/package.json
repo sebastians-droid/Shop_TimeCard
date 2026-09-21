@@ -2,9 +2,11 @@
   "name": "shop-timecard-api",
   "private": true,
   "version": "1.0.0",
-  "main": "src/functions/*.js",
+  "main": "src/functions/api.js",
+  "engines": {
+    "node": "20"
+  },
   "dependencies": {
-    "@azure/functions": "^4.6.0",
-    "shop-timecard": "file:.."
+    "@azure/functions": "^4.6.0"
   }
 }
