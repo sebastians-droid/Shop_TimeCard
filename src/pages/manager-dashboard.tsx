@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react';
-import { addWeeks, endOfWeek, format, startOfDay, startOfWeek } from 'date-fns';
+import { addDays, addWeeks, endOfWeek, format, startOfDay, startOfWeek } from 'date-fns';
 import { CalendarIcon, Check, ChevronDown, ChevronLeft, ChevronRight, ChevronsUpDown, Download, LockKeyhole, Pencil, RefreshCw, Search, ShieldCheck, TimerReset, Trash2, Users, X } from 'lucide-react';
 import { toast } from 'sonner';
 
@@ -15,6 +15,7 @@ import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover
 import { useAllEquipmentAssets, useDeleteShopTimeEntry, useShopEmployeeList, useShopTimeEntryList, useUpdateShopTimeEntry } from '@/hooks/use-shop-data';
 import type { EquipmentAsset } from '@/models/equipment-asset';
 import { mapShopEmployees, type AppShopEmployee } from '@/lib/shop-employees';
+import { buildPayrollWorkbookBlob } from '@/lib/payroll-workbook';
 import {
   applyNoLunchMarker,
   formatDuration,
@@ -124,98 +125,6 @@ const mergeDateAndTime = (existingDateTime: string, timeValue: string) => {
 
 const getEntryWorkDateKey = (entry: ShopTimeEntry) => (entry.clockIn ? format(new Date(entry.clockIn), 'yyyy-MM-dd') : 'No clock-in date');
 
-const formatHoursAndMinutes = (minutes: number) => formatDuration(minutes);
-
-const formatCsvCell = (value: string | number) => `\"${String(value).replace(/\"/g, '\"\"')}\"`;
-
-const crcTable = Array.from({ length: 256 }, (_value: unknown, index: number) => {
-  let current = index;
-  for (let bitIndex = 0; bitIndex < 8; bitIndex += 1) {
-    current = current & 1 ? 0xedb88320 ^ (current >>> 1) : current >>> 1;
-  }
-  return current >>> 0;
-});
-
-const getCrc32 = (content: Uint8Array) => {
-  let crc = 0xffffffff;
-  content.forEach((byte: number) => {
-    crc = crcTable[(crc ^ byte) & 0xff] ^ (crc >>> 8);
-  });
-  return (crc ^ 0xffffffff) >>> 0;
-};
-
-const writeZipString = (bytes: number[], value: string) => {
-  const encoded = new TextEncoder().encode(value);
-  encoded.forEach((byte: number) => bytes.push(byte));
-};
-
-const writeZipUint16 = (bytes: number[], value: number) => {
-  bytes.push(value & 0xff, (value >>> 8) & 0xff);
-};
-
-const writeZipUint32 = (bytes: number[], value: number) => {
-  bytes.push(value & 0xff, (value >>> 8) & 0xff, (value >>> 16) & 0xff, (value >>> 24) & 0xff);
-};
-
-const createZipBlob = (files: { name: string; content: string }[]) => {
-  const fileBytes = new TextEncoder();
-  const zipBytes: number[] = [];
-  const centralDirectory: number[] = [];
-
-  files.forEach((file: { name: string; content: string }) => {
-    const nameBytes = fileBytes.encode(file.name);
-    const contentBytes = fileBytes.encode(file.content);
-    const crc = getCrc32(contentBytes);
-    const localHeaderOffset = zipBytes.length;
-
-    writeZipUint32(zipBytes, 0x04034b50);
-    writeZipUint16(zipBytes, 20);
-    writeZipUint16(zipBytes, 0);
-    writeZipUint16(zipBytes, 0);
-    writeZipUint16(zipBytes, 0);
-    writeZipUint16(zipBytes, 0);
-    writeZipUint32(zipBytes, crc);
-    writeZipUint32(zipBytes, contentBytes.length);
-    writeZipUint32(zipBytes, contentBytes.length);
-    writeZipUint16(zipBytes, nameBytes.length);
-    writeZipUint16(zipBytes, 0);
-    nameBytes.forEach((byte: number) => zipBytes.push(byte));
-    contentBytes.forEach((byte: number) => zipBytes.push(byte));
-
-    writeZipUint32(centralDirectory, 0x02014b50);
-    writeZipUint16(centralDirectory, 20);
-    writeZipUint16(centralDirectory, 20);
-    writeZipUint16(centralDirectory, 0);
-    writeZipUint16(centralDirectory, 0);
-    writeZipUint16(centralDirectory, 0);
-    writeZipUint16(centralDirectory, 0);
-    writeZipUint32(centralDirectory, crc);
-    writeZipUint32(centralDirectory, contentBytes.length);
-    writeZipUint32(centralDirectory, contentBytes.length);
-    writeZipUint16(centralDirectory, nameBytes.length);
-    writeZipUint16(centralDirectory, 0);
-    writeZipUint16(centralDirectory, 0);
-    writeZipUint16(centralDirectory, 0);
-    writeZipUint16(centralDirectory, 0);
-    writeZipUint32(centralDirectory, 0);
-    writeZipUint32(centralDirectory, localHeaderOffset);
-    nameBytes.forEach((byte: number) => centralDirectory.push(byte));
-  });
-
-  const centralDirectoryOffset = zipBytes.length;
-  zipBytes.push(...centralDirectory);
-  writeZipUint32(zipBytes, 0x06054b50);
-  writeZipUint16(zipBytes, 0);
-  writeZipUint16(zipBytes, 0);
-  writeZipUint16(zipBytes, files.length);
-  writeZipUint16(zipBytes, files.length);
-  writeZipUint32(zipBytes, centralDirectory.length);
-  writeZipUint32(zipBytes, centralDirectoryOffset);
-  writeZipUint16(zipBytes, 0);
-
-  return new Blob([new Uint8Array(zipBytes)], { type: 'application/zip' });
-};
-
 const getEmployeeNotes = (notes?: string) => stripNoLunchMarker(notes);
 
 function AssetPicker({ assets, value, onChange, currentAsset }: AssetPickerProps) {
@@ -275,6 +184,7 @@ export default function ManagerDashboardPage() {
   const [search, setSearch] = useState<string>('');
   const [selectedDate, setSelectedDate] = useState<Date>(startOfDay(new Date()));
   const [exportWeekDate, setExportWeekDate] = useState<Date>(startOfDay(new Date()));
+  const [isExporting, setIsExporting] = useState(false);
   const [openEmployeeKeys, setOpenEmployeeKeys] = useState<string[]>([]);
   const [editingEntryId, setEditingEntryId] = useState<string>('');
   const [editValues, setEditValues] = useState<EditableEntry | null>(null);
@@ -469,15 +379,14 @@ export default function ManagerDashboardPage() {
     }
   };
 
-  const handleExportWeeklyPayroll = () => {
+  const handleExportWeeklyPayroll = async () => {
     if (weeklyEntries.length === 0) {
       toast.info(`No time entries are available for ${formatWeekRangeLabel(exportWeekDate)}.`);
       return;
     }
 
-    const headerRow = ['Employee', 'Employee Number', 'Work Date', 'Punch In', 'Punch Out', 'Hours', 'Lunch', 'PTO Time', 'PTO Type', 'Division', 'Asset', 'Job Number', 'Status', 'Notes'].map(formatCsvCell).join(',');
+    const dayKeys = Array.from({ length: 7 }, (_value, index) => format(addDays(exportWeekRange.start, index), 'yyyy-MM-dd'));
     const entriesByEmployee = new Map<string, ShopTimeEntry[]>();
-
     weeklyEntries.forEach((entry: ShopTimeEntry) => {
       const employeeKey = getEntryEmployeeKey(entry);
       const currentEntries = entriesByEmployee.get(employeeKey) ?? [];
@@ -485,69 +394,74 @@ export default function ManagerDashboardPage() {
       entriesByEmployee.set(employeeKey, currentEntries);
     });
 
-    const employeeGroups = Array.from(entriesByEmployee.entries())
+    const payrollEmployees = Array.from(entriesByEmployee.entries())
       .map(([employeeKey, entries]: [string, ShopTimeEntry[]]) => {
         const firstEntry = entries[0];
         const employeeName = firstEntry ? getEntryEmployeeName(firstEntry, employees) : 'Unknown employee';
         const employeeNumber = firstEntry ? getEntryEmployeeNumber(firstEntry, employees) : employeeKey;
-        return { employeeKey, employeeName, employeeNumber, entries };
+        const sortedEntries = [...entries].sort((entryA: ShopTimeEntry, entryB: ShopTimeEntry) => new Date(entryA.clockIn ?? '').getTime() - new Date(entryB.clockIn ?? '').getTime());
+        const entriesByDay = new Map<string, ShopTimeEntry[]>();
+        sortedEntries.forEach((entry: ShopTimeEntry) => {
+          const dayKey = getEntryWorkDateKey(entry);
+          const dayEntries = entriesByDay.get(dayKey) ?? [];
+          dayEntries.push(entry);
+          entriesByDay.set(dayKey, dayEntries);
+        });
+        const dayHours = dayKeys.map((dayKey) => getDayPayMinutes(entriesByDay.get(dayKey) ?? []).totalMinutes);
+        const noLunchDays = dayKeys.flatMap((dayKey, index) => {
+          const pay = getDayPayMinutes(entriesByDay.get(dayKey) ?? []);
+          return pay.noLunch ? [format(addDays(exportWeekRange.start, index), 'EEE M/d')] : [];
+        });
+        return {
+          name: employeeName,
+          number: employeeNumber,
+          dayHours,
+          noLunchDays,
+          weekHours: dayHours.reduce((total, minutes) => total + minutes, 0),
+          rows: sortedEntries.map((entry: ShopTimeEntry) => {
+            const dayEntries = entriesByDay.get(getEntryWorkDateKey(entry)) ?? [entry];
+            return {
+              workDate: getEntryWorkDateKey(entry),
+              punchIn: entry.clockIn ? format(new Date(entry.clockIn), 'M/d/yyyy p') : '',
+              punchOut: entry.clockOut ? format(new Date(entry.clockOut), 'M/d/yyyy p') : '',
+              hours: Math.round((getEntryPaidMinutes(dayEntries, entry) / 60) * 100) / 100,
+              lunch: isPtoEntry(entry) ? '' : lunchCsvLabel(dayEntries),
+              ptoTime: isPtoEntry(entry) ? `${getPtoHours(entry)} hours` : '',
+              ptoType: entry.pTOTypeKey ? ShopTimeEntryPTOTypeKeyToLabel[entry.pTOTypeKey] : '',
+              division: getEntryDivision(entry, assets) || 'Unassigned',
+              asset: getEntryAssetName(entry, assets),
+              jobNumber: getEntryJobNumber(entry) || '',
+              status: entry.clockOut ? 'Complete' : 'Active',
+              notes: getEmployeeNotes(entry.notes),
+            };
+          }),
+        };
       })
       .sort((employeeA, employeeB) =>
-        employeeA.employeeName.localeCompare(employeeB.employeeName) || employeeA.employeeNumber.localeCompare(employeeB.employeeNumber),
+        employeeA.name.localeCompare(employeeB.name) || employeeA.number.localeCompare(employeeB.number),
       );
 
-    const csvFiles = employeeGroups.map((employeeGroup) => {
-      const { employeeName, employeeNumber, entries } = employeeGroup;
-      const csvRows: string[] = [headerRow];
-      const sortedEntries = [...entries].sort((a: ShopTimeEntry, b: ShopTimeEntry) => new Date(a.clockIn ?? '').getTime() - new Date(b.clockIn ?? '').getTime());
-      const entriesByDay = new Map<string, ShopTimeEntry[]>();
-      sortedEntries.forEach((entry: ShopTimeEntry) => {
-        const dayKey = getEntryWorkDateKey(entry);
-        const dayEntries = entriesByDay.get(dayKey) ?? [];
-        dayEntries.push(entry);
-        entriesByDay.set(dayKey, dayEntries);
+    setIsExporting(true);
+    try {
+      const blob = await buildPayrollWorkbookBlob({
+        weekStart: exportWeekRange.start,
+        weekEnd: exportWeekRange.end,
+        employees: payrollEmployees,
       });
-
-      sortedEntries.forEach((entry: ShopTimeEntry) => {
-        const clockInDate = entry.clockIn ? new Date(entry.clockIn) : null;
-        const clockOutDate = entry.clockOut ? new Date(entry.clockOut) : null;
-        const dayEntries = entriesByDay.get(getEntryWorkDateKey(entry)) ?? [entry];
-        csvRows.push([
-          employeeName,
-          employeeNumber,
-          getEntryWorkDateKey(entry),
-          clockInDate ? format(clockInDate, 'M/d/yyyy p') : '',
-          clockOutDate ? format(clockOutDate, 'M/d/yyyy p') : '',
-          formatHoursAndMinutes(getEntryPaidMinutes(dayEntries, entry)),
-          isPtoEntry(entry) ? '' : lunchCsvLabel(dayEntries),
-          isPtoEntry(entry) ? `${getPtoHours(entry)} hours` : '',
-          entry.pTOTypeKey ? ShopTimeEntryPTOTypeKeyToLabel[entry.pTOTypeKey] : '',
-          getEntryDivision(entry, assets) || 'Unassigned',
-          getEntryAssetName(entry, assets),
-          getEntryJobNumber(entry) || '',
-          entry.clockOut ? 'Complete' : 'Active',
-          getEmployeeNotes(entry.notes),
-        ].map(formatCsvCell).join(','));
-      });
-
-      const safeEmployeeName = employeeName.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || 'employee';
-      return {
-        name: `timecard-${safeEmployeeName}-${employeeNumber}-${format(exportWeekRange.start, 'yyyy-MM-dd')}-to-${format(exportWeekRange.end, 'yyyy-MM-dd')}.csv`,
-        content: `\uFEFF${csvRows.join('\r\n')}`,
-      };
-    });
-
-    const zipBlob = createZipBlob(csvFiles);
-    const url = URL.createObjectURL(zipBlob);
-    const link = document.createElement('a');
-    link.href = url;
-    link.download = `timecards-by-employee-${format(exportWeekRange.start, 'yyyy-MM-dd')}-to-${format(exportWeekRange.end, 'yyyy-MM-dd')}.zip`;
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
-    URL.revokeObjectURL(url);
-
-    toast.success(`${employeeGroups.length} employee CSV ${employeeGroups.length === 1 ? 'file' : 'files'} packaged for ${formatWeekRangeLabel(exportWeekDate)}.`);
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = `timecards-${format(exportWeekRange.start, 'yyyy-MM-dd')}-to-${format(exportWeekRange.end, 'yyyy-MM-dd')}.xlsx`;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      URL.revokeObjectURL(url);
+      toast.success(`Excel workbook exported for ${payrollEmployees.length} employee${payrollEmployees.length === 1 ? '' : 's'} · ${formatWeekRangeLabel(exportWeekDate)}.`);
+    } catch (error: unknown) {
+      toast.error(error instanceof Error ? error.message : 'Unable to export the Excel workbook.');
+    } finally {
+      setIsExporting(false);
+    }
   };
 
   if (userLoading || !user) {
@@ -595,7 +509,7 @@ export default function ManagerDashboardPage() {
           <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
             <div>
               <CardTitle className="flex items-center gap-2 text-2xl"><ShieldCheck className="h-6 w-6" /> Manager dashboard</CardTitle>
-              <p className="mt-2 text-sm text-muted-foreground">Access verified with Microsoft 365. Review daily activity and export saved time entries for a selected Sunday-Saturday payroll week.</p>
+              <p className="mt-2 text-sm text-muted-foreground">Access verified with Microsoft 365. Review daily activity and export a weekly Excel workbook.</p>
             </div>
             <div className="flex flex-wrap items-center gap-2"><Button type="button" variant="outline" onClick={() => void handleReloadTables()} disabled={assetsLoading || entriesLoading}><RefreshCw className="mr-2 h-4 w-4" /> Reload tables</Button><Badge variant="secondary">{user?.name || user?.email || 'Shop manager'}</Badge></div>
           </div>
@@ -626,10 +540,10 @@ export default function ManagerDashboardPage() {
           <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
             <div>
               <CardTitle className="flex items-center gap-2 text-xl"><Download className="h-5 w-5" /> Weekly timecard export</CardTitle>
-              <p className="mt-1 text-sm text-muted-foreground">Choose a Sunday-Saturday payroll week, then export a ZIP with one CSV file for each employee.</p>
+              <p className="mt-1 text-sm text-muted-foreground">Choose a Sunday-Saturday payroll week, then export one Excel workbook: a shop summary plus a detail sheet for each employee.</p>
             </div>
-            <Button type="button" variant="secondary" onClick={handleExportWeeklyPayroll} disabled={weeklyEntries.length === 0} className="w-full sm:w-auto">
-              <Download className="mr-2 h-4 w-4" /> Export {formatWeekRangeLabel(exportWeekDate)} ZIP
+            <Button type="button" variant="secondary" onClick={() => void handleExportWeeklyPayroll()} disabled={weeklyEntries.length === 0 || isExporting} className="w-full sm:w-auto">
+              <Download className="mr-2 h-4 w-4" /> {isExporting ? 'Building Excel…' : `Export ${formatWeekRangeLabel(exportWeekDate)} Excel`}
             </Button>
           </div>
         </CardHeader>
