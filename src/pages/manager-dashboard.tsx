@@ -1,0 +1,798 @@
+import { useMemo, useState } from 'react';
+import { addWeeks, endOfWeek, format, startOfDay, startOfWeek } from 'date-fns';
+import { CalendarIcon, Check, ChevronDown, ChevronLeft, ChevronRight, ChevronsUpDown, Download, LockKeyhole, Pencil, RefreshCw, Search, ShieldCheck, TimerReset, Trash2, Users, X } from 'lucide-react';
+import { toast } from 'sonner';
+
+import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger } from '@/components/ui/alert-dialog';
+import { Badge } from '@/components/ui/badge';
+import { Button } from '@/components/ui/button';
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Calendar } from '@/components/ui/calendar';
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
+import { useAllEquipmentAssets, useDeleteShopTimeEntry, useShopEmployeeList, useShopTimeEntryList, useUpdateShopTimeEntry } from '@/hooks/use-shop-data';
+import type { EquipmentAsset } from '@/models/equipment-asset';
+import { mapShopEmployees, type AppShopEmployee } from '@/lib/shop-employees';
+import { ShopTimeEntryPTOTypeKeyToLabel, type ShopTimeEntry, type ShopTimeEntryPTOTimeKey } from '@/models/shop-time-entry';
+import { useUser } from '@/hooks/use-user';
+
+type EditableEntry = {
+  assetId: string;
+  assetRecord?: Pick<EquipmentAsset, 'id' | 'asset' | 'divisionCode'>;
+  division: string;
+  jobNumber: string;
+  clockInTime: string;
+  clockOutTime: string;
+};
+
+type EmployeeDailySummary = {
+  employeeKey: string;
+  employeeName: string;
+  employeeNumber: string;
+  entries: ShopTimeEntry[];
+  activeCount: number;
+  totalMinutes: number;
+};
+
+type AssetPickerProps = {
+  assets: EquipmentAsset[];
+  value: string;
+  onChange: (asset: Pick<EquipmentAsset, 'id' | 'asset' | 'divisionCode'> | undefined) => void;
+  currentAsset?: Pick<EquipmentAsset, 'id' | 'asset' | 'divisionCode'>;
+};
+
+const getTodayKey = () => format(new Date(), 'yyyy-MM-dd');
+const getWeekRange = (date: Date) => {
+  const start = startOfWeek(date, { weekStartsOn: 0 });
+  const end = endOfWeek(date, { weekStartsOn: 0 });
+  return { start, end };
+};
+
+const formatWeekRangeLabel = (date: Date) => {
+  const { start, end } = getWeekRange(date);
+  return `${format(start, 'M/d/yyyy')} - ${format(end, 'M/d/yyyy')}`;
+};
+
+const getAssetDisplayName = (asset?: EquipmentAsset | Pick<EquipmentAsset, 'id' | 'asset'> | null) => {
+  if (!asset) {
+    return 'Unassigned asset';
+  }
+
+  return asset.asset || 'Unassigned asset';
+};
+
+const getEntryAssetName = (entry: ShopTimeEntry, assets: EquipmentAsset[]) => {
+  if (isPtoEntry(entry)) return 'PTO';
+  const matchedAsset = entry.asset?.id ? assets.find((asset: EquipmentAsset) => asset.id === entry.asset?.id) : undefined;
+  if (entry.asset?.asset || matchedAsset) {
+    return entry.asset?.asset || getAssetDisplayName(matchedAsset);
+  }
+
+  return '';
+};
+
+const getEntryDivision = (entry: ShopTimeEntry, assets: EquipmentAsset[]) => {
+  const matchedAsset = entry.asset?.id ? assets.find((asset: EquipmentAsset) => asset.id === entry.asset?.id) : undefined;
+  return String(entry.assetDivision ?? matchedAsset?.divisionCode ?? '');
+};
+
+const roundMinutesUpToQuarterHour = (minutes: number) => Math.ceil(Math.max(0, minutes) / 15) * 15;
+const PTO_TIME_KEY_BY_HOURS: Record<4 | 8, ShopTimeEntryPTOTimeKey> = { 4: 'PTOTimeKey04', 8: 'PTOTimeKey18' };
+const getPtoHours = (entry: ShopTimeEntry) => {
+  if (entry.pTOTimeKey === 'PTOTimeKey04') return 4;
+  if (entry.pTOTimeKey === 'PTOTimeKey18') return 8;
+  if (entry.jobNumber !== 'PTO' && !entry.timeEntry.toLowerCase().includes(' - pto')) return 0;
+  return Math.round(entry.hours ?? 0);
+};
+const isPtoEntry = (entry: ShopTimeEntry) => getPtoHours(entry) > 0 || entry.jobNumber === 'PTO' || entry.timeEntry.toLowerCase().includes(' - pto');
+const getDurationMinutes = (entry: ShopTimeEntry) => {
+  if (isPtoEntry(entry)) return getPtoHours(entry) * 60;
+  if (typeof entry.hours === 'number' && entry.clockOut) {
+    return roundMinutesUpToQuarterHour(Math.round(entry.hours * 60));
+  }
+
+  const start = entry.clockIn ? new Date(entry.clockIn) : new Date();
+  const end = entry.clockOut ? new Date(entry.clockOut) : new Date();
+  return roundMinutesUpToQuarterHour(Math.round((end.getTime() - start.getTime()) / 60000));
+};
+
+const formatDuration = (minutes: number) => {
+  const hours = Math.floor(minutes / 60);
+  const remainingMinutes = minutes % 60;
+  return `${hours}h ${remainingMinutes}m`;
+};
+
+const formatTimeForInput = (dateTime?: string) => {
+  if (!dateTime) {
+    return '';
+  }
+
+  return format(new Date(dateTime), 'HH:mm');
+};
+
+const getEntryJobNumber = (entry: ShopTimeEntry) => entry.jobNumber ?? '';
+
+const getEntryEmployeeKey = (entry: ShopTimeEntry) => entry.employee?.id ?? entry.id;
+
+const getEntryEmployeeName = (entry: ShopTimeEntry, employees: AppShopEmployee[]) => {
+  const employeeRecord = employees.find((employee: AppShopEmployee) => employee.id === entry.employee?.id);
+  return employeeRecord?.employeeName ?? entry.employee?.autoNumber ?? 'Unknown employee';
+};
+
+const getEntryEmployeeNumber = (entry: ShopTimeEntry, employees: AppShopEmployee[]) => {
+  const employeeRecord = employees.find((employee: AppShopEmployee) => employee.id === entry.employee?.id);
+  return String(employeeRecord?.employeeCode ?? entry.employee?.autoNumber ?? '—');
+};
+
+const mergeDateAndTime = (existingDateTime: string, timeValue: string) => {
+  const date = new Date(existingDateTime);
+  const [hours = '0', minutes = '0'] = timeValue.split(':');
+  date.setHours(Number(hours), Number(minutes), 0, 0);
+  return date.toISOString();
+};
+
+const getEntryWorkDateKey = (entry: ShopTimeEntry) => (entry.clockIn ? format(new Date(entry.clockIn), 'yyyy-MM-dd') : 'No clock-in date');
+
+const formatHoursAndMinutes = (minutes: number) => {
+  const hours = Math.floor(minutes / 60);
+  const remainingMinutes = minutes % 60;
+  return `${hours}h ${remainingMinutes}m`;
+};
+
+const formatCsvCell = (value: string | number) => `\"${String(value).replace(/\"/g, '\"\"')}\"`;
+
+const crcTable = Array.from({ length: 256 }, (_value: unknown, index: number) => {
+  let current = index;
+  for (let bitIndex = 0; bitIndex < 8; bitIndex += 1) {
+    current = current & 1 ? 0xedb88320 ^ (current >>> 1) : current >>> 1;
+  }
+  return current >>> 0;
+});
+
+const getCrc32 = (content: Uint8Array) => {
+  let crc = 0xffffffff;
+  content.forEach((byte: number) => {
+    crc = crcTable[(crc ^ byte) & 0xff] ^ (crc >>> 8);
+  });
+  return (crc ^ 0xffffffff) >>> 0;
+};
+
+const writeZipString = (bytes: number[], value: string) => {
+  const encoded = new TextEncoder().encode(value);
+  encoded.forEach((byte: number) => bytes.push(byte));
+};
+
+const writeZipUint16 = (bytes: number[], value: number) => {
+  bytes.push(value & 0xff, (value >>> 8) & 0xff);
+};
+
+const writeZipUint32 = (bytes: number[], value: number) => {
+  bytes.push(value & 0xff, (value >>> 8) & 0xff, (value >>> 16) & 0xff, (value >>> 24) & 0xff);
+};
+
+const createZipBlob = (files: { name: string; content: string }[]) => {
+  const fileBytes = new TextEncoder();
+  const zipBytes: number[] = [];
+  const centralDirectory: number[] = [];
+
+  files.forEach((file: { name: string; content: string }) => {
+    const nameBytes = fileBytes.encode(file.name);
+    const contentBytes = fileBytes.encode(file.content);
+    const crc = getCrc32(contentBytes);
+    const localHeaderOffset = zipBytes.length;
+
+    writeZipUint32(zipBytes, 0x04034b50);
+    writeZipUint16(zipBytes, 20);
+    writeZipUint16(zipBytes, 0);
+    writeZipUint16(zipBytes, 0);
+    writeZipUint16(zipBytes, 0);
+    writeZipUint16(zipBytes, 0);
+    writeZipUint32(zipBytes, crc);
+    writeZipUint32(zipBytes, contentBytes.length);
+    writeZipUint32(zipBytes, contentBytes.length);
+    writeZipUint16(zipBytes, nameBytes.length);
+    writeZipUint16(zipBytes, 0);
+    nameBytes.forEach((byte: number) => zipBytes.push(byte));
+    contentBytes.forEach((byte: number) => zipBytes.push(byte));
+
+    writeZipUint32(centralDirectory, 0x02014b50);
+    writeZipUint16(centralDirectory, 20);
+    writeZipUint16(centralDirectory, 20);
+    writeZipUint16(centralDirectory, 0);
+    writeZipUint16(centralDirectory, 0);
+    writeZipUint16(centralDirectory, 0);
+    writeZipUint16(centralDirectory, 0);
+    writeZipUint32(centralDirectory, crc);
+    writeZipUint32(centralDirectory, contentBytes.length);
+    writeZipUint32(centralDirectory, contentBytes.length);
+    writeZipUint16(centralDirectory, nameBytes.length);
+    writeZipUint16(centralDirectory, 0);
+    writeZipUint16(centralDirectory, 0);
+    writeZipUint16(centralDirectory, 0);
+    writeZipUint16(centralDirectory, 0);
+    writeZipUint32(centralDirectory, 0);
+    writeZipUint32(centralDirectory, localHeaderOffset);
+    nameBytes.forEach((byte: number) => centralDirectory.push(byte));
+  });
+
+  const centralDirectoryOffset = zipBytes.length;
+  zipBytes.push(...centralDirectory);
+  writeZipUint32(zipBytes, 0x06054b50);
+  writeZipUint16(zipBytes, 0);
+  writeZipUint16(zipBytes, 0);
+  writeZipUint16(zipBytes, files.length);
+  writeZipUint16(zipBytes, files.length);
+  writeZipUint32(zipBytes, centralDirectory.length);
+  writeZipUint32(zipBytes, centralDirectoryOffset);
+  writeZipUint16(zipBytes, 0);
+
+  return new Blob([new Uint8Array(zipBytes)], { type: 'application/zip' });
+};
+
+const getEmployeeNotes = (notes?: string) =>
+  (notes ?? '')
+    .replace(/\s*Auto-clocked out when starting next asset\.?/gi, '')
+    .replace(/\s*Auto-clocked out\.?/gi, '')
+    .trim();
+
+function AssetPicker({ assets, value, onChange, currentAsset }: AssetPickerProps) {
+  const [search, setSearch] = useState<string>('');
+  const [isOpen, setIsOpen] = useState<boolean>(false);
+  const trimmedSearch = search.trim();
+  const allAssets = useMemo(() => {
+    const assetsById = new Map<string, EquipmentAsset>();
+    [...assets, ...(currentAsset ? [currentAsset as EquipmentAsset] : [])].forEach((asset: EquipmentAsset) => {
+      if (asset.id) {
+        assetsById.set(asset.id, asset);
+      }
+    });
+    return Array.from(assetsById.values()).sort((assetA: EquipmentAsset, assetB: EquipmentAsset) =>
+      getAssetDisplayName(assetA).localeCompare(getAssetDisplayName(assetB), undefined, { numeric: true, sensitivity: 'base' }),
+    );
+  }, [assets, currentAsset]);
+  const selectedAsset = allAssets.find((asset: EquipmentAsset) => asset.id === value);
+  const inputValue = search || (selectedAsset ? getAssetDisplayName(selectedAsset) : '');
+  const validAssets = allAssets.filter((asset: EquipmentAsset) => asset.id);
+  const filteredAssets = validAssets.filter((asset: EquipmentAsset) => getAssetDisplayName(asset).toLowerCase().includes(trimmedSearch.toLowerCase()));
+  const assetToSelect = filteredAssets.find((asset: EquipmentAsset) => getAssetDisplayName(asset).toLowerCase() === trimmedSearch.toLowerCase()) ?? filteredAssets[0];
+  const handleSelect = (assetId: string) => {
+    const selected = allAssets.find((asset: EquipmentAsset) => asset.id === assetId);
+    onChange(selected ? { id: selected.id, asset: getAssetDisplayName(selected), divisionCode: selected.divisionCode } : undefined);
+    setSearch(selected ? getAssetDisplayName(selected) : '');
+    setIsOpen(false);
+  };
+  const handleSearchChange = (event: React.ChangeEvent<HTMLInputElement>) => {
+    setSearch(event.target.value);
+    setIsOpen(true);
+    if (value) {
+      onChange(undefined);
+    }
+  };
+
+  return (
+    <div className="relative">
+      <Input className={`bg-background pr-10 ${value ? 'font-semibold' : ''}`} value={inputValue} onChange={handleSearchChange} onFocus={() => setIsOpen(true)} onBlur={() => window.setTimeout(() => setIsOpen(false), 150)} onKeyDown={(event: React.KeyboardEvent<HTMLInputElement>) => { if (event.key === 'Enter' && assetToSelect?.id) { event.preventDefault(); handleSelect(assetToSelect.id); } }} placeholder="Search assets" />
+      <ChevronDown className="pointer-events-none absolute right-3 top-3 h-4 w-4 text-muted-foreground" />
+      {isOpen ? (
+        <div className="absolute z-20 mt-1 max-h-64 w-full overflow-auto rounded-md border border-border bg-popover text-popover-foreground shadow-md">
+          {filteredAssets.length === 0 ? <p className="p-3 text-sm text-muted-foreground">No asset matches “{inputValue}”.</p> : null}
+          {filteredAssets.map((asset: EquipmentAsset) => (
+            <button key={asset.id} type="button" className={`flex w-full items-center gap-2 border-b border-border px-3 py-2 text-left text-sm last:border-b-0 hover:bg-muted focus:bg-muted focus:outline-none ${value === asset.id ? 'font-semibold' : ''}`} onMouseDown={(event: React.MouseEvent<HTMLButtonElement>) => event.preventDefault()} onClick={() => handleSelect(asset.id)}>
+              <Check className={`h-4 w-4 ${value === asset.id ? '' : 'invisible'}`} />
+              <span>{getAssetDisplayName(asset)}</span>
+            </button>
+          ))}
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+export default function ManagerDashboardPage() {
+  const [search, setSearch] = useState<string>('');
+  const [selectedDate, setSelectedDate] = useState<Date>(startOfDay(new Date()));
+  const [exportWeekDate, setExportWeekDate] = useState<Date>(startOfDay(new Date()));
+  const [openEmployeeKeys, setOpenEmployeeKeys] = useState<string[]>([]);
+  const [editingEntryId, setEditingEntryId] = useState<string>('');
+  const [editValues, setEditValues] = useState<EditableEntry | null>(null);
+  const { data: user, isLoading: userLoading } = useUser();
+  const { data: shopEmployees = [], isLoading: employeesLoading } = useShopEmployeeList();
+  const employees = useMemo(() => mapShopEmployees(shopEmployees), [shopEmployees]);
+  const { data: assets = [], isLoading: assetsLoading, refetch: refetchAssets } = useAllEquipmentAssets();
+  const { data: timeEntries = [], isLoading: entriesLoading, refetch: refetchEntries } = useShopTimeEntryList();
+  const isAllowedManager = Boolean(user?.isManager);
+  const deleteTimeEntry = useDeleteShopTimeEntry();
+  const updateTimeEntry = useUpdateShopTimeEntry();
+
+  const selectedDayEntries = useMemo(() => {
+    const selectedDay = format(selectedDate, 'yyyy-MM-dd');
+    return timeEntries
+      .filter((entry: ShopTimeEntry) => entry.clockIn?.startsWith(selectedDay))
+      .sort((a: ShopTimeEntry, b: ShopTimeEntry) => new Date(b.clockIn ?? '').getTime() - new Date(a.clockIn ?? '').getTime());
+  }, [selectedDate, timeEntries]);
+
+  const employeeSummaries = useMemo(() => {
+    const summaries = new Map<string, EmployeeDailySummary>();
+
+    selectedDayEntries.forEach((entry: ShopTimeEntry) => {
+      const employeeKey = getEntryEmployeeKey(entry);
+      const current = summaries.get(employeeKey) ?? {
+        employeeKey,
+        employeeName: getEntryEmployeeName(entry, employees),
+        employeeNumber: getEntryEmployeeNumber(entry, employees),
+        entries: [] as ShopTimeEntry[],
+        activeCount: 0,
+        totalMinutes: 0,
+      };
+
+      current.entries.push(entry);
+      current.activeCount += entry.clockOut ? 0 : 1;
+      current.totalMinutes += getDurationMinutes(entry);
+      summaries.set(employeeKey, current);
+    });
+
+    return Array.from(summaries.values())
+      .filter((summary: EmployeeDailySummary) => {
+        const query = search.trim().toLowerCase();
+        return !query || summary.employeeName.toLowerCase().includes(query) || summary.employeeNumber.toLowerCase().includes(query);
+      })
+      .sort((a: EmployeeDailySummary, b: EmployeeDailySummary) => a.employeeName.localeCompare(b.employeeName));
+  }, [employees, search, selectedDayEntries]);
+
+  const exportWeekRange = useMemo(() => getWeekRange(exportWeekDate), [exportWeekDate]);
+
+  const weeklyEntries = useMemo(() => {
+    return timeEntries
+      .filter((entry: ShopTimeEntry) => {
+        const clockInDate = entry.clockIn ? new Date(entry.clockIn) : null;
+        return clockInDate ? clockInDate >= exportWeekRange.start && clockInDate <= exportWeekRange.end : false;
+      })
+      .sort((a: ShopTimeEntry, b: ShopTimeEntry) => new Date(a.clockIn ?? '').getTime() - new Date(b.clockIn ?? '').getTime());
+  }, [exportWeekRange, timeEntries]);
+
+  const weeklyPayrollMinutes = weeklyEntries.reduce((total: number, entry: ShopTimeEntry) => total + getDurationMinutes(entry), 0);
+
+
+  const handleToggleEmployee = (employeeKey: string) => {
+    setOpenEmployeeKeys((currentKeys: string[]) =>
+      currentKeys.includes(employeeKey) ? currentKeys.filter((key: string) => key !== employeeKey) : [...currentKeys, employeeKey],
+    );
+  };
+  const activeEmployeeCount = employeeSummaries.filter((summary: EmployeeDailySummary) => summary.activeCount > 0).length;
+  const totalHours = formatDuration(employeeSummaries.reduce((total: number, summary: EmployeeDailySummary) => total + summary.totalMinutes, 0));
+
+  const handleStartEdit = (entry: ShopTimeEntry) => {
+    setEditingEntryId(entry.id);
+    setEditValues({
+      assetId: entry.asset?.id ?? '',
+      assetRecord: entry.asset,
+      division: String(entry.assetDivision ?? ''),
+      jobNumber: getEntryJobNumber(entry),
+      clockInTime: formatTimeForInput(entry.clockIn),
+      clockOutTime: formatTimeForInput(entry.clockOut),
+    });
+  };
+
+  const handleCancelEdit = () => {
+    setEditingEntryId('');
+    setEditValues(null);
+  };
+
+  const handleSaveEdit = async (entry: ShopTimeEntry) => {
+    if (!editValues) {
+      return;
+    }
+
+    const selectedAsset = editValues.assetId ? editValues.assetRecord ?? assets.find((asset: EquipmentAsset) => asset.id === editValues.assetId) : undefined;
+    const manualDivision = editValues.division.trim();
+    const manualJobNumber = editValues.jobNumber.trim();
+
+    if (!editValues.clockInTime || !entry.clockIn) {
+      toast.error('Clock-in time is required.');
+      return;
+    }
+
+    const clockIn = mergeDateAndTime(entry.clockIn, editValues.clockInTime);
+    const clockOut = editValues.clockOutTime ? mergeDateAndTime(entry.clockIn, editValues.clockOutTime) : undefined;
+    const label = selectedAsset ? getAssetDisplayName(selectedAsset) : manualJobNumber || (manualDivision ? `Division ${manualDivision}` : getEntryAssetName(entry, assets) || 'Time entry');
+    const notes = entry.notes ?? '';
+
+    try {
+      await updateTimeEntry.mutateAsync({
+        id: entry.id,
+        changedFields: {
+          timeEntry: `${getEntryEmployeeName(entry, employees)} - ${label}`,
+          asset: selectedAsset ? { id: selectedAsset.id, asset: getAssetDisplayName(selectedAsset) } : entry.asset,
+          assetDivision: selectedAsset ? selectedAsset.divisionCode : manualDivision ? Number(manualDivision) : entry.assetDivision,
+          notes: notes || undefined,
+          clockIn,
+          clockOut,
+          division: !selectedAsset && manualDivision ? Number(manualDivision) : undefined,
+          jobNumber: manualJobNumber || undefined,
+          hours: clockOut ? getDurationMinutes({ ...entry, clockIn, clockOut }) / 60 : undefined,
+          pTOTimeKey: isPtoEntry(entry) && (getPtoHours(entry) === 4 || getPtoHours(entry) === 8) ? PTO_TIME_KEY_BY_HOURS[getPtoHours(entry) as 4 | 8] : entry.pTOTimeKey,
+          workDate: format(new Date(clockIn), 'yyyy-MM-dd'),
+        },
+      });
+      handleCancelEdit();
+      toast.success('Timecard row updated.');
+    } catch (error: unknown) {
+      toast.error(error instanceof Error ? error.message : 'Unable to update timecard row.');
+    }
+  };
+
+  const handleDeleteEntry = async (entry: ShopTimeEntry) => {
+    try {
+      await deleteTimeEntry.mutateAsync(entry.id);
+      if (editingEntryId === entry.id) {
+        handleCancelEdit();
+      }
+      toast.success('Timecard row deleted.');
+    } catch (error: unknown) {
+      toast.error(error instanceof Error ? error.message : 'Unable to delete timecard row.');
+    }
+  };
+
+  const handleReloadTables = async () => {
+    try {
+      await Promise.all([refetchAssets(), refetchEntries()]);
+      toast.success('Equipment assets and shop time entries reloaded.');
+    } catch (error: unknown) {
+      toast.error(error instanceof Error ? error.message : 'Unable to reload table data.');
+    }
+  };
+
+  const handleExportWeeklyPayroll = () => {
+    if (weeklyEntries.length === 0) {
+      toast.info(`No time entries are available for ${formatWeekRangeLabel(exportWeekDate)}.`);
+      return;
+    }
+
+    const headerRow = ['Employee', 'Employee Number', 'Work Date', 'Punch In', 'Punch Out', 'Hours', 'PTO Time', 'PTO Type', 'Division', 'Asset', 'Job Number', 'Status', 'Notes'].map(formatCsvCell).join(',');
+    const entriesByEmployee = new Map<string, ShopTimeEntry[]>();
+
+    weeklyEntries.forEach((entry: ShopTimeEntry) => {
+      const employeeKey = getEntryEmployeeKey(entry);
+      const currentEntries = entriesByEmployee.get(employeeKey) ?? [];
+      currentEntries.push(entry);
+      entriesByEmployee.set(employeeKey, currentEntries);
+    });
+
+    const employeeGroups = Array.from(entriesByEmployee.entries())
+      .map(([employeeKey, entries]: [string, ShopTimeEntry[]]) => {
+        const firstEntry = entries[0];
+        const employeeName = firstEntry ? getEntryEmployeeName(firstEntry, employees) : 'Unknown employee';
+        const employeeNumber = firstEntry ? getEntryEmployeeNumber(firstEntry, employees) : employeeKey;
+        return { employeeKey, employeeName, employeeNumber, entries };
+      })
+      .sort((employeeA, employeeB) =>
+        employeeA.employeeName.localeCompare(employeeB.employeeName) || employeeA.employeeNumber.localeCompare(employeeB.employeeNumber),
+      );
+
+    const csvFiles = employeeGroups.map((employeeGroup) => {
+      const { employeeName, employeeNumber, entries } = employeeGroup;
+      const csvRows: string[] = [headerRow];
+      const sortedEntries = [...entries].sort((a: ShopTimeEntry, b: ShopTimeEntry) => new Date(a.clockIn ?? '').getTime() - new Date(b.clockIn ?? '').getTime());
+
+
+      sortedEntries.forEach((entry: ShopTimeEntry) => {
+        const clockInDate = entry.clockIn ? new Date(entry.clockIn) : null;
+        const clockOutDate = entry.clockOut ? new Date(entry.clockOut) : null;
+        csvRows.push([
+          employeeName,
+          employeeNumber,
+          getEntryWorkDateKey(entry),
+          clockInDate ? format(clockInDate, 'M/d/yyyy p') : '',
+          clockOutDate ? format(clockOutDate, 'M/d/yyyy p') : '',
+          formatHoursAndMinutes(getDurationMinutes(entry)),
+          isPtoEntry(entry) ? `${getPtoHours(entry)} hours` : '',
+          entry.pTOTypeKey ? ShopTimeEntryPTOTypeKeyToLabel[entry.pTOTypeKey] : '',
+          getEntryDivision(entry, assets) || 'Unassigned',
+          getEntryAssetName(entry, assets),
+          getEntryJobNumber(entry) || '',
+          entry.clockOut ? 'Complete' : 'Active',
+          getEmployeeNotes(entry.notes),
+        ].map(formatCsvCell).join(','));
+      });
+
+      const safeEmployeeName = employeeName.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || 'employee';
+      return {
+        name: `timecard-${safeEmployeeName}-${employeeNumber}-${format(exportWeekRange.start, 'yyyy-MM-dd')}-to-${format(exportWeekRange.end, 'yyyy-MM-dd')}.csv`,
+        content: `\uFEFF${csvRows.join('\r\n')}`,
+      };
+    });
+
+    const zipBlob = createZipBlob(csvFiles);
+    const url = URL.createObjectURL(zipBlob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = `timecards-by-employee-${format(exportWeekRange.start, 'yyyy-MM-dd')}-to-${format(exportWeekRange.end, 'yyyy-MM-dd')}.zip`;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+
+    toast.success(`${employeeGroups.length} employee CSV ${employeeGroups.length === 1 ? 'file' : 'files'} packaged for ${formatWeekRangeLabel(exportWeekDate)}.`);
+  };
+
+  if (userLoading || !user) {
+    return (
+      <main className="mx-auto flex w-full max-w-3xl flex-1 flex-col gap-6 p-4 sm:p-6 lg:p-8">
+        <Card className="border-l-4 border-l-primary bg-card text-card-foreground shadow-sm">
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2 text-2xl"><LockKeyhole className="h-6 w-6" /> Checking manager access</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <p className="text-sm text-muted-foreground">Loading your Microsoft 365 identity before opening the manager dashboard.</p>
+          </CardContent>
+        </Card>
+      </main>
+    );
+  }
+
+  if (!isAllowedManager) {
+    return (
+      <main className="mx-auto flex w-full max-w-3xl flex-1 flex-col gap-6 p-4 sm:p-6 lg:p-8">
+        <Card className="border-l-4 border-l-destructive bg-card text-card-foreground shadow-sm">
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2 text-2xl"><LockKeyhole className="h-6 w-6" /> Manager access required</CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <p className="text-sm text-muted-foreground">Your Microsoft 365 account is not currently on the manager allowlist for this dashboard.</p>
+            <div className="rounded-lg bg-muted p-4 text-muted-foreground">
+              <p className="text-sm">Signed in as</p>
+              <p className="mt-1 font-semibold text-foreground">{user.name || 'Unknown user'}</p>
+              <p className="text-sm">{user.email}</p>
+            </div>
+            <p className="text-sm text-muted-foreground">Ask the app owner to add this email to the <span className="font-medium text-foreground">MANAGER_EMAILS</span> Function App setting.</p>
+          </CardContent>
+        </Card>
+      </main>
+    );
+  }
+
+  return (
+    <main className="mx-auto flex w-full max-w-6xl flex-1 flex-col gap-6 p-4 sm:p-6 lg:p-8">
+
+
+      <Card className="border-l-4 border-l-primary bg-card text-card-foreground shadow-sm">
+        <CardHeader>
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+            <div>
+              <CardTitle className="flex items-center gap-2 text-2xl"><ShieldCheck className="h-6 w-6" /> Manager dashboard</CardTitle>
+              <p className="mt-2 text-sm text-muted-foreground">Access verified with Microsoft 365. Review daily activity and export saved time entries for a selected Sunday-Saturday payroll week.</p>
+            </div>
+            <div className="flex flex-wrap items-center gap-2"><Button type="button" variant="outline" onClick={() => void handleReloadTables()} disabled={assetsLoading || entriesLoading}><RefreshCw className="mr-2 h-4 w-4" /> Reload tables</Button><Badge variant="secondary">{user?.name || user?.email || 'Shop manager'}</Badge></div>
+          </div>
+        </CardHeader>
+        <CardContent className="grid gap-4 sm:grid-cols-4">
+          <div className="rounded-lg bg-muted p-4 text-muted-foreground">
+            <p className="text-sm">Employees clocked in</p>
+            <p className="mt-2 text-3xl font-semibold text-foreground">{employeeSummaries.length}</p>
+          </div>
+          <div className="rounded-lg bg-muted p-4 text-muted-foreground">
+            <p className="text-sm">Currently active</p>
+            <p className="mt-2 text-3xl font-semibold text-foreground">{activeEmployeeCount}</p>
+          </div>
+          <div className="rounded-lg bg-muted p-4 text-muted-foreground">
+            <p className="text-sm">Total shop time</p>
+            <p className="mt-2 text-3xl font-semibold text-foreground">{totalHours}</p>
+          </div>
+          <div className="rounded-lg bg-muted p-4 text-muted-foreground">
+            <p className="text-sm">Export week</p>
+            <p className="mt-2 text-3xl font-semibold text-foreground">{formatDuration(weeklyPayrollMinutes)}</p>
+            <p className="mt-1 text-sm">{formatWeekRangeLabel(exportWeekDate)}</p>
+          </div>
+        </CardContent>
+      </Card>
+
+      <Card className="bg-card text-card-foreground shadow-sm">
+        <CardHeader>
+          <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+            <div>
+              <CardTitle className="flex items-center gap-2 text-xl"><Download className="h-5 w-5" /> Weekly timecard export</CardTitle>
+              <p className="mt-1 text-sm text-muted-foreground">Choose a Sunday-Saturday payroll week, then export a ZIP with one CSV file for each employee.</p>
+            </div>
+            <Button type="button" variant="secondary" onClick={handleExportWeeklyPayroll} disabled={weeklyEntries.length === 0} className="w-full sm:w-auto">
+              <Download className="mr-2 h-4 w-4" /> Export {formatWeekRangeLabel(exportWeekDate)} ZIP
+            </Button>
+          </div>
+        </CardHeader>
+        <CardContent>
+          <div className="flex flex-col gap-3 rounded-lg border border-border bg-background p-3 sm:flex-row sm:items-center sm:justify-between">
+            <div>
+              <p className="text-sm font-medium text-foreground">Export week</p>
+              <p className="text-sm text-muted-foreground">{formatWeekRangeLabel(exportWeekDate)} · {weeklyEntries.length} entries · {formatDuration(weeklyPayrollMinutes)}</p>
+            </div>
+            <div className="flex items-center gap-1 rounded-md border border-border bg-card p-1 text-card-foreground">
+              <Button type="button" variant="ghost" size="icon" aria-label="Previous export week" onClick={() => setExportWeekDate((currentDate: Date) => addWeeks(currentDate, -1))}>
+                <ChevronLeft className="h-4 w-4" />
+              </Button>
+              <Popover>
+                <PopoverTrigger asChild>
+                  <Button type="button" variant="outline" className="min-w-56 justify-start bg-background">
+                    <CalendarIcon className="mr-2 h-4 w-4" />
+                    {formatWeekRangeLabel(exportWeekDate)}
+                  </Button>
+                </PopoverTrigger>
+                <PopoverContent className="w-auto p-0" align="end">
+                  <Calendar
+                    mode="single"
+                    selected={exportWeekDate}
+                    onSelect={(date: Date | undefined) => {
+                      if (date) {
+                        setExportWeekDate(startOfDay(date));
+                      }
+                    }}
+                    initialFocus
+                  />
+                </PopoverContent>
+              </Popover>
+              <Button type="button" variant="ghost" size="icon" aria-label="Next export week" onClick={() => setExportWeekDate((currentDate: Date) => addWeeks(currentDate, 1))}>
+                <ChevronRight className="h-4 w-4" />
+              </Button>
+            </div>
+          </div>
+        </CardContent>
+      </Card>
+
+      <Card className="bg-card text-card-foreground shadow-sm">
+        <CardHeader>
+          <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+            <div>
+              <CardTitle className="flex items-center gap-2 text-xl"><Users className="h-5 w-5" /> Employee timecards</CardTitle>
+              <p className="mt-1 text-sm text-muted-foreground">{format(selectedDate, 'EEEE, MMM d')} · collapsed by employee.</p>
+            </div>
+            <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+              <Popover>
+                <PopoverTrigger asChild>
+                  <Button type="button" variant="outline" className="justify-start bg-background sm:w-56">
+                    <CalendarIcon className="mr-2 h-4 w-4" />
+                    {format(selectedDate, 'MMM d, yyyy')}
+                  </Button>
+                </PopoverTrigger>
+                <PopoverContent className="w-auto p-0" align="end">
+                  <Calendar
+                    mode="single"
+                    selected={selectedDate}
+                    onSelect={(date: Date | undefined) => {
+                      if (date) {
+                        setSelectedDate(startOfDay(date));
+                        setOpenEmployeeKeys([]);
+                        handleCancelEdit();
+                      }
+                    }}
+                    initialFocus
+                  />
+                </PopoverContent>
+              </Popover>
+              <div className="relative w-full sm:w-72">
+                <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2" />
+                <Input value={search} onChange={(event: React.ChangeEvent<HTMLInputElement>) => setSearch(event.target.value)} className="pl-9" placeholder="Search employee" />
+              </div>
+            </div>
+          </div>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          {employeesLoading || entriesLoading || assetsLoading ? <p className="text-sm text-muted-foreground">Loading manager dashboard...</p> : null}
+          {!entriesLoading && employeeSummaries.length === 0 ? <p className="rounded-lg bg-muted p-4 text-sm text-muted-foreground">No employees have timecard entries for the selected day.</p> : null}
+          {employeeSummaries.map((summary: EmployeeDailySummary) => {
+            const isOpen = openEmployeeKeys.includes(summary.employeeKey);
+            return (
+              <Collapsible key={summary.employeeKey} open={isOpen} onOpenChange={() => handleToggleEmployee(summary.employeeKey)} asChild>
+                <section className="rounded-lg border border-border bg-background">
+                  <CollapsibleTrigger asChild>
+                    <button type="button" className="flex w-full flex-col gap-3 p-4 text-left sm:flex-row sm:items-center sm:justify-between">
+                      <div>
+                        <h2 className="text-lg font-semibold">{summary.employeeName}</h2>
+                        <p className="text-sm text-muted-foreground">Employee {summary.employeeNumber} · {summary.entries.length} entries · {formatDuration(summary.totalMinutes)}</p>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <Badge variant={summary.activeCount > 0 ? 'default' : 'outline'}>{summary.activeCount > 0 ? 'Active now' : 'Complete'}</Badge>
+                        <ChevronDown className={`h-5 w-5 transition-transform ${isOpen ? 'rotate-180' : ''}`} />
+                      </div>
+                    </button>
+                  </CollapsibleTrigger>
+                  <CollapsibleContent>
+                    <div className="space-y-3 border-t border-border p-4">
+                      {summary.entries.map((entry: ShopTimeEntry) => {
+                        const isEditing = editingEntryId === entry.id;
+                        return (
+                          <div key={entry.id} className="rounded-lg border border-border bg-card p-4 text-card-foreground">
+                            <div className="grid gap-4 lg:grid-cols-[minmax(0,1.5fr)_minmax(0,1fr)_auto] lg:items-start">
+                              <div className="space-y-2">
+                                <p className="text-sm text-muted-foreground">Asset / job</p>
+                                {isEditing && editValues ? (
+                                  <div className="space-y-3">
+                                    <AssetPicker assets={assets} value={editValues.assetId} onChange={(asset: Pick<EquipmentAsset, 'id' | 'asset' | 'divisionCode'> | undefined) => setEditValues({ ...editValues, assetId: asset?.id ?? '', assetRecord: asset, division: asset?.divisionCode ? String(asset.divisionCode) : editValues.division })} currentAsset={editValues.assetRecord ?? entry.asset} />
+                                    <div className="grid gap-3 sm:grid-cols-2">
+                                      <div className="space-y-2">
+                                        <Label htmlFor={`division-${entry.id}`}>Division</Label>
+                                        <Input id={`division-${entry.id}`} value={editValues.division} onChange={(event: React.ChangeEvent<HTMLInputElement>) => setEditValues({ ...editValues, division: event.target.value.replace(/\D/g, '') })} placeholder="Optional division code" />
+                                      </div>
+                                      <div className="space-y-2">
+                                        <Label htmlFor={`job-number-${entry.id}`}>Job Number</Label>
+                                        <Input id={`job-number-${entry.id}`} value={editValues.jobNumber} onChange={(event: React.ChangeEvent<HTMLInputElement>) => setEditValues({ ...editValues, jobNumber: event.target.value })} placeholder="Optional job note" />
+                                      </div>
+                                    </div>
+                                  </div>
+                                ) : (
+                                  <div>
+                                    <div className="flex flex-wrap items-center gap-2"><p className="text-base font-semibold">{getEntryAssetName(entry, assets)}</p>{entry.pTOTypeKey ? <Badge variant="outline">{ShopTimeEntryPTOTypeKeyToLabel[entry.pTOTypeKey]}</Badge> : null}</div>
+                                    <p className="mt-1 text-sm text-muted-foreground">{isPtoEntry(entry) ? `${getPtoHours(entry)} hours PTO` : `Division ${getEntryDivision(entry, assets) || '—'} · Job ${getEntryJobNumber(entry) || '—'}`}</p>
+                                  </div>
+                                )}
+                              </div>
+
+                              <div className="grid gap-3 sm:grid-cols-3">
+                                <div className="space-y-2">
+                                  <Label htmlFor={`clock-in-${entry.id}`}>Clock in</Label>
+                                  {isEditing && editValues ? (
+                                    <Input id={`clock-in-${entry.id}`} type="time" value={editValues.clockInTime} onChange={(event: React.ChangeEvent<HTMLInputElement>) => setEditValues({ ...editValues, clockInTime: event.target.value })} />
+                                  ) : (
+                                    <p className="font-semibold">{entry.clockIn ? format(new Date(entry.clockIn), 'p') : '—'}</p>
+                                  )}
+                                </div>
+                                <div className="space-y-2">
+                                  <Label htmlFor={`clock-out-${entry.id}`}>Clock out</Label>
+                                  {isEditing && editValues ? (
+                                    <Input id={`clock-out-${entry.id}`} type="time" value={editValues.clockOutTime} onChange={(event: React.ChangeEvent<HTMLInputElement>) => setEditValues({ ...editValues, clockOutTime: event.target.value })} />
+                                  ) : (
+                                    <p className="font-semibold">{entry.clockOut ? format(new Date(entry.clockOut), 'p') : 'Active'}</p>
+                                  )}
+                                </div>
+                                <div className="space-y-2">
+                                  <Label>Duration</Label>
+                                  <p className="font-semibold">{formatDuration(getDurationMinutes(entry))}</p>
+                                </div>
+                              </div>
+
+                              <div className="flex flex-wrap gap-2 lg:justify-end">
+                                <Badge variant={entry.clockOut ? 'outline' : 'default'}>{entry.clockOut ? 'Complete' : 'Active'}</Badge>
+                                {isEditing ? (
+                                  <>
+                                    <Button type="button" size="icon" aria-label="Save row" onClick={() => void handleSaveEdit(entry)} disabled={updateTimeEntry.isPending}><Check className="h-4 w-4" /></Button>
+                                    <Button type="button" size="icon" variant="outline" aria-label="Cancel row edit" onClick={handleCancelEdit}><X className="h-4 w-4" /></Button>
+                                  </>
+                                ) : (
+                                  <Button type="button" variant="outline" size="sm" onClick={() => handleStartEdit(entry)}><Pencil className="mr-2 h-4 w-4" /> Edit</Button>
+                                )}
+                                <AlertDialog>
+                                  <AlertDialogTrigger asChild>
+                                    <Button type="button" variant="destructive" size="sm" disabled={deleteTimeEntry.isPending}>
+                                      <Trash2 className="mr-2 h-4 w-4" /> Delete
+                                    </Button>
+                                  </AlertDialogTrigger>
+                                  <AlertDialogContent>
+                                    <AlertDialogHeader>
+                                      <AlertDialogTitle>Delete this time entry?</AlertDialogTitle>
+                                      <AlertDialogDescription>
+                                        This removes {summary.employeeName}&apos;s {format(selectedDate, 'MMM d')} time entry for {getEntryAssetName(entry, assets)} from Dataverse and the weekly timecard export.
+                                      </AlertDialogDescription>
+                                    </AlertDialogHeader>
+                                    <AlertDialogFooter>
+                                      <AlertDialogCancel>Cancel</AlertDialogCancel>
+                                      <AlertDialogAction onClick={() => void handleDeleteEntry(entry)}>Delete time entry</AlertDialogAction>
+                                    </AlertDialogFooter>
+                                  </AlertDialogContent>
+                                </AlertDialog>
+                              </div>
+                            </div>
+                            {getEmployeeNotes(entry.notes) ? <p className="mt-3 border-t border-border pt-3 text-sm text-muted-foreground">{getEmployeeNotes(entry.notes)}</p> : null}
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </CollapsibleContent>
+                </section>
+              </Collapsible>
+            );
+          })}
+
+        </CardContent>
+      </Card>
+    </main>
+  );
+}

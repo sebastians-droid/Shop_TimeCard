@@ -1,0 +1,14 @@
+node_modules
+dist
+dist-ssr
+.azure
+.vscode/*
+!.vscode/extensions.json
+.idea
+.DS_Store
+*.log
+*.local
+dataverse.local.json
+api/local.settings.json
+_import
+.tools
