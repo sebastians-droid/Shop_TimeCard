@@ -27,10 +27,14 @@ function getUser(request) {
   const skipAuth = process.env.DATAVERSE_LOCAL_SKIP_AUTH === '1' || !isProduction;
 
   if (!principal) {
-    const headerEmail = headerGet(request, 'x-ms-client-principal-name').toLowerCase();
+    const headerEmail = (
+      headerGet(request, 'x-ms-client-principal-name') ||
+      request.user?.username ||
+      ''
+    ).toLowerCase();
     if (headerEmail) {
       return {
-        userId: headerGet(request, 'x-ms-client-principal-id'),
+        userId: headerGet(request, 'x-ms-client-principal-id') || request.user?.id || '',
         email: headerEmail,
         name: headerEmail,
         isManager: cfg.managerEmails.includes(headerEmail),

@@ -387,7 +387,7 @@ export default function HomePage() {
               {employeesFailed ? (
                 <div className="rounded-md border border-destructive/40 bg-destructive/10 p-3 text-sm text-destructive">
                   <p className="font-medium">Could not load shop employees from Dataverse.</p>
-                  <p className="mt-1 text-destructive/80">{employeesError instanceof Error ? employeesError.message : 'Grant the app user Read on Shop Employee, then retry.'}</p>
+                  <p className="mt-1 break-words text-destructive/80">{employeesError instanceof Error ? employeesError.message : 'Grant the app user Read on Shop Employee, then retry.'}</p>
                   <Button type="button" variant="outline" className="mt-3" onClick={() => void refetchEmployees()}>Retry</Button>
                 </div>
               ) : null}

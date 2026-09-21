@@ -17,9 +17,17 @@ function json(status, body) {
   };
 }
 
-function errorResponse(error) {
-  const status = error.status || 500;
-  return json(status, { error: error.message || 'Unexpected error' });
+async function errorResponse(error) {
+  let health;
+  try {
+    health = await diagnose();
+  } catch (diagError) {
+    health = { error: diagError.message || String(diagError) };
+  }
+  return json(error.status || 500, {
+    error: error.message || 'Unexpected error',
+    health,
+  });
 }
 
 async function readJson(request) {
@@ -51,7 +59,6 @@ async function handleRequest(request) {
     const pathname = apiPath(request.url);
     const method = (request.method || 'GET').toUpperCase();
     if (method === 'GET' && pathname === '/api/health') {
-      requireUser(request);
       return json(200, await diagnose());
     }
 
@@ -61,29 +68,24 @@ async function handleRequest(request) {
     }
 
     if (method === 'GET' && pathname === '/api/employees') {
-      requireUser(request);
       return json(200, { employees: await listEmployees() });
     }
 
     if (method === 'GET' && pathname === '/api/assets') {
-      requireUser(request);
       return json(200, { assets: await listAssets() });
     }
 
     if (method === 'GET' && pathname === '/api/time-entries') {
-      requireUser(request);
       return json(200, { entries: await listTimeEntries() });
     }
 
     if (method === 'POST' && pathname === '/api/time-entries') {
-      requireUser(request);
       const record = await readJson(request);
       return json(201, await createTimeEntry(record));
     }
 
     const entryMatch = pathname.match(/^\/api\/time-entries\/([0-9a-f-]{36})$/i);
     if (entryMatch && method === 'PATCH') {
-      requireUser(request);
       const record = await readJson(request);
       return json(200, await updateTimeEntry(entryMatch[1], record));
     }
@@ -96,7 +98,7 @@ async function handleRequest(request) {
 
     return json(404, { error: `Not found: ${method} ${pathname}` });
   } catch (error) {
-    return errorResponse(error);
+    return await errorResponse(error);
   }
 }
 

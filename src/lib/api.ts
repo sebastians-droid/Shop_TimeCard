@@ -1,14 +1,39 @@
+function readErrorMessage(data: unknown, status: number): string {
+  if (!data || typeof data !== 'object') return `Request failed (${status})`;
+  const record = data as Record<string, unknown>;
+  const nested = record.error;
+  const fromError =
+    typeof nested === 'string'
+      ? nested
+      : nested && typeof nested === 'object' && typeof (nested as { message?: unknown }).message === 'string'
+        ? (nested as { message: string }).message
+        : '';
+  const fromMessage = typeof record.message === 'string' ? record.message : '';
+  const health = record.health && typeof record.health === 'object' ? (record.health as Record<string, unknown>) : null;
+  const healthError = typeof health?.error === 'string' ? health.error : '';
+  const flags = health
+    ? ` Credentials: org=${health.hasOrgUrl ? 'yes' : 'no'} (${String(health.orgHost || '')}), tenant=${health.hasTenantId ? 'yes' : 'no'}, client=${health.hasClientId ? 'yes' : 'no'}${health.clientIdTail ? ` …${health.clientIdTail}` : ''}, secret=${health.hasClientSecret ? 'yes' : 'no'}, token=${health.tokenOk ? 'yes' : 'no'}.`
+    : '';
+  const main = fromError || fromMessage || healthError || `Request failed (${status})`;
+  if (healthError && healthError !== main) return `${main}${flags} Dataverse: ${healthError}`;
+  return `${main}${flags}`.trim();
+}
+
 async function apiFetch<T>(path: string, init?: RequestInit): Promise<T> {
   const response = await fetch(path, {
     ...init,
     credentials: 'include',
+    redirect: 'manual',
     headers: {
       'Content-Type': 'application/json',
       ...(init?.headers ?? {}),
     },
   });
+  if (response.status === 0 || response.type === 'opaqueredirect' || response.status === 302) {
+    throw new Error('Not signed in. Refresh the page and sign in with Microsoft 365.');
+  }
   const text = await response.text();
-  let data: { error?: string; message?: string } = {};
+  let data: unknown = {};
   try {
     data = text ? JSON.parse(text) : {};
   } catch {
@@ -17,11 +42,7 @@ async function apiFetch<T>(path: string, init?: RequestInit): Promise<T> {
     );
   }
   if (!response.ok) {
-    const message =
-      (typeof data.error === 'string' && data.error) ||
-      (typeof data.message === 'string' && data.message) ||
-      `Request failed (${response.status})`;
-    throw new Error(message);
+    throw new Error(readErrorMessage(data, response.status));
   }
   return data as T;
 }

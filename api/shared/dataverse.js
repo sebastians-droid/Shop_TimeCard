@@ -32,23 +32,30 @@ function readJsonIfExists(filePath) {
   return null;
 }
 
+function cleanEnv(name) {
+  const raw = process.env[name];
+  if (!raw) return '';
+  return String(raw).trim().replace(/^['"]+|['"]+$/g, '');
+}
+
 function loadConfig() {
   if (cachedConfig) return cachedConfig;
 
+  const isAzure = Boolean(process.env.WEBSITE_SITE_NAME);
   const root = path.resolve(__dirname, '..', '..');
-  const local = readJsonIfExists(path.join(root, 'dataverse.local.json'));
-  const mattKurth = readJsonIfExists(
-    path.join(root, '..', '..', 'REPO', 'MATT KURTH', 'dataverse.local.json'),
-  );
+  const local = isAzure ? null : readJsonIfExists(path.join(root, 'dataverse.local.json'));
+  const mattKurth = isAzure
+    ? null
+    : readJsonIfExists(path.join(root, '..', '..', 'REPO', 'MATT KURTH', 'dataverse.local.json'));
   const fileCfg = local || mattKurth || {};
 
   const orgUrl = (
-    process.env.DATAVERSE_ORG_URL ||
+    cleanEnv('DATAVERSE_ORG_URL') ||
     fileCfg.org_url ||
     'https://org9cab1d0f.crm.dynamics.com'
   ).replace(/\/$/, '');
 
-  const managerEmails = (process.env.MANAGER_EMAILS || fileCfg.manager_emails || [
+  const managerEmails = (cleanEnv('MANAGER_EMAILS') || fileCfg.manager_emails || [
     'alisonh@swankco.com',
     'bryank@swankco.com',
     'beaul@swankco.com',
@@ -62,9 +69,9 @@ function loadConfig() {
   cachedConfig = {
     orgUrl,
     api: `${orgUrl}/api/data/v9.2`,
-    tenantId: process.env.DATAVERSE_TENANT_ID || fileCfg.tenant_id || '',
-    clientId: process.env.DATAVERSE_CLIENT_ID || fileCfg.client_id || '',
-    clientSecret: process.env.DATAVERSE_CLIENT_SECRET || fileCfg.client_secret || '',
+    tenantId: cleanEnv('DATAVERSE_TENANT_ID') || fileCfg.tenant_id || '',
+    clientId: cleanEnv('DATAVERSE_CLIENT_ID') || fileCfg.client_id || '',
+    clientSecret: cleanEnv('DATAVERSE_CLIENT_SECRET') || fileCfg.client_secret || '',
     managerEmails,
   };
   return cachedConfig;
@@ -100,9 +107,15 @@ async function getToken() {
       body,
     },
   );
-  const data = await response.json();
+  const text = await response.text();
+  let data = {};
+  try {
+    data = text ? JSON.parse(text) : {};
+  } catch {
+    throw new Error(`Unable to get a Dataverse token (${response.status}).`);
+  }
   if (!response.ok) {
-    throw new Error(data.error_description || 'Unable to get a Dataverse token.');
+    throw new Error(data.error_description || data.error || 'Unable to get a Dataverse token.');
   }
   cachedToken = {
     value: data.access_token,
@@ -315,10 +328,18 @@ async function deleteTimeEntry(id) {
 
 async function diagnose() {
   const cfg = loadConfig();
+  let orgHost = cfg.orgUrl;
+  try {
+    orgHost = new URL(cfg.orgUrl).host;
+  } catch {
+    // keep raw value
+  }
   const result = {
     hasOrgUrl: Boolean(cfg.orgUrl),
+    orgHost,
     hasTenantId: Boolean(cfg.tenantId),
     hasClientId: Boolean(cfg.clientId),
+    clientIdTail: cfg.clientId ? cfg.clientId.slice(-4) : '',
     hasClientSecret: Boolean(cfg.clientSecret),
     tokenOk: false,
     employeeCount: null,
