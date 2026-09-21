@@ -1,5 +1,5 @@
 const { app } = require('@azure/functions');
-const { handleRequest } = require('../shared/handlers');
+const { handleRequest } = require('../../shared/handlers');
 
 async function azureHandler(request) {
   try {
@@ -13,9 +13,33 @@ async function azureHandler(request) {
   }
 }
 
-app.http('api', {
-  methods: ['GET', 'POST', 'PATCH', 'DELETE', 'OPTIONS'],
+app.http('employees', {
+  methods: ['GET'],
   authLevel: 'anonymous',
-  route: '{*path}',
+  handler: azureHandler,
+});
+
+app.http('me', {
+  methods: ['GET'],
+  authLevel: 'anonymous',
+  handler: azureHandler,
+});
+
+app.http('assets', {
+  methods: ['GET'],
+  authLevel: 'anonymous',
+  handler: azureHandler,
+});
+
+app.http('health', {
+  methods: ['GET'],
+  authLevel: 'anonymous',
+  handler: azureHandler,
+});
+
+app.http('timeEntries', {
+  methods: ['GET', 'POST', 'PATCH', 'DELETE'],
+  authLevel: 'anonymous',
+  route: 'time-entries/{id?}',
   handler: azureHandler,
 });
