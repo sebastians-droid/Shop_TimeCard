@@ -504,7 +504,8 @@ export default function ManagerDashboardPage() {
         laborEntries.map((entry: ShopTimeEntry) =>
           updateTimeEntry.mutateAsync({
             id: entry.id,
-            changedFields: { notes: applyNoLunchMarker(entry.notes, checked) },
+            // Empty string clears notes in Dataverse; undefined would leave [NO_LUNCH] in place.
+            changedFields: { notes: applyNoLunchMarker(entry.notes, checked) ?? '' },
           }),
         ),
       );
