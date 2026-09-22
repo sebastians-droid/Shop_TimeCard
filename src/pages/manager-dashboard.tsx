@@ -29,7 +29,7 @@ import {
   lunchCsvLabel,
   stripNoLunchMarker,
 } from '@/lib/time-rules';
-import { ShopTimeEntryPTOTypeKeyToLabel, type ShopTimeEntry, type ShopTimeEntryPTOTimeKey, type ShopTimeEntryPTOTypeKey } from '@/models/shop-time-entry';
+import { ShopTimeEntryPayTypeKeyToLabel, ShopTimeEntryPTOTypeKeyToLabel, DEFAULT_PAY_TYPE, type ShopTimeEntry, type ShopTimeEntryPayTypeKey, type ShopTimeEntryPTOTimeKey, type ShopTimeEntryPTOTypeKey } from '@/models/shop-time-entry';
 import { NoLunchCheckbox } from '@/components/no-lunch-checkbox';
 import { useUser } from '@/hooks/use-user';
 
@@ -40,6 +40,7 @@ type EditableEntry = {
   assetRecord?: Pick<EquipmentAsset, 'id' | 'asset' | 'divisionCode'>;
   division: string;
   jobNumber: string;
+  payTypeKey: ShopTimeEntryPayTypeKey;
   clockInTime: string;
   clockOutTime: string;
 };
@@ -157,6 +158,7 @@ const emptyEntryDraft = (employeeId = ''): NewEntryDraft => ({
   assetRecord: undefined,
   division: '',
   jobNumber: '',
+  payTypeKey: DEFAULT_PAY_TYPE,
   clockInTime: '',
   clockOutTime: '',
 });
@@ -336,6 +338,7 @@ export default function ManagerDashboardPage() {
       assetRecord: entry.asset,
       division: String(entry.assetDivision ?? ''),
       jobNumber: getEntryJobNumber(entry),
+      payTypeKey: entry.payTypeKey ?? DEFAULT_PAY_TYPE,
       clockInTime: formatTimeForInput(entry.clockIn),
       clockOutTime: formatTimeForInput(entry.clockOut),
     });
@@ -499,6 +502,7 @@ export default function ManagerDashboardPage() {
         assetDivision: selectedAsset ? selectedAsset.divisionCode : manualDivision ? Number(manualDivision) : undefined,
         division: selectedAsset ? selectedAsset.divisionCode : manualDivision ? Number(manualDivision) : undefined,
         jobNumber: manualJobNumber || undefined,
+        payTypeKey: newEntryDraft.payTypeKey,
         clockIn,
         clockOut,
         hours,
@@ -550,6 +554,7 @@ export default function ManagerDashboardPage() {
           clockOut,
           division: !selectedAsset && manualDivision ? Number(manualDivision) : undefined,
           jobNumber: manualJobNumber || undefined,
+          payTypeKey: isPtoEntry(entry) ? entry.payTypeKey : editValues.payTypeKey,
           hours: clockOut ? getEntryPaidMinutes(dayEntries, updatedEntry) / 60 : undefined,
           pTOTimeKey: isPtoEntry(entry) && (getPtoHours(entry) === 4 || getPtoHours(entry) === 8) ? PTO_TIME_KEY_BY_HOURS[getPtoHours(entry) as 4 | 8] : entry.pTOTimeKey,
           workDate: format(new Date(clockIn), 'yyyy-MM-dd'),
@@ -677,6 +682,7 @@ export default function ManagerDashboardPage() {
               division: getEntryDivision(entry, assets) || 'Unassigned',
               asset: getEntryAssetName(entry, assets),
               jobNumber: getEntryJobNumber(entry) || '',
+              payType: isPtoEntry(entry) ? '' : ShopTimeEntryPayTypeKeyToLabel[entry.payTypeKey ?? DEFAULT_PAY_TYPE],
               status: entry.clockOut ? 'Complete' : 'Active',
               notes: getEmployeeNotes(entry.notes),
             };
@@ -1024,6 +1030,19 @@ export default function ManagerDashboardPage() {
                   <Input id="missed-job" className="bg-background" value={newEntryDraft.jobNumber} onChange={(event: React.ChangeEvent<HTMLInputElement>) => setNewEntryDraft({ ...newEntryDraft, jobNumber: event.target.value })} placeholder="Optional job note" />
                 </div>
               </div>
+              <div className="space-y-2">
+                <Label htmlFor="missed-pay-type">Pay type</Label>
+                <Select value={newEntryDraft.payTypeKey} onValueChange={(value: ShopTimeEntryPayTypeKey) => setNewEntryDraft({ ...newEntryDraft, payTypeKey: value })}>
+                  <SelectTrigger id="missed-pay-type" className="w-full bg-background">
+                    <SelectValue placeholder="Select pay type" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {Object.entries(ShopTimeEntryPayTypeKeyToLabel).map(([key, label]) => (
+                      <SelectItem key={key} value={key}>{label}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
               <div className="grid gap-3 sm:grid-cols-2">
                 <div className="space-y-2">
                   <Label htmlFor="missed-clock-in">Clock in</Label>
@@ -1084,10 +1103,25 @@ export default function ManagerDashboardPage() {
                                         <Input id={`job-number-${entry.id}`} value={editValues.jobNumber} onChange={(event: React.ChangeEvent<HTMLInputElement>) => setEditValues({ ...editValues, jobNumber: event.target.value })} placeholder="Optional job note" />
                                       </div>
                                     </div>
+                                    {!isPtoEntry(entry) ? (
+                                      <div className="space-y-2">
+                                        <Label htmlFor={`pay-type-${entry.id}`}>Pay type</Label>
+                                        <Select value={editValues.payTypeKey} onValueChange={(value: ShopTimeEntryPayTypeKey) => setEditValues({ ...editValues, payTypeKey: value })}>
+                                          <SelectTrigger id={`pay-type-${entry.id}`} className="w-full bg-background">
+                                            <SelectValue placeholder="Select pay type" />
+                                          </SelectTrigger>
+                                          <SelectContent>
+                                            {Object.entries(ShopTimeEntryPayTypeKeyToLabel).map(([key, label]) => (
+                                              <SelectItem key={key} value={key}>{label}</SelectItem>
+                                            ))}
+                                          </SelectContent>
+                                        </Select>
+                                      </div>
+                                    ) : null}
                                   </div>
                                 ) : (
                                   <div>
-                                    <div className="flex flex-wrap items-center gap-2"><p className="text-base font-semibold">{getEntryAssetName(entry, assets)}</p>{entry.pTOTypeKey ? <Badge variant="outline">{ShopTimeEntryPTOTypeKeyToLabel[entry.pTOTypeKey]}</Badge> : null}</div>
+                                    <div className="flex flex-wrap items-center gap-2"><p className="text-base font-semibold">{getEntryAssetName(entry, assets)}</p>{entry.pTOTypeKey ? <Badge variant="outline">{ShopTimeEntryPTOTypeKeyToLabel[entry.pTOTypeKey]}</Badge> : null}{!isPtoEntry(entry) ? <Badge variant="outline">{ShopTimeEntryPayTypeKeyToLabel[entry.payTypeKey ?? DEFAULT_PAY_TYPE]}</Badge> : null}</div>
                                     <p className="mt-1 text-sm text-muted-foreground">{isPtoEntry(entry) ? `${getPtoHours(entry)} hours PTO` : `Division ${getEntryDivision(entry, assets) || '—'} · Job ${getEntryJobNumber(entry) || '—'}`}</p>
                                   </div>
                                 )}
@@ -1185,6 +1219,19 @@ export default function ManagerDashboardPage() {
                               <Label htmlFor={`add-job-${summary.employeeKey}`}>Job number</Label>
                               <Input id={`add-job-${summary.employeeKey}`} className="bg-background" value={newEntryDraft.jobNumber} onChange={(event: React.ChangeEvent<HTMLInputElement>) => setNewEntryDraft({ ...newEntryDraft, jobNumber: event.target.value })} placeholder="Optional job note" />
                             </div>
+                          </div>
+                          <div className="space-y-2">
+                            <Label htmlFor={`add-pay-type-${summary.employeeKey}`}>Pay type</Label>
+                            <Select value={newEntryDraft.payTypeKey} onValueChange={(value: ShopTimeEntryPayTypeKey) => setNewEntryDraft({ ...newEntryDraft, payTypeKey: value })}>
+                              <SelectTrigger id={`add-pay-type-${summary.employeeKey}`} className="w-full bg-background">
+                                <SelectValue placeholder="Select pay type" />
+                              </SelectTrigger>
+                              <SelectContent>
+                                {Object.entries(ShopTimeEntryPayTypeKeyToLabel).map(([key, label]) => (
+                                  <SelectItem key={key} value={key}>{label}</SelectItem>
+                                ))}
+                              </SelectContent>
+                            </Select>
                           </div>
                           <div className="grid gap-3 sm:grid-cols-2">
                             <div className="space-y-2">

@@ -27,7 +27,7 @@ import {
   roundClockInUpToQuarterHour,
   stripNoLunchMarker,
 } from '@/lib/time-rules';
-import { ShopTimeEntryPTOTypeKeyToLabel, type ShopTimeEntry, type ShopTimeEntryPTOTimeKey, type ShopTimeEntryPTOTypeKey } from '@/models/shop-time-entry';
+import { ShopTimeEntryPayTypeKeyToLabel, ShopTimeEntryPTOTypeKeyToLabel, DEFAULT_PAY_TYPE, type ShopTimeEntry, type ShopTimeEntryPayTypeKey, type ShopTimeEntryPTOTimeKey, type ShopTimeEntryPTOTypeKey } from '@/models/shop-time-entry';
 
 type PtoHours = 4 | 8;
 type ClockInConfirmation = {
@@ -140,6 +140,7 @@ export default function HomePage() {
   const [selectedAssetRecord, setSelectedAssetRecord] = useState<Pick<EquipmentAsset, 'id' | 'asset' | 'divisionCode'> | undefined>(undefined);
   const [division, setDivision] = useState<string>('');
   const [jobNumber, setJobNumber] = useState<string>('');
+  const [payType, setPayType] = useState<ShopTimeEntryPayTypeKey>(DEFAULT_PAY_TYPE);
   const [notes, setNotes] = useState<string>('');
   const [showAddAsset, setShowAddAsset] = useState<boolean>(false);
   const [showPtoForm, setShowPtoForm] = useState<boolean>(false);
@@ -151,6 +152,7 @@ export default function HomePage() {
   const [editingAssetRecord, setEditingAssetRecord] = useState<Pick<EquipmentAsset, 'id' | 'asset' | 'divisionCode'> | undefined>(undefined);
   const [editingDivision, setEditingDivision] = useState<string>('');
   const [editingJobNumber, setEditingJobNumber] = useState<string>('');
+  const [editingPayType, setEditingPayType] = useState<ShopTimeEntryPayTypeKey>(DEFAULT_PAY_TYPE);
   const [editingNotesEntryId, setEditingNotesEntryId] = useState<string>('');
   const [editingNotes, setEditingNotes] = useState<string>('');
   const returnToSignInTimer = useRef<number | undefined>(undefined);
@@ -198,6 +200,7 @@ export default function HomePage() {
     setNotes('');
     setDivision('');
     setJobNumber('');
+    setPayType(DEFAULT_PAY_TYPE);
     setShowAddAsset(false);
   };
 
@@ -278,6 +281,7 @@ export default function HomePage() {
         assetDivision: divisionNumber,
         division: divisionNumber,
         jobNumber: manualJobNumber || undefined,
+        payTypeKey: payType,
         clockIn,
         workDate: getWorkDate(clockIn),
         notes: applyNoLunchMarker(notes.trim() || undefined, todayPay.noLunch),
@@ -356,6 +360,7 @@ export default function HomePage() {
     setEditingAssetRecord(entry.asset);
     setEditingDivision(entry.assetDivision !== undefined ? String(entry.assetDivision) : '');
     setEditingJobNumber(getEntryJobNumber(entry));
+    setEditingPayType(entry.payTypeKey ?? DEFAULT_PAY_TYPE);
     setEditingNotesEntryId('');
     setEditingNotes(stripNoLunchMarker(entry.notes));
   };
@@ -365,6 +370,7 @@ export default function HomePage() {
     setEditingAssetRecord(undefined);
     setEditingDivision('');
     setEditingJobNumber('');
+    setEditingPayType(DEFAULT_PAY_TYPE);
     setEditingNotes('');
   };
   const handleSaveEditAsset = async (entry: ShopTimeEntry) => {
@@ -387,6 +393,7 @@ export default function HomePage() {
           assetDivision: newAsset ? newAsset.divisionCode : manualDivision ? Number(manualDivision) : undefined,
           division: newAsset ? newAsset.divisionCode : manualDivision ? Number(manualDivision) : undefined,
           jobNumber: manualJobNumber || undefined,
+          payTypeKey: editingPayType,
           notes: applyNoLunchMarker(editingNotes.trim() || undefined, notesHaveNoLunch(entry.notes) || todayPay.noLunch),
         },
       });
@@ -489,6 +496,19 @@ export default function HomePage() {
                             </div>
                           </div>
                           <div className="space-y-2">
+                            <Label htmlFor={`edit-pay-type-${entry.id}`}>Pay type</Label>
+                            <Select value={editingPayType} onValueChange={(value: ShopTimeEntryPayTypeKey) => setEditingPayType(value)}>
+                              <SelectTrigger id={`edit-pay-type-${entry.id}`} className="w-full bg-background">
+                                <SelectValue placeholder="Select pay type" />
+                              </SelectTrigger>
+                              <SelectContent>
+                                {Object.entries(ShopTimeEntryPayTypeKeyToLabel).map(([key, label]) => (
+                                  <SelectItem key={key} value={key}>{label}</SelectItem>
+                                ))}
+                              </SelectContent>
+                            </Select>
+                          </div>
+                          <div className="space-y-2">
                             <div className="flex items-center justify-between gap-2">
                               <Label htmlFor={`edit-notes-${entry.id}`}>Notes</Label>
                               <VoiceNoteButton value={editingNotes} onChange={setEditingNotes} phrases={voicePhrases} disabled={updateTimeEntry.isPending} />
@@ -497,7 +517,7 @@ export default function HomePage() {
                           </div>
                         </div>
                       ) : (
-                        <div className="space-y-1"><div className="flex flex-wrap items-center gap-2">{isPtoEntry(entry) ? <Badge variant="secondary">PTO</Badge> : null}{entry.pTOTypeKey ? <Badge variant="outline">{ShopTimeEntryPTOTypeKeyToLabel[entry.pTOTypeKey]}</Badge> : null}<p className="text-sm text-muted-foreground">{isPtoEntry(entry) ? 'Paid time off' : 'Asset'}</p></div><p className="text-lg font-semibold">{getTimeEntryAssetName(entry, assets)}</p><p className="text-sm text-muted-foreground">{isPtoEntry(entry) ? `${getPtoHours(entry) || Math.round(entry.hours ?? 0)} hours submitted` : `Division ${entry.assetDivision ?? '—'} · Job ${getEntryJobNumber(entry) || '—'}`}</p></div>
+                        <div className="space-y-1"><div className="flex flex-wrap items-center gap-2">{isPtoEntry(entry) ? <Badge variant="secondary">PTO</Badge> : null}{entry.pTOTypeKey ? <Badge variant="outline">{ShopTimeEntryPTOTypeKeyToLabel[entry.pTOTypeKey]}</Badge> : null}{!isPtoEntry(entry) ? <Badge variant="outline">{ShopTimeEntryPayTypeKeyToLabel[entry.payTypeKey ?? DEFAULT_PAY_TYPE]}</Badge> : null}<p className="text-sm text-muted-foreground">{isPtoEntry(entry) ? 'Paid time off' : 'Asset'}</p></div><p className="text-lg font-semibold">{getTimeEntryAssetName(entry, assets)}</p><p className="text-sm text-muted-foreground">{isPtoEntry(entry) ? `${getPtoHours(entry) || Math.round(entry.hours ?? 0)} hours submitted` : `Division ${entry.assetDivision ?? '—'} · Job ${getEntryJobNumber(entry) || '—'}`}</p></div>
                       )}
                       {editingNotesEntryId === entry.id ? (
                         <div className="mt-3 space-y-2">
@@ -550,7 +570,7 @@ export default function HomePage() {
                   </div>
                 </div>
               ))}
-              {!showAddAsset ? <Button type="button" variant="outline" className="w-full justify-center border-dashed" onClick={() => setShowAddAsset(true)}><Plus className="mr-2 h-4 w-4" /> Add</Button> : <div className="grid gap-4 rounded-lg border border-dashed border-border bg-muted p-4 text-muted-foreground"><div className="flex items-center justify-between gap-3"><p className="font-medium text-foreground">Add asset time</p><Button type="button" size="icon" variant="ghost" aria-label="Cancel add asset" onClick={() => setShowAddAsset(false)}><X className="h-4 w-4" /></Button></div><div className="space-y-2"><Label>Equipment asset</Label><AssetPicker assets={assets} value={selectedAssetId} onChange={(asset: Pick<EquipmentAsset, 'id' | 'asset' | 'divisionCode'> | undefined) => { setSelectedAssetRecord(asset); setSelectedAssetId(asset?.id ?? ''); setDivision(asset?.divisionCode === undefined ? '' : String(asset.divisionCode)); }} currentAsset={selectedAssetRecord} /><p className="text-sm text-muted-foreground">Choose any equipment asset, or leave it blank and enter a division or job number below.</p></div><div className="space-y-2"><div className="flex items-center justify-between gap-2"><Label>Notes</Label><VoiceNoteButton value={notes} onChange={setNotes} phrases={voicePhrases} disabled={createTimeEntry.isPending || updateTimeEntry.isPending} /></div><Textarea className="bg-background" value={notes} onChange={(event: React.ChangeEvent<HTMLTextAreaElement>) => setNotes(event.target.value)} placeholder="Optional job notes or handoff details" /></div>{employeeActiveEntry ? <div className="rounded-lg border border-border bg-background p-3 text-muted-foreground"><p className="font-medium text-foreground">Current active asset: {getTimeEntryAssetName(employeeActiveEntry, assets)}</p><p className="text-sm">Starting another asset will clock out this row first.</p></div> : null}<div className="grid gap-4 sm:grid-cols-2"><div className="space-y-2"><Label htmlFor="division">Division (optional)</Label><Input id="division" className="bg-background" value={division} onChange={(event: React.ChangeEvent<HTMLInputElement>) => setDivision(event.target.value)} placeholder="Mapped from asset or enter division" /></div><div className="space-y-2"><Label htmlFor="job-number">Job Number (optional)</Label><Input id="job-number" className="bg-background" value={jobNumber} onChange={(event: React.ChangeEvent<HTMLInputElement>) => setJobNumber(event.target.value)} placeholder="Enter job number" /></div></div><Button className="h-12" type="button" onClick={handleClockIn} disabled={assetsLoading || createTimeEntry.isPending || updateTimeEntry.isPending}>Clock in</Button></div>}
+              {!showAddAsset ? <Button type="button" variant="outline" className="w-full justify-center border-dashed" onClick={() => setShowAddAsset(true)}><Plus className="mr-2 h-4 w-4" /> Add</Button> : <div className="grid gap-4 rounded-lg border border-dashed border-border bg-muted p-4 text-muted-foreground"><div className="flex items-center justify-between gap-3"><p className="font-medium text-foreground">Add asset time</p><Button type="button" size="icon" variant="ghost" aria-label="Cancel add asset" onClick={() => setShowAddAsset(false)}><X className="h-4 w-4" /></Button></div><div className="space-y-2"><Label>Equipment asset</Label><AssetPicker assets={assets} value={selectedAssetId} onChange={(asset: Pick<EquipmentAsset, 'id' | 'asset' | 'divisionCode'> | undefined) => { setSelectedAssetRecord(asset); setSelectedAssetId(asset?.id ?? ''); setDivision(asset?.divisionCode === undefined ? '' : String(asset.divisionCode)); }} currentAsset={selectedAssetRecord} /><p className="text-sm text-muted-foreground">Choose any equipment asset, or leave it blank and enter a division or job number below.</p></div><div className="space-y-2"><div className="flex items-center justify-between gap-2"><Label>Notes</Label><VoiceNoteButton value={notes} onChange={setNotes} phrases={voicePhrases} disabled={createTimeEntry.isPending || updateTimeEntry.isPending} /></div><Textarea className="bg-background" value={notes} onChange={(event: React.ChangeEvent<HTMLTextAreaElement>) => setNotes(event.target.value)} placeholder="Optional job notes or handoff details" /></div>{employeeActiveEntry ? <div className="rounded-lg border border-border bg-background p-3 text-muted-foreground"><p className="font-medium text-foreground">Current active asset: {getTimeEntryAssetName(employeeActiveEntry, assets)}</p><p className="text-sm">Starting another asset will clock out this row first.</p></div> : null}<div className="grid gap-4 sm:grid-cols-2"><div className="space-y-2"><Label htmlFor="division">Division (optional)</Label><Input id="division" className="bg-background" value={division} onChange={(event: React.ChangeEvent<HTMLInputElement>) => setDivision(event.target.value)} placeholder="Mapped from asset or enter division" /></div><div className="space-y-2"><Label htmlFor="job-number">Job Number (optional)</Label><Input id="job-number" className="bg-background" value={jobNumber} onChange={(event: React.ChangeEvent<HTMLInputElement>) => setJobNumber(event.target.value)} placeholder="Enter job number" /></div></div><div className="space-y-2"><Label htmlFor="pay-type">Pay type</Label><Select value={payType} onValueChange={(value: ShopTimeEntryPayTypeKey) => setPayType(value)}><SelectTrigger id="pay-type" className="w-full bg-background"><SelectValue placeholder="Select pay type" /></SelectTrigger><SelectContent>{Object.entries(ShopTimeEntryPayTypeKeyToLabel).map(([key, label]) => <SelectItem key={key} value={key}>{label}</SelectItem>)}</SelectContent></Select></div><Button className="h-12" type="button" onClick={handleClockIn} disabled={assetsLoading || createTimeEntry.isPending || updateTimeEntry.isPending}>Clock in</Button></div>}
             </CardContent>
           </Card>
 

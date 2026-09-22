@@ -12,6 +12,7 @@ export type PayrollDetailRow = {
   division: string;
   asset: string;
   jobNumber: string;
+  payType: string;
   status: string;
   notes: string;
 };
@@ -137,6 +138,7 @@ export async function buildPayrollWorkbookBlob(data: PayrollWeekExport): Promise
     'Division',
     'Asset',
     'Job number',
+    'Pay type',
     'Status',
     'Notes',
   ];
@@ -163,13 +165,14 @@ export async function buildPayrollWorkbookBlob(data: PayrollWeekExport): Promise
         detail.division,
         detail.asset,
         detail.jobNumber,
+        detail.payType,
         detail.status,
         detail.notes,
       ]);
       row.getCell(6).numFmt = '0.00';
     });
     if (employee.rows.length > 0) {
-      const total = sheet.addRow(['', '', '', '', 'Employee week total', hoursNumber(employee.weekHours), '', '', '', '', '', '', '', '']);
+      const total = sheet.addRow(['', '', '', '', 'Employee week total', hoursNumber(employee.weekHours), '', '', '', '', '', '', '', '', '']);
       total.font = { bold: true };
       total.getCell(6).numFmt = '0.00';
     }
@@ -186,6 +189,7 @@ export async function buildPayrollWorkbookBlob(data: PayrollWeekExport): Promise
       { width: 12 },
       { width: 18 },
       { width: 14 },
+      { width: 16 },
       { width: 12 },
       { width: 36 },
     ];

@@ -17,6 +17,16 @@ const PTO_VALUE_TO_TYPE = {
   290180000: 'Personal',
   290180001: 'Vacation',
 };
+const PAY_TYPE_TO_VALUE = {
+  JR: 290180000,
+  SR: 290180001,
+  DoubleTime: 290180002,
+};
+const PAY_VALUE_TO_TYPE = {
+  290180000: 'JR',
+  290180001: 'SR',
+  290180002: 'DoubleTime',
+};
 
 let cachedToken = { value: '', expiresAt: 0 };
 let cachedConfig = null;
@@ -236,6 +246,7 @@ function mapTimeEntry(row) {
     hours: toNumber(row.swank_hours),
     jobNumber: row.swank_jobnumber || undefined,
     notes: row.swank_notes || undefined,
+    payTypeKey: PAY_VALUE_TO_TYPE[row.swank_paytype] || undefined,
     pTOTimeKey: PTO_VALUE_TO_TIME[row.swank_ptotime],
     pTOTypeKey: PTO_VALUE_TO_TYPE[row.swank_ptotype],
     workDate: row.swank_workdate || undefined,
@@ -263,6 +274,11 @@ function timeEntryPayload(record, { isCreate }) {
   }
   if (record.pTOTypeKey !== undefined) {
     payload.swank_ptotype = PTO_TYPE_TO_VALUE[record.pTOTypeKey] ?? null;
+  }
+  if (record.payTypeKey !== undefined) {
+    payload.swank_paytype = PAY_TYPE_TO_VALUE[record.payTypeKey] ?? null;
+  } else if (isCreate) {
+    payload.swank_paytype = PAY_TYPE_TO_VALUE.SR;
   }
   if (record.employee?.id) {
     payload['swank_Employee@odata.bind'] = `/swank_shopemployees(${record.employee.id})`;
@@ -302,7 +318,7 @@ async function listAssets() {
 
 async function listTimeEntries() {
   const rows = await listAll(
-    '/swank_shoptimeentries?$select=swank_shoptimeentryid,swank_timeentry,swank_clockin,swank_clockout,swank_hours,swank_jobnumber,swank_notes,swank_workdate,swank_assetdivision,crcce_division,swank_ptotime,swank_ptotype,_swank_employee_value,_swank_asset_value&$expand=swank_Employee($select=swank_shopemployeeid,swank_autonumber,swank_empnum),swank_Asset($select=swank_equipmentassetid,swank_assetidentifier,swank_divisioncode)&$orderby=swank_clockin desc',
+    '/swank_shoptimeentries?$select=swank_shoptimeentryid,swank_timeentry,swank_clockin,swank_clockout,swank_hours,swank_jobnumber,swank_notes,swank_workdate,swank_assetdivision,crcce_division,swank_ptotime,swank_ptotype,swank_paytype,_swank_employee_value,_swank_asset_value&$expand=swank_Employee($select=swank_shopemployeeid,swank_autonumber,swank_empnum),swank_Asset($select=swank_equipmentassetid,swank_assetidentifier,swank_divisioncode)&$orderby=swank_clockin desc',
   );
   return rows.map(mapTimeEntry);
 }

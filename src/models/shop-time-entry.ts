@@ -13,6 +13,15 @@ export const ShopTimeEntryPTOTypeKeyToLabel = {
 } as const;
 export type ShopTimeEntryPTOTypeKey = keyof typeof ShopTimeEntryPTOTypeKeyToLabel;
 
+export const ShopTimeEntryPayTypeKeyToLabel = {
+  JR: 'JR · Job Rate',
+  SR: 'SR · Shop Rate',
+  DoubleTime: 'Double-Time',
+} as const;
+export type ShopTimeEntryPayTypeKey = keyof typeof ShopTimeEntryPayTypeKeyToLabel;
+
+export const DEFAULT_PAY_TYPE: ShopTimeEntryPayTypeKey = 'SR';
+
 export interface ShopTimeEntry {
   id: string;
   timeEntry: string;
@@ -25,6 +34,7 @@ export interface ShopTimeEntry {
   hours?: number;
   jobNumber?: string;
   notes?: string;
+  payTypeKey?: ShopTimeEntryPayTypeKey;
   pTOTimeKey?: ShopTimeEntryPTOTimeKey;
   pTOTypeKey?: ShopTimeEntryPTOTypeKey;
   workDate?: string;
