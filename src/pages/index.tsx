@@ -233,6 +233,10 @@ export default function HomePage() {
     const selectedAssetForEntry = selectedAssetId ? selectedAsset : undefined;
     const manualDivision = division.trim();
     const manualJobNumber = jobNumber.trim();
+    if (!selectedAssetForEntry && !manualDivision && !manualJobNumber) {
+      toast.error('An asset, division, or job number is required to clock in.');
+      return;
+    }
     const divisionNumber = manualDivision ? Number(manualDivision) : selectedAssetForEntry?.divisionCode;
     if (manualDivision && !Number.isFinite(divisionNumber)) {
       toast.error('Division must be a number.');
