@@ -148,6 +148,8 @@ export default function HomePage() {
   const [editingEntryId, setEditingEntryId] = useState<string>('');
   const [editingAssetId, setEditingAssetId] = useState<string>('');
   const [editingAssetRecord, setEditingAssetRecord] = useState<Pick<EquipmentAsset, 'id' | 'asset' | 'divisionCode'> | undefined>(undefined);
+  const [editingDivision, setEditingDivision] = useState<string>('');
+  const [editingJobNumber, setEditingJobNumber] = useState<string>('');
   const [editingNotesEntryId, setEditingNotesEntryId] = useState<string>('');
   const [editingNotes, setEditingNotes] = useState<string>('');
   const returnToSignInTimer = useRef<number | undefined>(undefined);
@@ -334,18 +336,44 @@ export default function HomePage() {
     setEditingEntryId(entry.id);
     setEditingAssetId(entry.asset?.id ?? '');
     setEditingAssetRecord(entry.asset);
+    setEditingDivision(entry.assetDivision !== undefined ? String(entry.assetDivision) : '');
+    setEditingJobNumber(getEntryJobNumber(entry));
     setEditingNotesEntryId('');
     setEditingNotes(stripNoLunchMarker(entry.notes));
   };
+  const handleCancelEditAsset = () => {
+    setEditingEntryId('');
+    setEditingAssetId('');
+    setEditingAssetRecord(undefined);
+    setEditingDivision('');
+    setEditingJobNumber('');
+    setEditingNotes('');
+  };
   const handleSaveEditAsset = async (entry: ShopTimeEntry) => {
     const newAsset = editingAssetId ? editingAssetRecord ?? assets.find((asset: EquipmentAsset) => asset.id === editingAssetId) : undefined;
+    const manualDivision = editingDivision.trim();
+    const manualJobNumber = editingJobNumber.trim();
+    if (manualDivision && !Number.isFinite(Number(manualDivision))) {
+      toast.error('Division must be a number.');
+      return;
+    }
+    const assetLabel = newAsset ? getAssetDisplayName(newAsset) : getTimeEntryAssetName(entry, assets);
+    const entryLabel = [assetLabel, manualJobNumber ? `Job ${manualJobNumber}` : ''].filter((value: string) => value).join(' · ') || (manualDivision ? `Division ${manualDivision}` : 'Time entry');
+    const employeeName = selectedEmployee?.employeeName ?? entry.employee?.autoNumber ?? 'Employee';
     try {
-      await updateTimeEntry.mutateAsync({ id: entry.id, changedFields: { timeEntry: `${entry.employee ?? selectedEmployee?.employeeName ?? 'Employee'} - ${[newAsset ? getAssetDisplayName(newAsset) : getTimeEntryAssetName(entry, assets), getEntryJobNumber(entry) ? `Job ${getEntryJobNumber(entry)}` : ''].filter((value: string) => value).join(' · ')}`, asset: newAsset ? { id: newAsset.id, asset: getAssetDisplayName(newAsset) } : entry.asset, assetDivision: newAsset ? newAsset.divisionCode : entry.assetDivision, jobNumber: getEntryJobNumber(entry) || undefined, notes: applyNoLunchMarker(editingNotes.trim() || undefined, notesHaveNoLunch(entry.notes) || todayPay.noLunch) } });
-      setEditingEntryId('');
-      setEditingAssetId('');
-      setEditingAssetRecord(undefined);
+      await updateTimeEntry.mutateAsync({
+        id: entry.id,
+        changedFields: {
+          timeEntry: `${employeeName} - ${entryLabel}`,
+          asset: newAsset ? { id: newAsset.id, asset: getAssetDisplayName(newAsset) } : entry.asset,
+          assetDivision: newAsset ? newAsset.divisionCode : manualDivision ? Number(manualDivision) : undefined,
+          division: newAsset ? newAsset.divisionCode : manualDivision ? Number(manualDivision) : undefined,
+          jobNumber: manualJobNumber || undefined,
+          notes: applyNoLunchMarker(editingNotes.trim() || undefined, notesHaveNoLunch(entry.notes) || todayPay.noLunch),
+        },
+      });
+      handleCancelEditAsset();
       setEditingNotesEntryId('');
-      setEditingNotes('');
       toast.success('Timecard updated.');
     } catch (error: unknown) {
       toast.error(error instanceof Error ? error.message : 'Unable to update asset.');
@@ -416,7 +444,37 @@ export default function HomePage() {
                   <div className="grid gap-4 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-start">
                     <div>
                       {editingEntryId === entry.id && !isPtoEntry(entry) ? (
-                        <div className="max-w-md space-y-3"><div className="space-y-2"><Label>Equipment asset</Label><AssetPicker assets={assets} value={editingAssetId} onChange={(asset: Pick<EquipmentAsset, 'id' | 'asset' | 'divisionCode'> | undefined) => { setEditingAssetRecord(asset); setEditingAssetId(asset?.id ?? ''); }} currentAsset={editingAssetRecord ?? entry.asset} /></div><div className="space-y-2"><Label htmlFor={`edit-notes-${entry.id}`}>Notes</Label><Textarea id={`edit-notes-${entry.id}`} value={editingNotes} onChange={(event: React.ChangeEvent<HTMLTextAreaElement>) => setEditingNotes(event.target.value)} placeholder="Add notes for this time entry" /></div></div>
+                        <div className="max-w-md space-y-3">
+                          <div className="space-y-2">
+                            <Label>Equipment asset</Label>
+                            <AssetPicker
+                              assets={assets}
+                              value={editingAssetId}
+                              onChange={(asset: Pick<EquipmentAsset, 'id' | 'asset' | 'divisionCode'> | undefined) => {
+                                setEditingAssetRecord(asset);
+                                setEditingAssetId(asset?.id ?? '');
+                                if (asset?.divisionCode !== undefined) {
+                                  setEditingDivision(String(asset.divisionCode));
+                                }
+                              }}
+                              currentAsset={editingAssetRecord ?? entry.asset}
+                            />
+                          </div>
+                          <div className="grid gap-3 sm:grid-cols-2">
+                            <div className="space-y-2">
+                              <Label htmlFor={`edit-division-${entry.id}`}>Division</Label>
+                              <Input id={`edit-division-${entry.id}`} value={editingDivision} onChange={(event: React.ChangeEvent<HTMLInputElement>) => setEditingDivision(event.target.value.replace(/\D/g, ''))} placeholder="Optional division code" />
+                            </div>
+                            <div className="space-y-2">
+                              <Label htmlFor={`edit-job-${entry.id}`}>Job number</Label>
+                              <Input id={`edit-job-${entry.id}`} value={editingJobNumber} onChange={(event: React.ChangeEvent<HTMLInputElement>) => setEditingJobNumber(event.target.value)} placeholder="Optional job note" />
+                            </div>
+                          </div>
+                          <div className="space-y-2">
+                            <Label htmlFor={`edit-notes-${entry.id}`}>Notes</Label>
+                            <Textarea id={`edit-notes-${entry.id}`} value={editingNotes} onChange={(event: React.ChangeEvent<HTMLTextAreaElement>) => setEditingNotes(event.target.value)} placeholder="Add notes for this time entry" />
+                          </div>
+                        </div>
                       ) : (
                         <div className="space-y-1"><div className="flex flex-wrap items-center gap-2">{isPtoEntry(entry) ? <Badge variant="secondary">PTO</Badge> : null}{entry.pTOTypeKey ? <Badge variant="outline">{ShopTimeEntryPTOTypeKeyToLabel[entry.pTOTypeKey]}</Badge> : null}<p className="text-sm text-muted-foreground">{isPtoEntry(entry) ? 'Paid time off' : 'Asset'}</p></div><p className="text-lg font-semibold">{getTimeEntryAssetName(entry, assets)}</p><p className="text-sm text-muted-foreground">{isPtoEntry(entry) ? `${getPtoHours(entry) || Math.round(entry.hours ?? 0)} hours submitted` : `Division ${entry.assetDivision ?? '—'} · Job ${getEntryJobNumber(entry) || '—'}`}</p></div>
                       )}
@@ -424,7 +482,39 @@ export default function HomePage() {
                     </div>
                     <div className="flex flex-col gap-2 sm:items-end">
                       <div className="space-y-2 text-left sm:text-right"><div><p className="text-sm text-muted-foreground">Clock in</p><p className="text-lg font-semibold">{entry.clockIn ? format(new Date(entry.clockIn), 'p') : '—'}</p></div><div><p className="text-sm text-muted-foreground">Clock out</p><p className="text-lg font-semibold">{entry.clockOut ? format(new Date(entry.clockOut), 'p') : '—'}</p></div><div><p className="text-xs text-muted-foreground">Duration</p><p className="text-sm font-medium text-foreground">{formatDuration(getEntryPaidMinutes(employeeTodayEntries, entry))}</p></div></div>
-                      {!entry.clockOut && !isPtoEntry(entry) ? <Button type="button" variant="secondary" onClick={() => void handleClockOut(entry)} disabled={updateTimeEntry.isPending}>Clock out</Button> : editingEntryId === entry.id ? <div className="flex gap-2"><Button type="button" size="icon" aria-label="Save timecard" onClick={() => void handleSaveEditAsset(entry)} disabled={updateTimeEntry.isPending}><Check className="h-4 w-4" /></Button><Button type="button" size="icon" variant="outline" aria-label="Cancel edit" onClick={() => setEditingEntryId('')}><X className="h-4 w-4" /></Button></div> : editingNotesEntryId === entry.id ? <div className="flex gap-2"><Button type="button" size="icon" aria-label="Save notes" onClick={() => void handleSaveEditNotes(entry)} disabled={updateTimeEntry.isPending}><Check className="h-4 w-4" /></Button><Button type="button" size="icon" variant="outline" aria-label="Cancel notes edit" onClick={() => setEditingNotesEntryId('')}><X className="h-4 w-4" /></Button></div> : <div className="flex flex-wrap items-center justify-end gap-2"><Badge variant="outline">Complete</Badge>{!isPtoEntry(entry) ? <Button type="button" variant="outline" onClick={() => handleStartEditAsset(entry)}>Edit timecard</Button> : null}<Button type="button" variant="outline" onClick={() => { setEditingNotesEntryId(entry.id); setEditingNotes(stripNoLunchMarker(entry.notes)); }}>{stripNoLunchMarker(entry.notes) ? 'Edit notes' : 'Add notes'}</Button></div>}
+                      {editingEntryId === entry.id ? (
+                        <div className="flex flex-wrap items-center justify-end gap-2">
+                          <Button type="button" size="icon" aria-label="Save timecard" onClick={() => void handleSaveEditAsset(entry)} disabled={updateTimeEntry.isPending}><Check className="h-4 w-4" /></Button>
+                          <Button type="button" size="icon" variant="outline" aria-label="Cancel edit" onClick={handleCancelEditAsset}><X className="h-4 w-4" /></Button>
+                        </div>
+                      ) : editingNotesEntryId === entry.id ? (
+                        <div className="flex flex-wrap items-center justify-end gap-2">
+                          <Button type="button" size="icon" aria-label="Save notes" onClick={() => void handleSaveEditNotes(entry)} disabled={updateTimeEntry.isPending}><Check className="h-4 w-4" /></Button>
+                          <Button type="button" size="icon" variant="outline" aria-label="Cancel notes edit" onClick={() => setEditingNotesEntryId('')}><X className="h-4 w-4" /></Button>
+                        </div>
+                      ) : (
+                        <div className="flex flex-wrap items-center justify-end gap-2">
+                          {!entry.clockOut && !isPtoEntry(entry) ? (
+                            <Button type="button" variant="secondary" onClick={() => void handleClockOut(entry)} disabled={updateTimeEntry.isPending}>Clock out</Button>
+                          ) : (
+                            <Badge variant="outline">Complete</Badge>
+                          )}
+                          {!isPtoEntry(entry) ? (
+                            <Button type="button" variant="outline" onClick={() => handleStartEditAsset(entry)}>Edit timecard</Button>
+                          ) : null}
+                          <Button
+                            type="button"
+                            variant="outline"
+                            onClick={() => {
+                              setEditingEntryId('');
+                              setEditingNotesEntryId(entry.id);
+                              setEditingNotes(stripNoLunchMarker(entry.notes));
+                            }}
+                          >
+                            {stripNoLunchMarker(entry.notes) ? 'Edit notes' : 'Add notes'}
+                          </Button>
+                        </div>
+                      )}
                     </div>
                   </div>
                 </div>
