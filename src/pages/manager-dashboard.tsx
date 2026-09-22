@@ -1,6 +1,7 @@
 import { useMemo, useState } from 'react';
 import { addDays, addWeeks, endOfWeek, format, startOfDay, startOfWeek } from 'date-fns';
 import { CalendarIcon, Check, ChevronDown, ChevronLeft, ChevronRight, Download, LockKeyhole, Pencil, Plus, RefreshCw, Search, ShieldCheck, Trash2, Users, X } from 'lucide-react';
+import { useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger } from '@/components/ui/alert-dialog';
@@ -16,6 +17,7 @@ import { useAllEquipmentAssets, useCreateShopTimeEntry, useDeleteShopTimeEntry, 
 import type { EquipmentAsset } from '@/models/equipment-asset';
 import { mapShopEmployees, type AppShopEmployee } from '@/lib/shop-employees';
 import { buildPayrollWorkbookBlob } from '@/lib/payroll-workbook';
+import { apiFetch } from '@/lib/api';
 import {
   applyNoLunchMarker,
   formatDuration,
@@ -213,6 +215,8 @@ export default function ManagerDashboardPage() {
   const [newEntryDraft, setNewEntryDraft] = useState<NewEntryDraft | null>(null);
   const [showMissedEntryForm, setShowMissedEntryForm] = useState(false);
   const [missedEmployeeSearch, setMissedEmployeeSearch] = useState('');
+  const [lunchUpdatingKey, setLunchUpdatingKey] = useState('');
+  const queryClient = useQueryClient();
   const { data: user, isLoading: userLoading } = useUser();
   const { data: shopEmployees = [], isLoading: employeesLoading } = useShopEmployeeList();
   const employees = useMemo(() => mapShopEmployees(shopEmployees), [shopEmployees]);
@@ -499,19 +503,39 @@ export default function ManagerDashboardPage() {
       toast.info('Clock time for this employee first, then lunch can be overridden.');
       return;
     }
+
+    const entryIds = new Set(laborEntries.map((entry: ShopTimeEntry) => entry.id));
+    const previousEntries = queryClient.getQueryData<ShopTimeEntry[]>(['shopTimeEntry-list']);
+
+    // Flip the checkbox immediately from cached notes, then persist.
+    queryClient.setQueryData<ShopTimeEntry[]>(['shopTimeEntry-list'], (current) =>
+      (current ?? []).map((entry: ShopTimeEntry) =>
+        entryIds.has(entry.id)
+          ? { ...entry, notes: applyNoLunchMarker(entry.notes, checked) }
+          : entry,
+      ),
+    );
+
+    setLunchUpdatingKey(summary.employeeKey);
     try {
-      await Promise.all(
-        laborEntries.map((entry: ShopTimeEntry) =>
-          updateTimeEntry.mutateAsync({
-            id: entry.id,
-            // Empty string clears notes in Dataverse; undefined would leave [NO_LUNCH] in place.
-            changedFields: { notes: applyNoLunchMarker(entry.notes, checked) ?? '' },
-          }),
-        ),
-      );
+      for (const entry of laborEntries) {
+        const nextNotes = applyNoLunchMarker(entry.notes, checked);
+        await apiFetch<ShopTimeEntry>(`/api/time-entries/${entry.id}`, {
+          method: 'PATCH',
+          body: JSON.stringify({ notes: nextNotes }),
+        });
+      }
+      await queryClient.invalidateQueries({ queryKey: ['shopTimeEntry-list'] });
       toast.success(checked ? `No lunch saved for ${summary.employeeName}.` : `Lunch deduction restored for ${summary.employeeName}.`);
     } catch (error: unknown) {
+      if (previousEntries) {
+        queryClient.setQueryData(['shopTimeEntry-list'], previousEntries);
+      } else {
+        await queryClient.invalidateQueries({ queryKey: ['shopTimeEntry-list'] });
+      }
       toast.error(error instanceof Error ? error.message : 'Unable to update lunch setting.');
+    } finally {
+      setLunchUpdatingKey('');
     }
   };
 
@@ -872,7 +896,7 @@ export default function ManagerDashboardPage() {
                     </button>
                   </CollapsibleTrigger>
                   <div className="border-t border-border px-4 py-3">
-                    <NoLunchCheckbox checked={summary.noLunch} disabled={updateTimeEntry.isPending} onCheckedChange={(checked: boolean) => void handleNoLunchChange(summary, checked)} />
+                    <NoLunchCheckbox checked={summary.noLunch} disabled={lunchUpdatingKey === summary.employeeKey} onCheckedChange={(checked: boolean) => void handleNoLunchChange(summary, checked)} />
                   </div>
                   <CollapsibleContent>
                     <div className="space-y-3 border-t border-border p-4">

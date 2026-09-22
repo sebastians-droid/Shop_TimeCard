@@ -44,9 +44,9 @@ export function stripNoLunchMarker(notes?: string): string {
     .trim();
 }
 
-export function applyNoLunchMarker(notes: string | undefined, noLunch: boolean): string | undefined {
+export function applyNoLunchMarker(notes: string | undefined, noLunch: boolean): string {
   const cleaned = stripNoLunchMarker(notes);
-  if (!noLunch) return cleaned || undefined;
+  if (!noLunch) return cleaned;
   return cleaned ? `${NO_LUNCH_MARKER} ${cleaned}` : NO_LUNCH_MARKER;
 }
 

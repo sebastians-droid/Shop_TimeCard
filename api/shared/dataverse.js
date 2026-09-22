@@ -251,7 +251,10 @@ function timeEntryPayload(record, { isCreate }) {
   if (record.clockOut !== undefined) payload.swank_clockout = record.clockOut || null;
   if (record.hours !== undefined) payload.swank_hours = record.hours;
   if (record.jobNumber !== undefined) payload.swank_jobnumber = record.jobNumber || null;
-  if (record.notes !== undefined) payload.swank_notes = record.notes || null;
+  if (record.notes !== undefined) {
+    const notes = typeof record.notes === 'string' ? record.notes.trim() : '';
+    payload.swank_notes = notes || null;
+  }
   if (record.workDate !== undefined) payload.swank_workdate = record.workDate || null;
   if (record.assetDivision !== undefined) payload.swank_assetdivision = record.assetDivision;
   if (record.division !== undefined) payload.crcce_division = record.division;
