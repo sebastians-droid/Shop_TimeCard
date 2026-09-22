@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react';
-import { addDays, addWeeks, endOfWeek, format, startOfDay, startOfWeek } from 'date-fns';
+import { addDays, addHours, addWeeks, endOfWeek, format, startOfDay, startOfWeek } from 'date-fns';
 import { CalendarIcon, Check, ChevronDown, ChevronLeft, ChevronRight, Download, LockKeyhole, Pencil, Plus, RefreshCw, Search, ShieldCheck, Trash2, Users, X } from 'lucide-react';
 import { useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
@@ -13,6 +13,7 @@ import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/component
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { useAllEquipmentAssets, useCreateShopTimeEntry, useDeleteShopTimeEntry, useShopEmployeeList, useShopTimeEntryList, useUpdateShopTimeEntry } from '@/hooks/use-shop-data';
 import type { EquipmentAsset } from '@/models/equipment-asset';
 import { mapShopEmployees, type AppShopEmployee } from '@/lib/shop-employees';
@@ -28,9 +29,11 @@ import {
   lunchCsvLabel,
   stripNoLunchMarker,
 } from '@/lib/time-rules';
-import { ShopTimeEntryPTOTypeKeyToLabel, type ShopTimeEntry, type ShopTimeEntryPTOTimeKey } from '@/models/shop-time-entry';
+import { ShopTimeEntryPTOTypeKeyToLabel, type ShopTimeEntry, type ShopTimeEntryPTOTimeKey, type ShopTimeEntryPTOTypeKey } from '@/models/shop-time-entry';
 import { NoLunchCheckbox } from '@/components/no-lunch-checkbox';
 import { useUser } from '@/hooks/use-user';
+
+type PtoHours = 4 | 8;
 
 type EditableEntry = {
   assetId: string;
@@ -43,6 +46,12 @@ type EditableEntry = {
 
 type NewEntryDraft = EditableEntry & {
   employeeId: string;
+};
+
+type PtoDraft = {
+  employeeId: string;
+  hours: PtoHours;
+  type: ShopTimeEntryPTOTypeKey | '';
 };
 
 type EmployeeDailySummary = {
@@ -136,6 +145,12 @@ const combineSelectedDateAndTime = (day: Date, timeValue: string) => {
   return date.toISOString();
 };
 
+const getPtoClockInIso = (date: Date) => {
+  const ptoDate = startOfDay(date);
+  ptoDate.setHours(8, 0, 0, 0);
+  return ptoDate.toISOString();
+};
+
 const emptyEntryDraft = (employeeId = ''): NewEntryDraft => ({
   employeeId,
   assetId: '',
@@ -144,6 +159,12 @@ const emptyEntryDraft = (employeeId = ''): NewEntryDraft => ({
   jobNumber: '',
   clockInTime: '',
   clockOutTime: '',
+});
+
+const emptyPtoDraft = (employeeId = ''): PtoDraft => ({
+  employeeId,
+  hours: 8,
+  type: '',
 });
 
 const getEntryWorkDateKey = (entry: ShopTimeEntry) => (entry.clockIn ? format(new Date(entry.clockIn), 'yyyy-MM-dd') : 'No clock-in date');
@@ -215,6 +236,9 @@ export default function ManagerDashboardPage() {
   const [newEntryDraft, setNewEntryDraft] = useState<NewEntryDraft | null>(null);
   const [showMissedEntryForm, setShowMissedEntryForm] = useState(false);
   const [missedEmployeeSearch, setMissedEmployeeSearch] = useState('');
+  const [showPtoForm, setShowPtoForm] = useState(false);
+  const [ptoDraft, setPtoDraft] = useState<PtoDraft | null>(null);
+  const [ptoEmployeeSearch, setPtoEmployeeSearch] = useState('');
   const [lunchUpdatingKey, setLunchUpdatingKey] = useState('');
   const queryClient = useQueryClient();
   const { data: user, isLoading: userLoading } = useUser();
@@ -305,6 +329,7 @@ export default function ManagerDashboardPage() {
 
   const handleStartEdit = (entry: ShopTimeEntry) => {
     handleCancelAddEntry();
+    handleCancelPto();
     setEditingEntryId(entry.id);
     setEditValues({
       assetId: entry.asset?.id ?? '',
@@ -328,8 +353,15 @@ export default function ManagerDashboardPage() {
     setMissedEmployeeSearch('');
   };
 
+  const handleCancelPto = () => {
+    setShowPtoForm(false);
+    setPtoDraft(null);
+    setPtoEmployeeSearch('');
+  };
+
   const handleStartAddEntry = (summary: EmployeeDailySummary) => {
     handleCancelEdit();
+    handleCancelPto();
     setShowMissedEntryForm(false);
     setMissedEmployeeSearch('');
     setAddingForEmployeeKey(summary.employeeKey);
@@ -341,9 +373,63 @@ export default function ManagerDashboardPage() {
 
   const handleStartMissedEntry = () => {
     handleCancelEdit();
+    handleCancelPto();
     setAddingForEmployeeKey('');
     setShowMissedEntryForm(true);
     setNewEntryDraft(emptyEntryDraft());
+  };
+
+  const handleStartAddPto = (employeeId = '') => {
+    handleCancelEdit();
+    handleCancelAddEntry();
+    setShowPtoForm(true);
+    setPtoDraft(emptyPtoDraft(employeeId));
+    setPtoEmployeeSearch(employees.find((row: AppShopEmployee) => row.id === employeeId)?.employeeName ?? '');
+    if (employeeId) {
+      setOpenEmployeeKeys((currentKeys: string[]) =>
+        currentKeys.includes(employeeId) ? currentKeys : [...currentKeys, employeeId],
+      );
+    }
+  };
+
+  const handleSavePto = async () => {
+    if (!ptoDraft) return;
+    const employee = employees.find((row: AppShopEmployee) => row.id === ptoDraft.employeeId);
+    if (!employee) {
+      toast.error('Choose an employee for this PTO.');
+      return;
+    }
+    if (!ptoDraft.type) {
+      toast.error('Choose a PTO type.');
+      return;
+    }
+
+    const clockIn = getPtoClockInIso(selectedDate);
+    const clockOut = addHours(new Date(clockIn), ptoDraft.hours).toISOString();
+    const dayKey = format(selectedDate, 'yyyy-MM-dd');
+    const typeLabel = ShopTimeEntryPTOTypeKeyToLabel[ptoDraft.type];
+
+    try {
+      await createTimeEntry.mutateAsync({
+        timeEntry: `${employee.employeeName} - PTO`,
+        pTOTimeKey: PTO_TIME_KEY_BY_HOURS[ptoDraft.hours],
+        pTOTypeKey: ptoDraft.type,
+        employee: { id: employee.id, autoNumber: employee.autoNumber },
+        jobNumber: 'PTO',
+        clockIn,
+        clockOut,
+        hours: ptoDraft.hours,
+        workDate: dayKey,
+        notes: `${ptoDraft.hours} hours ${typeLabel} PTO submitted for ${format(selectedDate, 'MMM d, yyyy')}.`,
+      });
+      handleCancelPto();
+      setOpenEmployeeKeys((currentKeys: string[]) =>
+        currentKeys.includes(employee.id) ? currentKeys : [...currentKeys, employee.id],
+      );
+      toast.success(`${ptoDraft.hours} hours ${typeLabel} PTO added for ${employee.employeeName} on ${format(selectedDate, 'MMM d')}.`);
+    } catch (error: unknown) {
+      toast.error(error instanceof Error ? error.message : 'Unable to add PTO.');
+    }
   };
 
   const handleSaveNewEntry = async () => {
@@ -750,7 +836,7 @@ export default function ManagerDashboardPage() {
           <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
             <div>
               <CardTitle className="flex items-center gap-2 text-xl"><Users className="h-5 w-5" /> Employee timecards</CardTitle>
-              <p className="mt-1 text-sm text-muted-foreground">{format(selectedDate, 'EEEE, MMM d')} · edit times, add missed asset punches, or mark No lunch.</p>
+              <p className="mt-1 text-sm text-muted-foreground">{format(selectedDate, 'EEEE, MMM d')} · edit times, add missed punches or PTO, or mark No lunch.</p>
             </div>
             <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
               <Popover>
@@ -770,6 +856,7 @@ export default function ManagerDashboardPage() {
                         setOpenEmployeeKeys([]);
                         handleCancelEdit();
                         handleCancelAddEntry();
+                        handleCancelPto();
                       }
                     }}
                     initialFocus
@@ -783,11 +870,88 @@ export default function ManagerDashboardPage() {
               <Button type="button" variant="secondary" onClick={handleStartMissedEntry} className="w-full sm:w-auto">
                 <Plus className="mr-2 h-4 w-4" /> Add missed entry
               </Button>
+              <Button type="button" variant="secondary" onClick={() => handleStartAddPto()} className="w-full sm:w-auto">
+                <Plus className="mr-2 h-4 w-4" /> Add PTO
+              </Button>
             </div>
           </div>
         </CardHeader>
         <CardContent className="space-y-4">
           {employeesLoading || entriesLoading || assetsLoading ? <p className="text-sm text-muted-foreground">Loading manager dashboard...</p> : null}
+          {showPtoForm && ptoDraft ? (
+            <div className="space-y-4 rounded-lg border border-dashed border-border bg-muted p-4 text-muted-foreground">
+              <div className="flex items-center justify-between gap-3">
+                <div>
+                  <p className="font-medium text-foreground">Add PTO</p>
+                  <p className="text-sm">4 or 8 hours of paid time off for {format(selectedDate, 'EEEE, MMM d')}.</p>
+                </div>
+                <Button type="button" size="icon" variant="ghost" aria-label="Cancel PTO" onClick={handleCancelPto}><X className="h-4 w-4" /></Button>
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="pto-employee-search">Employee</Label>
+                <Input
+                  id="pto-employee-search"
+                  className="bg-background"
+                  value={ptoEmployeeSearch || (employees.find((row: AppShopEmployee) => row.id === ptoDraft.employeeId)?.employeeName ?? '')}
+                  onChange={(event: React.ChangeEvent<HTMLInputElement>) => {
+                    setPtoEmployeeSearch(event.target.value);
+                    setPtoDraft({ ...ptoDraft, employeeId: '' });
+                  }}
+                  placeholder="Search shop employees"
+                />
+                {!ptoDraft.employeeId ? (
+                  <div className="max-h-40 overflow-auto rounded-md border border-border bg-background">
+                    {employees
+                      .filter((row: AppShopEmployee) => {
+                        const query = ptoEmployeeSearch.trim().toLowerCase();
+                        return !query || row.employeeName.toLowerCase().includes(query) || String(row.employeeCode).includes(query);
+                      })
+                      .slice(0, 12)
+                      .map((row: AppShopEmployee) => (
+                        <button
+                          key={row.id}
+                          type="button"
+                          className="flex w-full items-center justify-between border-b border-border px-3 py-2 text-left text-sm last:border-b-0 hover:bg-muted"
+                          onClick={() => {
+                            setPtoDraft({ ...ptoDraft, employeeId: row.id });
+                            setPtoEmployeeSearch(row.employeeName);
+                          }}
+                        >
+                          <span className="font-medium text-foreground">{row.employeeName}</span>
+                          <span className="text-muted-foreground">{row.employeeCode}</span>
+                        </button>
+                      ))}
+                  </div>
+                ) : null}
+              </div>
+              <div className="grid gap-4 sm:grid-cols-2">
+                <div className="space-y-2">
+                  <Label htmlFor="manager-pto-type">PTO type</Label>
+                  <Select value={ptoDraft.type || undefined} onValueChange={(value: ShopTimeEntryPTOTypeKey) => setPtoDraft({ ...ptoDraft, type: value })}>
+                    <SelectTrigger id="manager-pto-type" className="w-full bg-background">
+                      <SelectValue placeholder="Select PTO type" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {Object.entries(ShopTimeEntryPTOTypeKeyToLabel).map(([key, label]) => (
+                        <SelectItem key={key} value={key}>{label}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="space-y-2">
+                  <Label>PTO hours</Label>
+                  <div className="grid grid-cols-2 gap-2">
+                    <Button type="button" variant={ptoDraft.hours === 4 ? 'default' : 'outline'} onClick={() => setPtoDraft({ ...ptoDraft, hours: 4 })}>4 hours</Button>
+                    <Button type="button" variant={ptoDraft.hours === 8 ? 'default' : 'outline'} onClick={() => setPtoDraft({ ...ptoDraft, hours: 8 })}>8 hours</Button>
+                  </div>
+                </div>
+              </div>
+              <div className="flex flex-wrap gap-2">
+                <Button type="button" onClick={() => void handleSavePto()} disabled={createTimeEntry.isPending}>Save PTO</Button>
+                <Button type="button" variant="outline" onClick={handleCancelPto}>Cancel</Button>
+              </div>
+            </div>
+          ) : null}
           {showMissedEntryForm && newEntryDraft ? (
             <div className="space-y-4 rounded-lg border border-dashed border-border bg-muted p-4 text-muted-foreground">
               <div className="flex items-center justify-between gap-3">
@@ -876,7 +1040,7 @@ export default function ManagerDashboardPage() {
               </div>
             </div>
           ) : null}
-          {!entriesLoading && employeeSummaries.length === 0 && !showMissedEntryForm ? <p className="rounded-lg bg-muted p-4 text-sm text-muted-foreground">No employees have timecard entries for the selected day. Use Add missed entry if someone forgot to punch.</p> : null}
+          {!entriesLoading && employeeSummaries.length === 0 && !showMissedEntryForm && !showPtoForm ? <p className="rounded-lg bg-muted p-4 text-sm text-muted-foreground">No employees have timecard entries for the selected day. Use Add missed entry or Add PTO if needed.</p> : null}
           {employeeSummaries.map((summary: EmployeeDailySummary) => {
             const isOpen = openEmployeeKeys.includes(summary.employeeKey);
             return (
@@ -1038,9 +1202,14 @@ export default function ManagerDashboardPage() {
                           </div>
                         </div>
                       ) : (
-                        <Button type="button" variant="outline" className="w-full justify-center border-dashed" onClick={() => handleStartAddEntry(summary)}>
-                          <Plus className="mr-2 h-4 w-4" /> Add time entry
-                        </Button>
+                        <div className="grid gap-2 sm:grid-cols-2">
+                          <Button type="button" variant="outline" className="w-full justify-center border-dashed" onClick={() => handleStartAddEntry(summary)}>
+                            <Plus className="mr-2 h-4 w-4" /> Add time entry
+                          </Button>
+                          <Button type="button" variant="outline" className="w-full justify-center border-dashed" onClick={() => handleStartAddPto(summary.employeeKey)}>
+                            <Plus className="mr-2 h-4 w-4" /> Add PTO
+                          </Button>
+                        </div>
                       )}
                     </div>
                   </CollapsibleContent>
