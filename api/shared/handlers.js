@@ -7,6 +7,7 @@ const {
   updateTimeEntry,
   deleteTimeEntry,
 } = require('./dataverse');
+const { issueSpeechToken } = require('./speech');
 const { requireUser, requireManager } = require('./auth');
 
 function json(status, body) {
@@ -68,6 +69,11 @@ async function handleRequest(request) {
     if (method === 'GET' && pathname === '/api/me') {
       const user = requireUser(request);
       return json(200, user);
+    }
+
+    if (method === 'GET' && (pathname === '/api/speech-token' || pathname === '/api/speechToken')) {
+      requireUser(request);
+      return json(200, await issueSpeechToken());
     }
 
     if (method === 'GET' && pathname === '/api/employees') {

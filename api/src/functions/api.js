@@ -37,6 +37,13 @@ app.http('health', {
   handler: azureHandler,
 });
 
+app.http('speechToken', {
+  methods: ['GET'],
+  authLevel: 'anonymous',
+  route: 'speech-token',
+  handler: azureHandler,
+});
+
 app.http('timeEntries', {
   methods: ['GET', 'POST', 'PATCH', 'DELETE'],
   authLevel: 'anonymous',

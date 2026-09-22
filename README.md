@@ -39,10 +39,26 @@ Locally the API skips Microsoft login (`DATAVERSE_LOCAL_SKIP_AUTH`). In Azure, S
    - `DATAVERSE_CLIENT_ID`
    - `DATAVERSE_CLIENT_SECRET`
    - `MANAGER_EMAILS` (comma-separated, used only for the manager dashboard)
+   - `SPEECH_KEY` and `SPEECH_REGION` (Azure Speech resource for voice notes)
+   - `SPEECH_CUSTOM_ENDPOINT_ID` (optional Custom Speech deployment id)
+   - `SPEECH_MAX_SECONDS` (optional, default `30`)
 
 The Dataverse application user needs:
 
 - Read on `swank_shopemployee`, `swank_employee`, and `swank_equipmentasset`
 - Create / Read / Write / Delete on `swank_shoptimeentry`
 
-The Matt Kurth `sawseal_DailySync` app user does **not** currently have those shop-table privileges. Grant them (or create a Shop Timecard app user) in the Power Platform admin center before live punches will work.
+## Voice notes (Azure Speech)
+
+Notes fields on the employee timecard include a **Voice note** button (max 30 seconds). The browser asks the Functions API for a short-lived Speech token so the Speech key never ships to the client.
+
+1. In Azure Portal create an **Speech service** (Cognitive Services / AI Services) in your preferred region (example: `eastus`).
+2. Copy the key and region into SWA app settings (`SPEECH_KEY`, `SPEECH_REGION`), or into local `dataverse.local.json` as `speech_key` / `speech_region`.
+3. (Recommended for the shop) In [Speech Studio](https://speech.microsoft.com/portal) → **Custom speech**:
+   - Create a project in the same region
+   - Upload a small set of shop phrases / labeled audio (asset names, job jargon)
+   - Train and **deploy** a model
+   - Copy the deployment **Endpoint ID** into `SPEECH_CUSTOM_ENDPOINT_ID`
+4. Until a custom model is deployed, leave `SPEECH_CUSTOM_ENDPOINT_ID` blank — the app uses the standard model plus a phrase list of equipment asset names.
+
+Typical cost at ~30 seconds per note stays within or near the free 5 audio hours/month for light shop use.

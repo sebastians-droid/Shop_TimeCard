@@ -12,6 +12,7 @@ import { Label } from '@/components/ui/label';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Textarea } from '@/components/ui/textarea';
+import { VoiceNoteButton } from '@/components/voice-note-button';
 import { useAllEquipmentAssets, useCreateShopTimeEntry, useShopEmployeeList, useShopTimeEntryList, useUpdateShopTimeEntry } from '@/hooks/use-shop-data';
 import type { EquipmentAsset } from '@/models/equipment-asset';
 import { mapShopEmployees, type AppShopEmployee } from '@/lib/shop-employees';
@@ -177,6 +178,19 @@ export default function HomePage() {
   }, [employeeEntries, selectedEmployee, selectedEmployeeId]);
   const employeeActiveEntry = employeeTodayEntries.find((entry: ShopTimeEntry) => !entry.clockOut && !isPtoEntry(entry));
   const todayPay = useMemo(() => getDayPayMinutes(employeeTodayEntries), [employeeTodayEntries]);
+  const voicePhrases = useMemo(
+    () =>
+      [
+        ...assets.map((asset: EquipmentAsset) => asset.asset).filter(Boolean),
+        selectedEmployee?.employeeName,
+        'job',
+        'division',
+        'handoff',
+        'parts',
+        'waiting on parts',
+      ].filter((value): value is string => Boolean(value)),
+    [assets, selectedEmployee?.employeeName],
+  );
 
   const resetEntryForm = () => {
     setSelectedAssetId('');
@@ -475,14 +489,27 @@ export default function HomePage() {
                             </div>
                           </div>
                           <div className="space-y-2">
-                            <Label htmlFor={`edit-notes-${entry.id}`}>Notes</Label>
+                            <div className="flex items-center justify-between gap-2">
+                              <Label htmlFor={`edit-notes-${entry.id}`}>Notes</Label>
+                              <VoiceNoteButton value={editingNotes} onChange={setEditingNotes} phrases={voicePhrases} disabled={updateTimeEntry.isPending} />
+                            </div>
                             <Textarea id={`edit-notes-${entry.id}`} value={editingNotes} onChange={(event: React.ChangeEvent<HTMLTextAreaElement>) => setEditingNotes(event.target.value)} placeholder="Add notes for this time entry" />
                           </div>
                         </div>
                       ) : (
                         <div className="space-y-1"><div className="flex flex-wrap items-center gap-2">{isPtoEntry(entry) ? <Badge variant="secondary">PTO</Badge> : null}{entry.pTOTypeKey ? <Badge variant="outline">{ShopTimeEntryPTOTypeKeyToLabel[entry.pTOTypeKey]}</Badge> : null}<p className="text-sm text-muted-foreground">{isPtoEntry(entry) ? 'Paid time off' : 'Asset'}</p></div><p className="text-lg font-semibold">{getTimeEntryAssetName(entry, assets)}</p><p className="text-sm text-muted-foreground">{isPtoEntry(entry) ? `${getPtoHours(entry) || Math.round(entry.hours ?? 0)} hours submitted` : `Division ${entry.assetDivision ?? '—'} · Job ${getEntryJobNumber(entry) || '—'}`}</p></div>
                       )}
-                      {editingNotesEntryId === entry.id ? <div className="mt-3 space-y-2"><Label htmlFor={`notes-${entry.id}`}>Notes</Label><Textarea id={`notes-${entry.id}`} value={editingNotes} onChange={(event: React.ChangeEvent<HTMLTextAreaElement>) => setEditingNotes(event.target.value)} placeholder="Add notes for this time entry" /></div> : stripNoLunchMarker(entry.notes) && editingEntryId !== entry.id ? <p className="mt-3 rounded-md bg-muted p-3 text-sm text-muted-foreground">{stripNoLunchMarker(entry.notes)}</p> : null}
+                      {editingNotesEntryId === entry.id ? (
+                        <div className="mt-3 space-y-2">
+                          <div className="flex items-center justify-between gap-2">
+                            <Label htmlFor={`notes-${entry.id}`}>Notes</Label>
+                            <VoiceNoteButton value={editingNotes} onChange={setEditingNotes} phrases={voicePhrases} disabled={updateTimeEntry.isPending} />
+                          </div>
+                          <Textarea id={`notes-${entry.id}`} value={editingNotes} onChange={(event: React.ChangeEvent<HTMLTextAreaElement>) => setEditingNotes(event.target.value)} placeholder="Add notes for this time entry" />
+                        </div>
+                      ) : stripNoLunchMarker(entry.notes) && editingEntryId !== entry.id ? (
+                        <p className="mt-3 rounded-md bg-muted p-3 text-sm text-muted-foreground">{stripNoLunchMarker(entry.notes)}</p>
+                      ) : null}
                     </div>
                     <div className="flex flex-col gap-2 sm:items-end">
                       <div className="space-y-2 text-left sm:text-right"><div><p className="text-sm text-muted-foreground">Clock in</p><p className="text-lg font-semibold">{entry.clockIn ? format(new Date(entry.clockIn), 'p') : '—'}</p></div><div><p className="text-sm text-muted-foreground">Clock out</p><p className="text-lg font-semibold">{entry.clockOut ? format(new Date(entry.clockOut), 'p') : '—'}</p></div><div><p className="text-xs text-muted-foreground">Duration</p><p className="text-sm font-medium text-foreground">{formatDuration(getEntryPaidMinutes(employeeTodayEntries, entry))}</p></div></div>
@@ -523,7 +550,7 @@ export default function HomePage() {
                   </div>
                 </div>
               ))}
-              {!showAddAsset ? <Button type="button" variant="outline" className="w-full justify-center border-dashed" onClick={() => setShowAddAsset(true)}><Plus className="mr-2 h-4 w-4" /> Add</Button> : <div className="grid gap-4 rounded-lg border border-dashed border-border bg-muted p-4 text-muted-foreground"><div className="flex items-center justify-between gap-3"><p className="font-medium text-foreground">Add asset time</p><Button type="button" size="icon" variant="ghost" aria-label="Cancel add asset" onClick={() => setShowAddAsset(false)}><X className="h-4 w-4" /></Button></div><div className="space-y-2"><Label>Equipment asset</Label><AssetPicker assets={assets} value={selectedAssetId} onChange={(asset: Pick<EquipmentAsset, 'id' | 'asset' | 'divisionCode'> | undefined) => { setSelectedAssetRecord(asset); setSelectedAssetId(asset?.id ?? ''); setDivision(asset?.divisionCode === undefined ? '' : String(asset.divisionCode)); }} currentAsset={selectedAssetRecord} /><p className="text-sm text-muted-foreground">Choose any equipment asset, or leave it blank and enter a division or job number below.</p></div><div className="space-y-2"><Label>Notes</Label><Textarea className="bg-background" value={notes} onChange={(event: React.ChangeEvent<HTMLTextAreaElement>) => setNotes(event.target.value)} placeholder="Optional job notes or handoff details" /></div>{employeeActiveEntry ? <div className="rounded-lg border border-border bg-background p-3 text-muted-foreground"><p className="font-medium text-foreground">Current active asset: {getTimeEntryAssetName(employeeActiveEntry, assets)}</p><p className="text-sm">Starting another asset will clock out this row first.</p></div> : null}<div className="grid gap-4 sm:grid-cols-2"><div className="space-y-2"><Label htmlFor="division">Division (optional)</Label><Input id="division" className="bg-background" value={division} onChange={(event: React.ChangeEvent<HTMLInputElement>) => setDivision(event.target.value)} placeholder="Mapped from asset or enter division" /></div><div className="space-y-2"><Label htmlFor="job-number">Job Number (optional)</Label><Input id="job-number" className="bg-background" value={jobNumber} onChange={(event: React.ChangeEvent<HTMLInputElement>) => setJobNumber(event.target.value)} placeholder="Enter job number" /></div></div><Button className="h-12" type="button" onClick={handleClockIn} disabled={assetsLoading || createTimeEntry.isPending || updateTimeEntry.isPending}>Clock in</Button></div>}
+              {!showAddAsset ? <Button type="button" variant="outline" className="w-full justify-center border-dashed" onClick={() => setShowAddAsset(true)}><Plus className="mr-2 h-4 w-4" /> Add</Button> : <div className="grid gap-4 rounded-lg border border-dashed border-border bg-muted p-4 text-muted-foreground"><div className="flex items-center justify-between gap-3"><p className="font-medium text-foreground">Add asset time</p><Button type="button" size="icon" variant="ghost" aria-label="Cancel add asset" onClick={() => setShowAddAsset(false)}><X className="h-4 w-4" /></Button></div><div className="space-y-2"><Label>Equipment asset</Label><AssetPicker assets={assets} value={selectedAssetId} onChange={(asset: Pick<EquipmentAsset, 'id' | 'asset' | 'divisionCode'> | undefined) => { setSelectedAssetRecord(asset); setSelectedAssetId(asset?.id ?? ''); setDivision(asset?.divisionCode === undefined ? '' : String(asset.divisionCode)); }} currentAsset={selectedAssetRecord} /><p className="text-sm text-muted-foreground">Choose any equipment asset, or leave it blank and enter a division or job number below.</p></div><div className="space-y-2"><div className="flex items-center justify-between gap-2"><Label>Notes</Label><VoiceNoteButton value={notes} onChange={setNotes} phrases={voicePhrases} disabled={createTimeEntry.isPending || updateTimeEntry.isPending} /></div><Textarea className="bg-background" value={notes} onChange={(event: React.ChangeEvent<HTMLTextAreaElement>) => setNotes(event.target.value)} placeholder="Optional job notes or handoff details" /></div>{employeeActiveEntry ? <div className="rounded-lg border border-border bg-background p-3 text-muted-foreground"><p className="font-medium text-foreground">Current active asset: {getTimeEntryAssetName(employeeActiveEntry, assets)}</p><p className="text-sm">Starting another asset will clock out this row first.</p></div> : null}<div className="grid gap-4 sm:grid-cols-2"><div className="space-y-2"><Label htmlFor="division">Division (optional)</Label><Input id="division" className="bg-background" value={division} onChange={(event: React.ChangeEvent<HTMLInputElement>) => setDivision(event.target.value)} placeholder="Mapped from asset or enter division" /></div><div className="space-y-2"><Label htmlFor="job-number">Job Number (optional)</Label><Input id="job-number" className="bg-background" value={jobNumber} onChange={(event: React.ChangeEvent<HTMLInputElement>) => setJobNumber(event.target.value)} placeholder="Enter job number" /></div></div><Button className="h-12" type="button" onClick={handleClockIn} disabled={assetsLoading || createTimeEntry.isPending || updateTimeEntry.isPending}>Clock in</Button></div>}
             </CardContent>
           </Card>
 
