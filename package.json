@@ -5,6 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "concurrently -n api,web -c blue,green \"node api/local-server.js\" \"vite\"",
+    "demo": "npm run dev",
     "dev:web": "vite",
     "dev:api": "node api/local-server.js",
     "build": "tsc -p tsconfig.app.json --noEmit && vite build",

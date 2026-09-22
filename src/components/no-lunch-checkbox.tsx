@@ -32,7 +32,7 @@ export function NoLunchCheckbox({ checked, disabled, onCheckedChange }: NoLunchC
       <span>
         <span className="block text-lg font-semibold text-foreground">No lunch</span>
         <span className="mt-1 block text-sm text-muted-foreground">
-          Check this if no 30-minute lunch was taken. Otherwise 0.5 hours is deducted from today’s paid time.
+          Click to skip the 30-minute lunch deduction for this employee today. Leave it off to deduct 0.5 hours.
         </span>
       </span>
     </button>

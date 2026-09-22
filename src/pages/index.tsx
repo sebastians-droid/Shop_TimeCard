@@ -14,7 +14,6 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Textarea } from '@/components/ui/textarea';
 import { useAllEquipmentAssets, useCreateShopTimeEntry, useShopEmployeeList, useShopTimeEntryList, useUpdateShopTimeEntry } from '@/hooks/use-shop-data';
 import type { EquipmentAsset } from '@/models/equipment-asset';
-import { NoLunchCheckbox } from '@/components/no-lunch-checkbox';
 import { mapShopEmployees, type AppShopEmployee } from '@/lib/shop-employees';
 import {
   applyNoLunchMarker,
@@ -23,6 +22,7 @@ import {
   getEntryPaidMinutes,
   getPtoHours,
   isPtoEntry,
+  notesHaveNoLunch,
   roundClockInUpToQuarterHour,
   stripNoLunchMarker,
 } from '@/lib/time-rules';
@@ -152,8 +152,6 @@ export default function HomePage() {
   const [editingNotes, setEditingNotes] = useState<string>('');
   const returnToSignInTimer = useRef<number | undefined>(undefined);
   const [clockInConfirmation, setClockInConfirmation] = useState<ClockInConfirmation | undefined>(undefined);
-  const [noLunchDraft, setNoLunchDraft] = useState(false);
-
 
   const { data: shopEmployees = [], isLoading: employeesLoading, isError: employeesFailed, error: employeesError, refetch: refetchEmployees } = useShopEmployeeList();
   const employees = useMemo(() => mapShopEmployees(shopEmployees), [shopEmployees]);
@@ -177,8 +175,6 @@ export default function HomePage() {
   }, [employeeEntries, selectedEmployee, selectedEmployeeId]);
   const employeeActiveEntry = employeeTodayEntries.find((entry: ShopTimeEntry) => !entry.clockOut && !isPtoEntry(entry));
   const todayPay = useMemo(() => getDayPayMinutes(employeeTodayEntries), [employeeTodayEntries]);
-  const noLunch = employeeTodayEntries.some((entry: ShopTimeEntry) => !isPtoEntry(entry)) ? todayPay.noLunch : noLunchDraft;
-
 
   const resetEntryForm = () => {
     setSelectedAssetId('');
@@ -199,7 +195,6 @@ export default function HomePage() {
       return;
     }
     setSelectedEmployeeId(matchedEmployee.id);
-    setNoLunchDraft(false);
     resetEntryForm();
     toast.success(`Verified ${matchedEmployee.employeeName}.`);
   };
@@ -212,7 +207,6 @@ export default function HomePage() {
     setClockInConfirmation(undefined);
     setEmployeeCode('');
     setSelectedEmployeeId('');
-    setNoLunchDraft(false);
     resetEntryForm();
     setShowPtoForm(false);
   };
@@ -223,26 +217,6 @@ export default function HomePage() {
       toast.success('Equipment assets and shop time entries reloaded.');
     } catch (error: unknown) {
       toast.error(error instanceof Error ? error.message : 'Unable to reload table data.');
-    }
-  };
-
-  const handleNoLunchChange = async (checked: boolean) => {
-    setNoLunchDraft(checked);
-    const laborEntries = employeeTodayEntries.filter((entry: ShopTimeEntry) => !isPtoEntry(entry));
-    if (laborEntries.length === 0) return;
-    try {
-      await Promise.all(
-        laborEntries.map((entry: ShopTimeEntry) =>
-          updateTimeEntry.mutateAsync({
-            id: entry.id,
-            changedFields: { notes: applyNoLunchMarker(entry.notes, checked) },
-          }),
-        ),
-      );
-      toast.success(checked ? 'No lunch saved for today.' : '30-minute lunch will be deducted today.');
-    } catch (error: unknown) {
-      setNoLunchDraft(!checked);
-      toast.error(error instanceof Error ? error.message : 'Unable to update lunch setting.');
     }
   };
 
@@ -286,7 +260,7 @@ export default function HomePage() {
         jobNumber: manualJobNumber || undefined,
         clockIn,
         workDate: getWorkDate(clockIn),
-        notes: applyNoLunchMarker(notes.trim() || undefined, noLunch),
+        notes: applyNoLunchMarker(notes.trim() || undefined, todayPay.noLunch),
       });
       resetEntryForm();
       setClockInConfirmation({
@@ -366,7 +340,7 @@ export default function HomePage() {
   const handleSaveEditAsset = async (entry: ShopTimeEntry) => {
     const newAsset = editingAssetId ? editingAssetRecord ?? assets.find((asset: EquipmentAsset) => asset.id === editingAssetId) : undefined;
     try {
-      await updateTimeEntry.mutateAsync({ id: entry.id, changedFields: { timeEntry: `${entry.employee ?? selectedEmployee?.employeeName ?? 'Employee'} - ${[newAsset ? getAssetDisplayName(newAsset) : getTimeEntryAssetName(entry, assets), getEntryJobNumber(entry) ? `Job ${getEntryJobNumber(entry)}` : ''].filter((value: string) => value).join(' · ')}`, asset: newAsset ? { id: newAsset.id, asset: getAssetDisplayName(newAsset) } : entry.asset, assetDivision: newAsset ? newAsset.divisionCode : entry.assetDivision, jobNumber: getEntryJobNumber(entry) || undefined, notes: applyNoLunchMarker(editingNotes.trim() || undefined, noLunch) } });
+      await updateTimeEntry.mutateAsync({ id: entry.id, changedFields: { timeEntry: `${entry.employee ?? selectedEmployee?.employeeName ?? 'Employee'} - ${[newAsset ? getAssetDisplayName(newAsset) : getTimeEntryAssetName(entry, assets), getEntryJobNumber(entry) ? `Job ${getEntryJobNumber(entry)}` : ''].filter((value: string) => value).join(' · ')}`, asset: newAsset ? { id: newAsset.id, asset: getAssetDisplayName(newAsset) } : entry.asset, assetDivision: newAsset ? newAsset.divisionCode : entry.assetDivision, jobNumber: getEntryJobNumber(entry) || undefined, notes: applyNoLunchMarker(editingNotes.trim() || undefined, notesHaveNoLunch(entry.notes) || todayPay.noLunch) } });
       setEditingEntryId('');
       setEditingAssetId('');
       setEditingAssetRecord(undefined);
@@ -379,7 +353,7 @@ export default function HomePage() {
   };
   const handleSaveEditNotes = async (entry: ShopTimeEntry) => {
     try {
-      await updateTimeEntry.mutateAsync({ id: entry.id, changedFields: { notes: applyNoLunchMarker(editingNotes.trim() || undefined, noLunch) } });
+      await updateTimeEntry.mutateAsync({ id: entry.id, changedFields: { notes: applyNoLunchMarker(editingNotes.trim() || undefined, notesHaveNoLunch(entry.notes) || todayPay.noLunch) } });
       setEditingNotesEntryId('');
       setEditingNotes('');
       toast.success('Notes updated.');
@@ -428,9 +402,6 @@ export default function HomePage() {
         <section className="grid gap-6">
           <Card className="bg-card text-card-foreground shadow-sm">
             <CardHeader><div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between"><div><CardTitle className="text-xl">{selectedEmployee.employeeName}</CardTitle><p className="mt-1 text-sm text-muted-foreground">Employee {selectedEmployee.employeeCode} · {format(new Date(), 'EEEE, MMM d')}</p></div><div className="flex flex-wrap gap-2"><Button type="button" variant="outline" onClick={() => void handleReloadTables()} disabled={assetsLoading || entriesLoading}><RefreshCw className="mr-2 h-4 w-4" /> Reload tables</Button><Button type="button" variant="outline" onClick={handleResetEmployee}>Change employee</Button></div></div></CardHeader>
-            <CardContent>
-              <NoLunchCheckbox checked={noLunch} disabled={updateTimeEntry.isPending} onCheckedChange={(checked: boolean) => void handleNoLunchChange(checked)} />
-            </CardContent>
           </Card>
 
 

@@ -590,7 +590,7 @@ export default function ManagerDashboardPage() {
           <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
             <div>
               <CardTitle className="flex items-center gap-2 text-xl"><Users className="h-5 w-5" /> Employee timecards</CardTitle>
-              <p className="mt-1 text-sm text-muted-foreground">{format(selectedDate, 'EEEE, MMM d')} · collapsed by employee.</p>
+              <p className="mt-1 text-sm text-muted-foreground">{format(selectedDate, 'EEEE, MMM d')} · mark No lunch on a daily card, then expand to edit punches.</p>
             </div>
             <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
               <Popover>
@@ -643,9 +643,11 @@ export default function ManagerDashboardPage() {
                       </div>
                     </button>
                   </CollapsibleTrigger>
+                  <div className="border-t border-border px-4 py-3">
+                    <NoLunchCheckbox checked={summary.noLunch} disabled={updateTimeEntry.isPending} onCheckedChange={(checked: boolean) => void handleNoLunchChange(summary, checked)} />
+                  </div>
                   <CollapsibleContent>
                     <div className="space-y-3 border-t border-border p-4">
-                      <NoLunchCheckbox checked={summary.noLunch} disabled={updateTimeEntry.isPending} onCheckedChange={(checked: boolean) => void handleNoLunchChange(summary, checked)} />
                       {summary.entries.map((entry: ShopTimeEntry) => {
                         const isEditing = editingEntryId === entry.id;
                         return (
