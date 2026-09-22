@@ -304,7 +304,23 @@ async function listTimeEntries() {
   return rows.map(mapTimeEntry);
 }
 
+async function ensureShopEmployeeDisplayName(shopEmployeeId) {
+  if (!shopEmployeeId) return;
+  try {
+    const row = await dataverseFetch(
+      'GET',
+      `/swank_shopemployees(${shopEmployeeId})?$select=swank_autonumber&$expand=swank_Employee($select=swank_name)`,
+    );
+    const name = row.swank_Employee?.swank_name;
+    if (!name || row.swank_autonumber) return;
+    await dataverseFetch('PATCH', `/swank_shopemployees(${shopEmployeeId})`, { swank_autonumber: name });
+  } catch {
+    // Clock-in should still succeed if the display name cannot be written.
+  }
+}
+
 async function createTimeEntry(record) {
+  await ensureShopEmployeeDisplayName(record.employee?.id);
   const created = await dataverseFetch(
     'POST',
     '/swank_shoptimeentries',
