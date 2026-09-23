@@ -2,6 +2,12 @@ const {
   diagnose,
   listEmployees,
   listAssets,
+  createAsset,
+  updateAsset,
+  deactivateAsset,
+  createShopEmployee,
+  updateShopEmployee,
+  deactivateShopEmployee,
   listTimeEntries,
   createTimeEntry,
   updateTimeEntry,
@@ -82,6 +88,44 @@ async function handleRequest(request) {
 
     if (method === 'GET' && pathname === '/api/assets') {
       return json(200, { assets: await listAssets() });
+    }
+
+    if (method === 'POST' && pathname === '/api/assets') {
+      requireManager(request);
+      const record = await readJson(request);
+      return json(201, await createAsset(record));
+    }
+
+    const assetMatch = pathname.match(/^\/api\/assets\/([0-9a-f-]{36})$/i);
+    if (assetMatch && method === 'PATCH') {
+      requireManager(request);
+      const record = await readJson(request);
+      return json(200, await updateAsset(assetMatch[1], record));
+    }
+
+    if (assetMatch && method === 'DELETE') {
+      requireManager(request);
+      await deactivateAsset(assetMatch[1]);
+      return json(204, {});
+    }
+
+    if (method === 'POST' && pathname === '/api/employees') {
+      requireManager(request);
+      const record = await readJson(request);
+      return json(201, await createShopEmployee(record));
+    }
+
+    const employeeMatch = pathname.match(/^\/api\/employees\/([0-9a-f-]{36})$/i);
+    if (employeeMatch && method === 'PATCH') {
+      requireManager(request);
+      const record = await readJson(request);
+      return json(200, await updateShopEmployee(employeeMatch[1], record));
+    }
+
+    if (employeeMatch && method === 'DELETE') {
+      requireManager(request);
+      await deactivateShopEmployee(employeeMatch[1]);
+      return json(204, {});
     }
 
     if (method === 'GET' && (pathname === '/api/time-entries' || pathname === '/api/timeEntries')) {

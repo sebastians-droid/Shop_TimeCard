@@ -125,6 +125,8 @@ export async function buildPayrollWorkbookBlob(data: PayrollWeekExport): Promise
     { width: 28 },
   ];
 
+  const RT_THRESHOLD = 8;
+
   const detailHeaders = [
     'Employee',
     'Employee number',
@@ -132,6 +134,8 @@ export async function buildPayrollWorkbookBlob(data: PayrollWeekExport): Promise
     'Punch in',
     'Punch out',
     'Hours',
+    'RT',
+    'OT',
     'Lunch',
     'PTO time',
     'PTO type',
@@ -140,7 +144,6 @@ export async function buildPayrollWorkbookBlob(data: PayrollWeekExport): Promise
     'Job number',
     'Pay type',
     'Status',
-    'Notes',
   ];
 
   data.employees.forEach((employee) => {
@@ -151,7 +154,33 @@ export async function buildPayrollWorkbookBlob(data: PayrollWeekExport): Promise
     const sheet = workbook.addWorksheet(sheetName, { views: [{ state: 'frozen', ySplit: 1 }] });
     const header = sheet.addRow(detailHeaders);
     styleHeader(header);
+
+    const rowsByDay = new Map<string, PayrollDetailRow[]>();
+    for (const detail of employee.rows) {
+      const dayRows = rowsByDay.get(detail.workDate) ?? [];
+      dayRows.push(detail);
+      rowsByDay.set(detail.workDate, dayRows);
+    }
+
+    const rtOtMap = new Map<PayrollDetailRow, { rt: number; ot: number }>();
+    for (const dayRows of rowsByDay.values()) {
+      let accumulated = 0;
+      for (const detail of dayRows) {
+        const hours = detail.hours;
+        if (hours <= 0 || detail.ptoTime) {
+          rtOtMap.set(detail, { rt: 0, ot: 0 });
+          continue;
+        }
+        const rtRemaining = Math.max(0, RT_THRESHOLD - accumulated);
+        const rt = Math.min(hours, rtRemaining);
+        const ot = Math.max(0, hours - rt);
+        rtOtMap.set(detail, { rt, ot });
+        accumulated += hours;
+      }
+    }
+
     employee.rows.forEach((detail) => {
+      const { rt, ot } = rtOtMap.get(detail) ?? { rt: 0, ot: 0 };
       const row = sheet.addRow([
         employee.name,
         employee.number,
@@ -159,6 +188,8 @@ export async function buildPayrollWorkbookBlob(data: PayrollWeekExport): Promise
         detail.punchIn,
         detail.punchOut,
         detail.hours,
+        rt > 0 ? rt : '',
+        ot > 0 ? ot : '',
         detail.lunch,
         detail.ptoTime,
         detail.ptoType,
@@ -167,14 +198,19 @@ export async function buildPayrollWorkbookBlob(data: PayrollWeekExport): Promise
         detail.jobNumber,
         detail.payType,
         detail.status,
-        detail.notes,
       ]);
       row.getCell(6).numFmt = '0.00';
+      if (rt > 0) row.getCell(7).numFmt = '0.00';
+      if (ot > 0) row.getCell(8).numFmt = '0.00';
     });
     if (employee.rows.length > 0) {
-      const total = sheet.addRow(['', '', '', '', 'Employee week total', hoursNumber(employee.weekHours), '', '', '', '', '', '', '', '', '']);
+      const weekRt = [...rtOtMap.values()].reduce((sum, v) => sum + v.rt, 0);
+      const weekOt = [...rtOtMap.values()].reduce((sum, v) => sum + v.ot, 0);
+      const total = sheet.addRow(['', '', '', '', 'Employee week total', hoursNumber(employee.weekHours), weekRt > 0 ? Math.round(weekRt * 100) / 100 : '', weekOt > 0 ? Math.round(weekOt * 100) / 100 : '', '', '', '', '', '', '', '', '']);
       total.font = { bold: true };
       total.getCell(6).numFmt = '0.00';
+      if (weekRt > 0) total.getCell(7).numFmt = '0.00';
+      if (weekOt > 0) total.getCell(8).numFmt = '0.00';
     }
     sheet.columns = [
       { width: 24 },
@@ -182,6 +218,8 @@ export async function buildPayrollWorkbookBlob(data: PayrollWeekExport): Promise
       { width: 12 },
       { width: 20 },
       { width: 20 },
+      { width: 10 },
+      { width: 10 },
       { width: 10 },
       { width: 22 },
       { width: 12 },
@@ -191,7 +229,6 @@ export async function buildPayrollWorkbookBlob(data: PayrollWeekExport): Promise
       { width: 14 },
       { width: 16 },
       { width: 12 },
-      { width: 36 },
     ];
   });
 

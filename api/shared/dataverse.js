@@ -12,10 +12,12 @@ const PTO_VALUE_TO_TIME = {
 const PTO_TYPE_TO_VALUE = {
   Personal: 290180000,
   Vacation: 290180001,
+  Holiday: 290180002,
 };
 const PTO_VALUE_TO_TYPE = {
   290180000: 'Personal',
   290180001: 'Vacation',
+  290180002: 'Holiday',
 };
 const PAY_TYPE_TO_VALUE = {
   JR: 290180000,
@@ -26,6 +28,17 @@ const PAY_VALUE_TO_TYPE = {
   290180000: 'JR',
   290180001: 'SR',
   290180002: 'DoubleTime',
+};
+
+const PTO_APPROVAL_TO_VALUE = {
+  Pending: 290180000,
+  Approved: 290180001,
+  Denied: 290180002,
+};
+const PTO_APPROVAL_VALUE_TO_KEY = {
+  290180000: 'Pending',
+  290180001: 'Approved',
+  290180002: 'Denied',
 };
 
 let cachedToken = { value: '', expiresAt: 0 };
@@ -246,7 +259,9 @@ function mapTimeEntry(row) {
     hours: toNumber(row.swank_hours),
     jobNumber: row.swank_jobnumber || undefined,
     notes: row.swank_notes || undefined,
+    onCall: row.swank_oncall === true,
     payTypeKey: PAY_VALUE_TO_TYPE[row.swank_paytype] || undefined,
+    ptoApproval: PTO_APPROVAL_VALUE_TO_KEY[row.swank_ptoapproval] || undefined,
     pTOTimeKey: PTO_VALUE_TO_TIME[row.swank_ptotime],
     pTOTypeKey: PTO_VALUE_TO_TYPE[row.swank_ptotype],
     workDate: row.swank_workdate || undefined,
@@ -269,6 +284,10 @@ function timeEntryPayload(record, { isCreate }) {
   if (record.workDate !== undefined) payload.swank_workdate = record.workDate || null;
   if (record.assetDivision !== undefined) payload.swank_assetdivision = record.assetDivision;
   if (record.division !== undefined) payload.crcce_division = record.division;
+  if (record.onCall !== undefined) payload.swank_oncall = Boolean(record.onCall);
+  if (record.ptoApproval !== undefined) {
+    payload.swank_ptoapproval = PTO_APPROVAL_TO_VALUE[record.ptoApproval] ?? null;
+  }
   if (record.pTOTimeKey !== undefined) {
     payload.swank_ptotime = PTO_TIME_TO_VALUE[record.pTOTimeKey] ?? null;
   }
@@ -316,11 +335,63 @@ async function listAssets() {
   return rows.map(mapAsset).filter((row) => row.id && row.asset);
 }
 
+async function createAsset(record) {
+  const payload = {};
+  if (record.asset) payload.swank_assetidentifier = record.asset;
+  if (record.assetDetail) payload.swank_assetdetails = record.assetDetail;
+  if (record.divisionCode !== undefined) payload.swank_divisioncode = record.divisionCode;
+  if (record.divisionPicklist !== undefined) payload.swank_divisionname = record.divisionPicklist;
+  const created = await dataverseFetch('POST', '/swank_equipmentassets', payload);
+  return mapAsset(created);
+}
+
+async function updateAsset(id, record) {
+  const payload = {};
+  if (record.asset !== undefined) payload.swank_assetidentifier = record.asset;
+  if (record.assetDetail !== undefined) payload.swank_assetdetails = record.assetDetail || null;
+  if (record.divisionCode !== undefined) payload.swank_divisioncode = record.divisionCode;
+  if (record.divisionPicklist !== undefined) payload.swank_divisionname = record.divisionPicklist;
+  const updated = await dataverseFetch('PATCH', `/swank_equipmentassets(${id})`, payload);
+  return mapAsset(updated);
+}
+
+async function deactivateAsset(id) {
+  await dataverseFetch('PATCH', `/swank_equipmentassets(${id})`, { statecode: 1, statuscode: 2 });
+}
+
 async function listTimeEntries() {
   const rows = await listAll(
-    '/swank_shoptimeentries?$select=swank_shoptimeentryid,swank_timeentry,swank_clockin,swank_clockout,swank_hours,swank_jobnumber,swank_notes,swank_workdate,swank_assetdivision,crcce_division,swank_ptotime,swank_ptotype,swank_paytype,_swank_employee_value,_swank_asset_value&$expand=swank_Employee($select=swank_shopemployeeid,swank_autonumber,swank_empnum),swank_Asset($select=swank_equipmentassetid,swank_assetidentifier,swank_divisioncode)&$orderby=swank_clockin desc',
+    '/swank_shoptimeentries?$select=swank_shoptimeentryid,swank_timeentry,swank_clockin,swank_clockout,swank_hours,swank_jobnumber,swank_notes,swank_workdate,swank_assetdivision,crcce_division,swank_ptotime,swank_ptotype,swank_paytype,swank_oncall,swank_ptoapproval,_swank_employee_value,_swank_asset_value&$expand=swank_Employee($select=swank_shopemployeeid,swank_autonumber,swank_empnum),swank_Asset($select=swank_equipmentassetid,swank_assetidentifier,swank_divisioncode)&$orderby=swank_clockin desc',
   );
   return rows.map(mapTimeEntry);
+}
+
+async function createShopEmployee(record) {
+  const payload = {};
+  if (record.autoNumber) payload.swank_autonumber = record.autoNumber;
+  if (record.empNum !== undefined) payload.swank_empnum = record.empNum;
+  if (record.employeeId) {
+    payload['swank_Employee@odata.bind'] = `/swank_employees(${record.employeeId})`;
+  }
+  const created = await dataverseFetch('POST', '/swank_shopemployees', payload);
+  return mapShopEmployee(created);
+}
+
+async function updateShopEmployee(id, record) {
+  const payload = {};
+  if (record.autoNumber !== undefined) payload.swank_autonumber = record.autoNumber || null;
+  if (record.empNum !== undefined) payload.swank_empnum = record.empNum;
+  if (record.employeeId !== undefined) {
+    payload['swank_Employee@odata.bind'] = record.employeeId
+      ? `/swank_employees(${record.employeeId})`
+      : null;
+  }
+  const updated = await dataverseFetch('PATCH', `/swank_shopemployees(${id})`, payload);
+  return mapShopEmployee(updated);
+}
+
+async function deactivateShopEmployee(id) {
+  await dataverseFetch('PATCH', `/swank_shopemployees(${id})`, { statecode: 1, statuscode: 2 });
 }
 
 async function ensureShopEmployeeDisplayName(shopEmployeeId) {
@@ -395,6 +466,12 @@ module.exports = {
   diagnose,
   listEmployees,
   listAssets,
+  createAsset,
+  updateAsset,
+  deactivateAsset,
+  createShopEmployee,
+  updateShopEmployee,
+  deactivateShopEmployee,
   listTimeEntries,
   createTimeEntry,
   updateTimeEntry,

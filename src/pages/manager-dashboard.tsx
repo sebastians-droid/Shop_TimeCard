@@ -1,8 +1,9 @@
 import { useMemo, useState } from 'react';
-import { addDays, addHours, addWeeks, endOfWeek, format, startOfDay, startOfWeek } from 'date-fns';
-import { CalendarIcon, Check, ChevronDown, ChevronLeft, ChevronRight, Download, LockKeyhole, Pencil, Plus, RefreshCw, Search, ShieldCheck, Trash2, Users, X } from 'lucide-react';
+import { addDays, addHours, addWeeks, eachDayOfInterval, endOfWeek, format, startOfDay, startOfWeek } from 'date-fns';
+import { CalendarIcon, CalendarRange, Check, ChevronDown, ChevronLeft, ChevronRight, Download, LockKeyhole, Pencil, Phone, Plus, RefreshCw, Search, ShieldCheck, Trash2, Users, X } from 'lucide-react';
 import { useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
+import type { DateRange } from 'react-day-picker';
 
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger } from '@/components/ui/alert-dialog';
 import { Badge } from '@/components/ui/badge';
@@ -29,7 +30,7 @@ import {
   lunchCsvLabel,
   stripNoLunchMarker,
 } from '@/lib/time-rules';
-import { ShopTimeEntryPayTypeKeyToLabel, ShopTimeEntryPTOTypeKeyToLabel, DEFAULT_PAY_TYPE, type ShopTimeEntry, type ShopTimeEntryPayTypeKey, type ShopTimeEntryPTOTimeKey, type ShopTimeEntryPTOTypeKey } from '@/models/shop-time-entry';
+import { ShopTimeEntryPayTypeKeyToLabel, ShopTimeEntryPTOApprovalKeyToLabel, ShopTimeEntryPTOTypeKeyToLabel, DEFAULT_PAY_TYPE, type ShopTimeEntry, type ShopTimeEntryPayTypeKey, type ShopTimeEntryPTOApprovalKey, type ShopTimeEntryPTOTimeKey, type ShopTimeEntryPTOTypeKey } from '@/models/shop-time-entry';
 import { NoLunchCheckbox } from '@/components/no-lunch-checkbox';
 import { useUser } from '@/hooks/use-user';
 
@@ -64,6 +65,7 @@ type EmployeeDailySummary = {
   totalMinutes: number;
   noLunch: boolean;
   lunchDeducted: boolean;
+  onCall: boolean;
 };
 
 type AssetPickerProps = {
@@ -242,6 +244,10 @@ export default function ManagerDashboardPage() {
   const [ptoDraft, setPtoDraft] = useState<PtoDraft | null>(null);
   const [ptoEmployeeSearch, setPtoEmployeeSearch] = useState('');
   const [lunchUpdatingKey, setLunchUpdatingKey] = useState('');
+  const [onCallUpdatingKey, setOnCallUpdatingKey] = useState('');
+  const [rangeViewEmployeeId, setRangeViewEmployeeId] = useState('');
+  const [rangeViewRange, setRangeViewRange] = useState<DateRange | undefined>(undefined);
+  const [rangeOpenDay, setRangeOpenDay] = useState('');
   const queryClient = useQueryClient();
   const { data: user, isLoading: userLoading } = useUser();
   const { data: shopEmployees = [], isLoading: employeesLoading } = useShopEmployeeList();
@@ -274,6 +280,7 @@ export default function ManagerDashboardPage() {
         totalMinutes: 0,
         noLunch: false,
         lunchDeducted: false,
+        onCall: false,
       };
 
       current.entries.push(entry);
@@ -289,6 +296,7 @@ export default function ManagerDashboardPage() {
           totalMinutes: pay.totalMinutes,
           noLunch: pay.noLunch,
           lunchDeducted: pay.lunchDeducted,
+          onCall: summary.entries.some((entry: ShopTimeEntry) => entry.onCall),
         };
       })
       .filter((summary: EmployeeDailySummary) => {
@@ -319,6 +327,37 @@ export default function ManagerDashboardPage() {
     });
     return [...groups.values()].reduce((total: number, dayEntries: ShopTimeEntry[]) => total + getDayPayMinutes(dayEntries).totalMinutes, 0);
   }, [weeklyEntries]);
+
+  const pendingPtoRequests = useMemo(() => {
+    return timeEntries
+      .filter((entry: ShopTimeEntry) => isPtoEntry(entry) && entry.ptoApproval === 'Pending')
+      .map((entry: ShopTimeEntry) => ({
+        ...entry,
+        employeeName: getEntryEmployeeName(entry, employees),
+        dateLabel: entry.clockIn ? format(new Date(entry.clockIn), 'EEE, MMM d') : 'Unknown date',
+        ptoHours: getPtoHours(entry),
+        ptoType: entry.pTOTypeKey ? ShopTimeEntryPTOTypeKeyToLabel[entry.pTOTypeKey] : 'PTO',
+      }))
+      .sort((a, b) => new Date(a.clockIn ?? '').getTime() - new Date(b.clockIn ?? '').getTime());
+  }, [timeEntries, employees]);
+
+  const rangeViewEmployee = useMemo(() => {
+    if (!rangeViewEmployeeId) return null;
+    return employees.find((row: AppShopEmployee) => row.id === rangeViewEmployeeId) ?? null;
+  }, [rangeViewEmployeeId, employees]);
+
+  const rangeViewDays = useMemo(() => {
+    if (!rangeViewEmployeeId || !rangeViewRange?.from || !rangeViewRange?.to) return [];
+    const days = eachDayOfInterval({ start: rangeViewRange.from, end: rangeViewRange.to });
+    return days.map((day: Date) => {
+      const dayKey = format(day, 'yyyy-MM-dd');
+      const dayEntries = timeEntries
+        .filter((entry: ShopTimeEntry) => entry.employee?.id === rangeViewEmployeeId && entry.clockIn?.startsWith(dayKey))
+        .sort((a: ShopTimeEntry, b: ShopTimeEntry) => new Date(a.clockIn ?? '').getTime() - new Date(b.clockIn ?? '').getTime());
+      const pay = getDayPayMinutes(dayEntries);
+      return { day, dayKey, entries: dayEntries, totalMinutes: pay.totalMinutes };
+    });
+  }, [rangeViewEmployeeId, rangeViewRange, timeEntries]);
 
 
   const handleToggleEmployee = (employeeKey: string) => {
@@ -423,6 +462,7 @@ export default function ManagerDashboardPage() {
         clockOut,
         hours: ptoDraft.hours,
         workDate: dayKey,
+        ptoApproval: 'Approved' as ShopTimeEntryPTOApprovalKey,
         notes: `${ptoDraft.hours} hours ${typeLabel} PTO submitted for ${format(selectedDate, 'MMM d, yyyy')}.`,
       });
       handleCancelPto();
@@ -630,6 +670,56 @@ export default function ManagerDashboardPage() {
     }
   };
 
+  const handleOnCallChange = async (summary: EmployeeDailySummary, checked: boolean) => {
+    const laborEntries = summary.entries.filter((entry: ShopTimeEntry) => !isPtoEntry(entry));
+    if (laborEntries.length === 0) {
+      toast.info('Clock time for this employee first, then on-call can be toggled.');
+      return;
+    }
+
+    const entryIds = new Set(laborEntries.map((entry: ShopTimeEntry) => entry.id));
+    const previousEntries = queryClient.getQueryData<ShopTimeEntry[]>(['shopTimeEntry-list']);
+
+    queryClient.setQueryData<ShopTimeEntry[]>(['shopTimeEntry-list'], (current) =>
+      (current ?? []).map((entry: ShopTimeEntry) =>
+        entryIds.has(entry.id) ? { ...entry, onCall: checked } : entry,
+      ),
+    );
+
+    setOnCallUpdatingKey(summary.employeeKey);
+    try {
+      for (const entry of laborEntries) {
+        await apiFetch<ShopTimeEntry>(`/api/time-entries/${entry.id}`, {
+          method: 'PATCH',
+          body: JSON.stringify({ onCall: checked }),
+        });
+      }
+      await queryClient.invalidateQueries({ queryKey: ['shopTimeEntry-list'] });
+      toast.success(checked ? `On-call saved for ${summary.employeeName}.` : `On-call removed for ${summary.employeeName}.`);
+    } catch (error: unknown) {
+      if (previousEntries) {
+        queryClient.setQueryData(['shopTimeEntry-list'], previousEntries);
+      } else {
+        await queryClient.invalidateQueries({ queryKey: ['shopTimeEntry-list'] });
+      }
+      toast.error(error instanceof Error ? error.message : 'Unable to update on-call setting.');
+    } finally {
+      setOnCallUpdatingKey('');
+    }
+  };
+
+  const handlePtoApproval = async (entryId: string, approval: ShopTimeEntryPTOApprovalKey) => {
+    try {
+      await updateTimeEntry.mutateAsync({
+        id: entryId,
+        changedFields: { ptoApproval: approval },
+      });
+      toast.success(`PTO request ${approval.toLowerCase()}.`);
+    } catch (error: unknown) {
+      toast.error(error instanceof Error ? error.message : 'Unable to update PTO approval.');
+    }
+  };
+
   const handleExportWeeklyPayroll = async () => {
     if (weeklyEntries.length === 0) {
       toast.info(`No time entries are available for ${formatWeekRangeLabel(exportWeekDate)}.`);
@@ -755,6 +845,31 @@ export default function ManagerDashboardPage() {
   return (
     <main className="mx-auto flex w-full max-w-6xl flex-1 flex-col gap-6 p-4 sm:p-6 lg:p-8">
 
+      {pendingPtoRequests.length > 0 ? (
+        <Card className="border-l-4 border-l-amber-400 bg-card text-card-foreground shadow-sm">
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2 text-xl text-amber-600 dark:text-amber-400">
+              <CalendarIcon className="h-5 w-5" /> Pending PTO requests ({pendingPtoRequests.length})
+            </CardTitle>
+            <p className="text-sm text-muted-foreground">Review and approve or deny PTO requests from all employees.</p>
+          </CardHeader>
+          <CardContent className="space-y-3">
+            {pendingPtoRequests.map((pto) => (
+              <div key={pto.id} className="flex flex-col gap-3 rounded-lg border border-amber-200 bg-amber-50/50 p-4 dark:border-amber-900 dark:bg-amber-950/20 sm:flex-row sm:items-center sm:justify-between">
+                <div>
+                  <p className="font-semibold text-foreground">{pto.employeeName}</p>
+                  <p className="text-sm text-muted-foreground">{pto.dateLabel} · {pto.ptoHours} hours · {pto.ptoType}</p>
+                  <Badge variant="outline" className="mt-1 border-amber-300 text-amber-700 dark:border-amber-700 dark:text-amber-400">{ShopTimeEntryPTOApprovalKeyToLabel[pto.ptoApproval!]}</Badge>
+                </div>
+                <div className="flex gap-2">
+                  <Button type="button" size="sm" onClick={() => void handlePtoApproval(pto.id, 'Approved')} disabled={updateTimeEntry.isPending}><Check className="mr-1 h-4 w-4" /> Approve</Button>
+                  <Button type="button" size="sm" variant="destructive" onClick={() => void handlePtoApproval(pto.id, 'Denied')} disabled={updateTimeEntry.isPending}><X className="mr-1 h-4 w-4" /> Deny</Button>
+                </div>
+              </div>
+            ))}
+          </CardContent>
+        </Card>
+      ) : null}
 
       <Card className="border-l-4 border-l-primary bg-card text-card-foreground shadow-sm">
         <CardHeader>
@@ -787,62 +902,12 @@ export default function ManagerDashboardPage() {
         </CardContent>
       </Card>
 
-      <Card className="bg-card text-card-foreground shadow-sm">
-        <CardHeader>
-          <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
-            <div>
-              <CardTitle className="flex items-center gap-2 text-xl"><Download className="h-5 w-5" /> Weekly timecard export</CardTitle>
-              <p className="mt-1 text-sm text-muted-foreground">Choose a Sunday-Saturday payroll week, then export one Excel workbook: a shop summary plus a detail sheet for each employee.</p>
-            </div>
-            <Button type="button" variant="secondary" onClick={() => void handleExportWeeklyPayroll()} disabled={weeklyEntries.length === 0 || isExporting} className="w-full sm:w-auto">
-              <Download className="mr-2 h-4 w-4" /> {isExporting ? 'Building Excel…' : `Export ${formatWeekRangeLabel(exportWeekDate)} Excel`}
-            </Button>
-          </div>
-        </CardHeader>
-        <CardContent>
-          <div className="flex flex-col gap-3 rounded-lg border border-border bg-background p-3 sm:flex-row sm:items-center sm:justify-between">
-            <div>
-              <p className="text-sm font-medium text-foreground">Export week</p>
-              <p className="text-sm text-muted-foreground">{formatWeekRangeLabel(exportWeekDate)} · {weeklyEntries.length} entries · {formatDuration(weeklyPayrollMinutes)}</p>
-            </div>
-            <div className="flex items-center gap-1 rounded-md border border-border bg-card p-1 text-card-foreground">
-              <Button type="button" variant="ghost" size="icon" aria-label="Previous export week" onClick={() => setExportWeekDate((currentDate: Date) => addWeeks(currentDate, -1))}>
-                <ChevronLeft className="h-4 w-4" />
-              </Button>
-              <Popover>
-                <PopoverTrigger asChild>
-                  <Button type="button" variant="outline" className="min-w-56 justify-start bg-background">
-                    <CalendarIcon className="mr-2 h-4 w-4" />
-                    {formatWeekRangeLabel(exportWeekDate)}
-                  </Button>
-                </PopoverTrigger>
-                <PopoverContent className="w-auto p-0" align="end">
-                  <Calendar
-                    mode="single"
-                    selected={exportWeekDate}
-                    onSelect={(date: Date | undefined) => {
-                      if (date) {
-                        setExportWeekDate(startOfDay(date));
-                      }
-                    }}
-                    initialFocus
-                  />
-                </PopoverContent>
-              </Popover>
-              <Button type="button" variant="ghost" size="icon" aria-label="Next export week" onClick={() => setExportWeekDate((currentDate: Date) => addWeeks(currentDate, 1))}>
-                <ChevronRight className="h-4 w-4" />
-              </Button>
-            </div>
-          </div>
-        </CardContent>
-      </Card>
-
-      <Card className="bg-card text-card-foreground shadow-sm">
+      {!rangeViewEmployeeId ? <Card className="bg-card text-card-foreground shadow-sm">
         <CardHeader>
           <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
             <div>
               <CardTitle className="flex items-center gap-2 text-xl"><Users className="h-5 w-5" /> Employee timecards</CardTitle>
-              <p className="mt-1 text-sm text-muted-foreground">{format(selectedDate, 'EEEE, MMM d')} · edit times, add missed punches or PTO, or mark No lunch.</p>
+              <p className="mt-1 text-sm text-muted-foreground">{format(selectedDate, 'EEEE, MMM d')}</p>
             </div>
             <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
               <Popover>
@@ -1074,12 +1139,29 @@ export default function ManagerDashboardPage() {
                       <div className="flex items-center gap-2">
                         <Badge variant={summary.activeCount > 0 ? 'default' : 'outline'}>{summary.activeCount > 0 ? 'Active now' : 'Complete'}</Badge>
                         {summary.noLunch ? <Badge variant="secondary">No lunch</Badge> : null}
+                        {summary.onCall ? <Badge variant="secondary"><Phone className="mr-1 h-3 w-3" /> On Call</Badge> : null}
                         <ChevronDown className={`h-5 w-5 transition-transform ${isOpen ? 'rotate-180' : ''}`} />
                       </div>
                     </button>
                   </CollapsibleTrigger>
-                  <div className="border-t border-border px-4 py-3">
+                  <div className="flex flex-wrap gap-2 border-t border-border px-4 py-3">
                     <NoLunchCheckbox checked={summary.noLunch} disabled={lunchUpdatingKey === summary.employeeKey} onCheckedChange={(checked: boolean) => void handleNoLunchChange(summary, checked)} />
+                    <button
+                      type="button"
+                      role="checkbox"
+                      aria-checked={summary.onCall}
+                      disabled={onCallUpdatingKey === summary.employeeKey}
+                      onClick={(event) => { event.preventDefault(); event.stopPropagation(); if (onCallUpdatingKey !== summary.employeeKey) void handleOnCallChange(summary, !summary.onCall); }}
+                      className={`flex items-center gap-2.5 rounded-lg border px-3 py-2 text-left text-sm transition-colors disabled:opacity-60 ${summary.onCall ? 'border-primary bg-primary/10' : 'border-border bg-card hover:bg-muted'}`}
+                    >
+                      <span className={`flex h-5 w-5 shrink-0 items-center justify-center rounded border ${summary.onCall ? 'border-primary bg-primary text-primary-foreground' : 'border-muted-foreground/40 bg-background'}`}>
+                        {summary.onCall ? <Phone className="h-3.5 w-3.5" /> : null}
+                      </span>
+                      <span className="font-medium text-foreground">On Call</span>
+                    </button>
+                    <Button type="button" variant="outline" size="sm" onClick={(event) => { event.stopPropagation(); setRangeViewEmployeeId(summary.employeeKey); setRangeViewRange(undefined); setRangeOpenDay(''); }}>
+                      <CalendarRange className="mr-2 h-4 w-4" /> Date range
+                    </Button>
                   </div>
                   <CollapsibleContent>
                     <div className="space-y-3 border-t border-border p-4">
@@ -1266,7 +1348,150 @@ export default function ManagerDashboardPage() {
           })}
 
         </CardContent>
+      </Card> : null}
+
+      {rangeViewEmployeeId ? (
+        <Card className="bg-card text-card-foreground shadow-sm">
+          <CardHeader>
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+              <div className="flex items-center gap-3 flex-wrap">
+                <CardTitle className="flex items-center gap-2 text-xl"><CalendarRange className="h-5 w-5" /> Date range</CardTitle>
+                <Select value={rangeViewEmployeeId} onValueChange={(id: string) => { setRangeViewEmployeeId(id); setRangeOpenDay(''); }}>
+                  <SelectTrigger className="w-auto min-w-48 bg-background">
+                    <SelectValue placeholder="Select employee" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {employees.map((emp: AppShopEmployee) => (
+                      <SelectItem key={emp.id} value={emp.id}>{emp.employeeName}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="flex items-center gap-2 flex-wrap">
+                <Popover>
+                  <PopoverTrigger asChild>
+                    <Button type="button" variant="outline" className="justify-start bg-background">
+                      <CalendarIcon className="mr-2 h-4 w-4" />
+                      {rangeViewRange?.from && rangeViewRange?.to ? `${format(rangeViewRange.from, 'MMM d')} – ${format(rangeViewRange.to, 'MMM d, yyyy')}` : rangeViewRange?.from ? `${format(rangeViewRange.from, 'MMM d, yyyy')} – …` : 'Pick a date range'}
+                    </Button>
+                  </PopoverTrigger>
+                  <PopoverContent className="w-auto p-0" align="end">
+                    <Calendar mode="range" selected={rangeViewRange} onSelect={(range: DateRange | undefined) => { setRangeViewRange(range); setRangeOpenDay(''); }} numberOfMonths={2} />
+                  </PopoverContent>
+                </Popover>
+                <Button type="button" variant="outline" onClick={() => setRangeViewEmployeeId('')}><X className="mr-2 h-4 w-4" /> Close</Button>
+              </div>
+            </div>
+          </CardHeader>
+          <CardContent className="space-y-3">
+            {!rangeViewRange?.from ? (
+              <p className="rounded-lg bg-muted p-4 text-sm text-muted-foreground">Use the date picker above to select a range of days.</p>
+            ) : !rangeViewRange?.to ? (
+              <p className="rounded-lg bg-muted p-4 text-sm text-muted-foreground">Click a second date to complete the range.</p>
+            ) : null}
+
+            {rangeViewDays.map(({ day, dayKey, entries: dayEntries, totalMinutes: dayMinutes }) => (
+              <Collapsible key={dayKey} open={rangeOpenDay === dayKey} onOpenChange={() => setRangeOpenDay(rangeOpenDay === dayKey ? '' : dayKey)} asChild>
+                <section className="rounded-lg border border-border bg-background">
+                  <CollapsibleTrigger asChild>
+                    <button type="button" className="flex w-full items-center justify-between p-3 text-left">
+                      <div>
+                        <p className="font-semibold text-sm">{format(day, 'EEEE, MMM d')}</p>
+                        <p className="text-xs text-muted-foreground">{dayEntries.length} {dayEntries.length === 1 ? 'entry' : 'entries'} · {formatDuration(dayMinutes)}</p>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        {dayEntries.length === 0 ? <Badge variant="outline">No entries</Badge> : <Badge variant="secondary">{formatDuration(dayMinutes)}</Badge>}
+                        <ChevronDown className={`h-4 w-4 transition-transform ${rangeOpenDay === dayKey ? 'rotate-180' : ''}`} />
+                      </div>
+                    </button>
+                  </CollapsibleTrigger>
+                  <CollapsibleContent>
+                    <div className="space-y-2 border-t border-border p-3">
+                      {dayEntries.length === 0 ? <p className="text-sm text-muted-foreground">No entries for this day.</p> : null}
+                      {dayEntries.map((entry: ShopTimeEntry) => (
+                        <div key={entry.id} className="rounded-lg border border-border bg-card p-3 text-card-foreground">
+                          <div className="flex flex-wrap items-center justify-between gap-2">
+                            <div>
+                              <p className="font-medium text-sm">{getEntryAssetName(entry, assets) || 'Time entry'}</p>
+                              <p className="text-xs text-muted-foreground">
+                                {entry.clockIn ? format(new Date(entry.clockIn), 'p') : '—'} – {entry.clockOut ? format(new Date(entry.clockOut), 'p') : 'Active'}
+                                {isPtoEntry(entry) ? ` · ${getPtoHours(entry)}h PTO` : ''}
+                                {!isPtoEntry(entry) ? ` · Div ${getEntryDivision(entry, assets) || '—'}` : ''}
+                                {getEntryJobNumber(entry) ? ` · Job ${getEntryJobNumber(entry)}` : ''}
+                              </p>
+                            </div>
+                            <div className="flex items-center gap-1.5">
+                              {isPtoEntry(entry) && entry.pTOTypeKey ? <Badge variant="outline">{ShopTimeEntryPTOTypeKeyToLabel[entry.pTOTypeKey]}</Badge> : null}
+                              {!isPtoEntry(entry) ? <Badge variant="outline">{ShopTimeEntryPayTypeKeyToLabel[entry.payTypeKey ?? DEFAULT_PAY_TYPE]}</Badge> : null}
+                              {entry.onCall ? <Badge variant="secondary"><Phone className="mr-1 h-3 w-3" />On Call</Badge> : null}
+                              <Badge variant={entry.clockOut ? 'outline' : 'default'}>{entry.clockOut ? 'Complete' : 'Active'}</Badge>
+                            </div>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </CollapsibleContent>
+                </section>
+              </Collapsible>
+            ))}
+
+            {rangeViewRange?.from && rangeViewRange?.to && rangeViewDays.every((d) => d.entries.length === 0) ? (
+              <p className="rounded-lg bg-muted p-4 text-sm text-muted-foreground">No entries found for {rangeViewEmployee?.employeeName ?? 'this employee'} in the selected date range.</p>
+            ) : null}
+          </CardContent>
+        </Card>
+      ) : null}
+
+      <Card className="bg-card text-card-foreground shadow-sm">
+        <CardHeader>
+          <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+            <div>
+              <CardTitle className="flex items-center gap-2 text-xl"><Download className="h-5 w-5" /> Weekly timecard export</CardTitle>
+              <p className="mt-1 text-sm text-muted-foreground">Choose a Sunday-Saturday payroll week, then export one Excel workbook.</p>
+            </div>
+            <Button type="button" variant="secondary" onClick={() => void handleExportWeeklyPayroll()} disabled={weeklyEntries.length === 0 || isExporting} className="w-full sm:w-auto">
+              <Download className="mr-2 h-4 w-4" /> {isExporting ? 'Building Excel…' : `Export ${formatWeekRangeLabel(exportWeekDate)} Excel`}
+            </Button>
+          </div>
+        </CardHeader>
+        <CardContent>
+          <div className="flex flex-col gap-3 rounded-lg border border-border bg-background p-3 sm:flex-row sm:items-center sm:justify-between">
+            <div>
+              <p className="text-sm font-medium text-foreground">Export week</p>
+              <p className="text-sm text-muted-foreground">{formatWeekRangeLabel(exportWeekDate)} · {weeklyEntries.length} entries · {formatDuration(weeklyPayrollMinutes)}</p>
+            </div>
+            <div className="flex items-center gap-1 rounded-md border border-border bg-card p-1 text-card-foreground">
+              <Button type="button" variant="ghost" size="icon" aria-label="Previous export week" onClick={() => setExportWeekDate((currentDate: Date) => addWeeks(currentDate, -1))}>
+                <ChevronLeft className="h-4 w-4" />
+              </Button>
+              <Popover>
+                <PopoverTrigger asChild>
+                  <Button type="button" variant="outline" className="min-w-56 justify-start bg-background">
+                    <CalendarIcon className="mr-2 h-4 w-4" />
+                    {formatWeekRangeLabel(exportWeekDate)}
+                  </Button>
+                </PopoverTrigger>
+                <PopoverContent className="w-auto p-0" align="end">
+                  <Calendar
+                    mode="single"
+                    selected={exportWeekDate}
+                    onSelect={(date: Date | undefined) => {
+                      if (date) {
+                        setExportWeekDate(startOfDay(date));
+                      }
+                    }}
+                    initialFocus
+                  />
+                </PopoverContent>
+              </Popover>
+              <Button type="button" variant="ghost" size="icon" aria-label="Next export week" onClick={() => setExportWeekDate((currentDate: Date) => addWeeks(currentDate, 1))}>
+                <ChevronRight className="h-4 w-4" />
+              </Button>
+            </div>
+          </div>
+        </CardContent>
       </Card>
+
     </main>
   );
 }

@@ -79,3 +79,81 @@ export function useDeleteShopTimeEntry() {
     },
   });
 }
+
+export function useCreateAsset() {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: (record: Omit<EquipmentAsset, 'id'> & { divisionPicklist?: number }) =>
+      apiFetch<EquipmentAsset>('/api/assets', {
+        method: 'POST',
+        body: JSON.stringify(record),
+      }),
+    onSuccess: () => {
+      client.invalidateQueries({ queryKey: ['equipmentAsset-list'] });
+    },
+  });
+}
+
+export function useUpdateAsset() {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, ...fields }: { id: string } & Partial<EquipmentAsset> & { divisionPicklist?: number }) =>
+      apiFetch<EquipmentAsset>(`/api/assets/${id}`, {
+        method: 'PATCH',
+        body: JSON.stringify(fields),
+      }),
+    onSuccess: () => {
+      client.invalidateQueries({ queryKey: ['equipmentAsset-list'] });
+    },
+  });
+}
+
+export function useDeactivateAsset() {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) =>
+      apiFetch<void>(`/api/assets/${id}`, { method: 'DELETE' }),
+    onSuccess: () => {
+      client.invalidateQueries({ queryKey: ['equipmentAsset-list'] });
+    },
+  });
+}
+
+export function useCreateShopEmployee() {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: (record: { autoNumber: string; empNum?: number; employeeId?: string }) =>
+      apiFetch<ShopEmployee>('/api/employees', {
+        method: 'POST',
+        body: JSON.stringify(record),
+      }),
+    onSuccess: () => {
+      client.invalidateQueries({ queryKey: ['shopEmployee-list'] });
+    },
+  });
+}
+
+export function useUpdateShopEmployee() {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, ...fields }: { id: string; autoNumber?: string; empNum?: number; employeeId?: string }) =>
+      apiFetch<ShopEmployee>(`/api/employees/${id}`, {
+        method: 'PATCH',
+        body: JSON.stringify(fields),
+      }),
+    onSuccess: () => {
+      client.invalidateQueries({ queryKey: ['shopEmployee-list'] });
+    },
+  });
+}
+
+export function useDeactivateShopEmployee() {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) =>
+      apiFetch<void>(`/api/employees/${id}`, { method: 'DELETE' }),
+    onSuccess: () => {
+      client.invalidateQueries({ queryKey: ['shopEmployee-list'] });
+    },
+  });
+}

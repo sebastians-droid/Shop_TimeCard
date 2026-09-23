@@ -7,7 +7,9 @@ import { Toaster } from '@/components/ui/sonner';
 import ErrorBoundary from '@/components/system/error-boundary';
 
 import HomePage from '@/pages/index';
+import TimecardPage from '@/pages/timecard';
 import ManagerDashboardPage from '@/pages/manager-dashboard';
+import AdminPage from '@/pages/admin';
 import NotFoundPage from '@/pages/not-found';
 
 function App() {
@@ -18,8 +20,10 @@ function App() {
         <Router>
           <Routes>
             <Route path="/" element={<Layout />}>
-              <Route path="manager" element={<ManagerDashboardPage />} />
               <Route index element={<HomePage />} />
+              <Route path="timecard" element={<TimecardPage />} />
+              <Route path="manager" element={<ManagerDashboardPage />} />
+              <Route path="admin" element={<AdminPage />} />
               <Route path="*" element={<NotFoundPage />} />
             </Route>
           </Routes>

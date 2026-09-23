@@ -18,23 +18,18 @@ export function NoLunchCheckbox({ checked, disabled, onCheckedChange }: NoLunchC
         event.stopPropagation();
         if (!disabled) onCheckedChange(!checked);
       }}
-      className={`flex w-full items-center gap-4 rounded-xl border-2 px-4 py-4 text-left transition-colors disabled:opacity-60 ${
+      className={`flex items-center gap-2.5 rounded-lg border px-3 py-2 text-left text-sm transition-colors disabled:opacity-60 ${
         checked ? 'border-primary bg-primary/10' : 'border-border bg-card hover:bg-muted'
       }`}
     >
       <span
-        className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-md border-2 ${
+        className={`flex h-5 w-5 shrink-0 items-center justify-center rounded border ${
           checked ? 'border-primary bg-primary text-primary-foreground' : 'border-muted-foreground/40 bg-background'
         }`}
       >
-        {checked ? <Check className="h-6 w-6" /> : null}
+        {checked ? <Check className="h-3.5 w-3.5" /> : null}
       </span>
-      <span>
-        <span className="block text-lg font-semibold text-foreground">No lunch</span>
-        <span className="mt-1 block text-sm text-muted-foreground">
-          Toggle on to skip the 30-minute lunch deduction for this employee today. Toggle off anytime to restore the 0.5 hour deduction.
-        </span>
-      </span>
+      <span className="font-medium text-foreground">No lunch</span>
     </button>
   );
 }

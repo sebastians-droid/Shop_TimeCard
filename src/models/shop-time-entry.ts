@@ -10,6 +10,7 @@ export type ShopTimeEntryPTOTimeKey = keyof typeof ShopTimeEntryPTOTimeKeyToLabe
 export const ShopTimeEntryPTOTypeKeyToLabel = {
   Personal: 'Personal',
   Vacation: 'Vacation',
+  Holiday: 'Holiday',
 } as const;
 export type ShopTimeEntryPTOTypeKey = keyof typeof ShopTimeEntryPTOTypeKeyToLabel;
 
@@ -21,6 +22,13 @@ export const ShopTimeEntryPayTypeKeyToLabel = {
 export type ShopTimeEntryPayTypeKey = keyof typeof ShopTimeEntryPayTypeKeyToLabel;
 
 export const DEFAULT_PAY_TYPE: ShopTimeEntryPayTypeKey = 'SR';
+
+export const ShopTimeEntryPTOApprovalKeyToLabel = {
+  Pending: 'Pending',
+  Approved: 'Approved',
+  Denied: 'Denied',
+} as const;
+export type ShopTimeEntryPTOApprovalKey = keyof typeof ShopTimeEntryPTOApprovalKeyToLabel;
 
 export interface ShopTimeEntry {
   id: string;
@@ -34,8 +42,10 @@ export interface ShopTimeEntry {
   hours?: number;
   jobNumber?: string;
   notes?: string;
+  onCall?: boolean;
   payTypeKey?: ShopTimeEntryPayTypeKey;
   pTOTimeKey?: ShopTimeEntryPTOTimeKey;
   pTOTypeKey?: ShopTimeEntryPTOTypeKey;
+  ptoApproval?: ShopTimeEntryPTOApprovalKey;
   workDate?: string;
 }
