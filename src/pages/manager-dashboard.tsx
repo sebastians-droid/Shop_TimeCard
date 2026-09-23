@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react';
-import { addDays, addHours, addWeeks, eachDayOfInterval, endOfWeek, format, startOfDay, startOfWeek } from 'date-fns';
-import { CalendarIcon, CalendarRange, Check, ChevronDown, ChevronLeft, ChevronRight, Download, LockKeyhole, Pencil, Phone, Plus, RefreshCw, Search, ShieldCheck, Trash2, Users, X } from 'lucide-react';
+import { addHours, eachDayOfInterval, format, startOfDay } from 'date-fns';
+import { CalendarIcon, CalendarRange, Check, ChevronDown, LockKeyhole, Pencil, Phone, Plus, RefreshCw, Search, ShieldCheck, Trash2, Users, X } from 'lucide-react';
 import { useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import type { DateRange } from 'react-day-picker';
@@ -15,10 +15,12 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { AssetPicker } from '@/components/asset-picker';
+import { PtoApprovalPanel } from '@/components/manager/pto-approval-panel';
+import { PayrollExportCard } from '@/components/manager/payroll-export-card';
 import { useAllEquipmentAssets, useCreateShopTimeEntry, useDeleteShopTimeEntry, useShopEmployeeList, useShopTimeEntryList, useUpdateShopTimeEntry } from '@/hooks/use-shop-data';
 import type { EquipmentAsset } from '@/models/equipment-asset';
 import { mapShopEmployees, type AppShopEmployee } from '@/lib/shop-employees';
-import { buildPayrollWorkbookBlob } from '@/lib/payroll-workbook';
 import { apiFetch } from '@/lib/api';
 import {
   applyNoLunchMarker,
@@ -27,10 +29,27 @@ import {
   getEntryPaidMinutes,
   getPtoHours,
   isPtoEntry,
-  lunchCsvLabel,
   stripNoLunchMarker,
 } from '@/lib/time-rules';
-import { ShopTimeEntryPayTypeKeyToLabel, ShopTimeEntryPTOApprovalKeyToLabel, ShopTimeEntryPTOTypeKeyToLabel, DEFAULT_PAY_TYPE, type ShopTimeEntry, type ShopTimeEntryPayTypeKey, type ShopTimeEntryPTOApprovalKey, type ShopTimeEntryPTOTimeKey, type ShopTimeEntryPTOTypeKey } from '@/models/shop-time-entry';
+import {
+  getAssetDisplayName,
+  getEntryAssetName,
+  getEntryJobNumber,
+  getEntryEmployeeKey,
+  getEntryEmployeeName,
+  getEntryEmployeeNumber,
+  getEntryDivision,
+  getEntryWorkDateKey,
+  getEmployeeNotes,
+  PTO_TIME_KEY_BY_HOURS,
+  formatTimeForInput,
+  mergeDateAndTime,
+  combineSelectedDateAndTime,
+  getPtoClockInIso,
+  getWeekRange,
+  formatWeekRangeLabel,
+} from '@/lib/entry-helpers';
+import { ShopTimeEntryPayTypeKeyToLabel, ShopTimeEntryPTOTypeKeyToLabel, DEFAULT_PAY_TYPE, type ShopTimeEntry, type ShopTimeEntryPayTypeKey, type ShopTimeEntryPTOApprovalKey, type ShopTimeEntryPTOTypeKey } from '@/models/shop-time-entry';
 import { NoLunchCheckbox } from '@/components/no-lunch-checkbox';
 import { useUser } from '@/hooks/use-user';
 
@@ -68,91 +87,7 @@ type EmployeeDailySummary = {
   onCall: boolean;
 };
 
-type AssetPickerProps = {
-  assets: EquipmentAsset[];
-  value: string;
-  onChange: (asset: Pick<EquipmentAsset, 'id' | 'asset' | 'divisionCode'> | undefined) => void;
-  currentAsset?: Pick<EquipmentAsset, 'id' | 'asset' | 'divisionCode'>;
-};
-
 const getTodayKey = () => format(new Date(), 'yyyy-MM-dd');
-const getWeekRange = (date: Date) => {
-  const start = startOfWeek(date, { weekStartsOn: 0 });
-  const end = endOfWeek(date, { weekStartsOn: 0 });
-  return { start, end };
-};
-
-const formatWeekRangeLabel = (date: Date) => {
-  const { start, end } = getWeekRange(date);
-  return `${format(start, 'M/d/yyyy')} - ${format(end, 'M/d/yyyy')}`;
-};
-
-const getAssetDisplayName = (asset?: EquipmentAsset | Pick<EquipmentAsset, 'id' | 'asset'> | null) => {
-  if (!asset) {
-    return 'Unassigned asset';
-  }
-
-  return asset.asset || 'Unassigned asset';
-};
-
-const getEntryAssetName = (entry: ShopTimeEntry, assets: EquipmentAsset[]) => {
-  if (isPtoEntry(entry)) return 'PTO';
-  const matchedAsset = entry.asset?.id ? assets.find((asset: EquipmentAsset) => asset.id === entry.asset?.id) : undefined;
-  if (entry.asset?.asset || matchedAsset) {
-    return entry.asset?.asset || getAssetDisplayName(matchedAsset);
-  }
-
-  return '';
-};
-
-const getEntryDivision = (entry: ShopTimeEntry, assets: EquipmentAsset[]) => {
-  const matchedAsset = entry.asset?.id ? assets.find((asset: EquipmentAsset) => asset.id === entry.asset?.id) : undefined;
-  return String(entry.assetDivision ?? matchedAsset?.divisionCode ?? '');
-};
-
-const PTO_TIME_KEY_BY_HOURS: Record<4 | 8, ShopTimeEntryPTOTimeKey> = { 4: 'PTOTimeKey04', 8: 'PTOTimeKey18' };
-
-const formatTimeForInput = (dateTime?: string) => {
-  if (!dateTime) {
-    return '';
-  }
-
-  return format(new Date(dateTime), 'HH:mm');
-};
-
-const getEntryJobNumber = (entry: ShopTimeEntry) => entry.jobNumber ?? '';
-
-const getEntryEmployeeKey = (entry: ShopTimeEntry) => entry.employee?.id ?? entry.id;
-
-const getEntryEmployeeName = (entry: ShopTimeEntry, employees: AppShopEmployee[]) => {
-  const employeeRecord = employees.find((employee: AppShopEmployee) => employee.id === entry.employee?.id);
-  return employeeRecord?.employeeName ?? entry.employee?.autoNumber ?? 'Unknown employee';
-};
-
-const getEntryEmployeeNumber = (entry: ShopTimeEntry, employees: AppShopEmployee[]) => {
-  const employeeRecord = employees.find((employee: AppShopEmployee) => employee.id === entry.employee?.id);
-  return String(employeeRecord?.employeeCode ?? entry.employee?.autoNumber ?? '—');
-};
-
-const mergeDateAndTime = (existingDateTime: string, timeValue: string) => {
-  const date = new Date(existingDateTime);
-  const [hours = '0', minutes = '0'] = timeValue.split(':');
-  date.setHours(Number(hours), Number(minutes), 0, 0);
-  return date.toISOString();
-};
-
-const combineSelectedDateAndTime = (day: Date, timeValue: string) => {
-  const date = startOfDay(day);
-  const [hours = '0', minutes = '0'] = timeValue.split(':');
-  date.setHours(Number(hours), Number(minutes), 0, 0);
-  return date.toISOString();
-};
-
-const getPtoClockInIso = (date: Date) => {
-  const ptoDate = startOfDay(date);
-  ptoDate.setHours(8, 0, 0, 0);
-  return ptoDate.toISOString();
-};
 
 const emptyEntryDraft = (employeeId = ''): NewEntryDraft => ({
   employeeId,
@@ -171,68 +106,10 @@ const emptyPtoDraft = (employeeId = ''): PtoDraft => ({
   type: '',
 });
 
-const getEntryWorkDateKey = (entry: ShopTimeEntry) => (entry.clockIn ? format(new Date(entry.clockIn), 'yyyy-MM-dd') : 'No clock-in date');
-
-const getEmployeeNotes = (notes?: string) => stripNoLunchMarker(notes);
-
-function AssetPicker({ assets, value, onChange, currentAsset }: AssetPickerProps) {
-  const [search, setSearch] = useState<string>('');
-  const [isOpen, setIsOpen] = useState<boolean>(false);
-  const trimmedSearch = search.trim();
-  const allAssets = useMemo(() => {
-    const assetsById = new Map<string, EquipmentAsset>();
-    [...assets, ...(currentAsset ? [currentAsset as EquipmentAsset] : [])].forEach((asset: EquipmentAsset) => {
-      if (asset.id) {
-        assetsById.set(asset.id, asset);
-      }
-    });
-    return Array.from(assetsById.values()).sort((assetA: EquipmentAsset, assetB: EquipmentAsset) =>
-      getAssetDisplayName(assetA).localeCompare(getAssetDisplayName(assetB), undefined, { numeric: true, sensitivity: 'base' }),
-    );
-  }, [assets, currentAsset]);
-  const selectedAsset = allAssets.find((asset: EquipmentAsset) => asset.id === value);
-  const inputValue = search || (selectedAsset ? getAssetDisplayName(selectedAsset) : '');
-  const validAssets = allAssets.filter((asset: EquipmentAsset) => asset.id);
-  const filteredAssets = validAssets.filter((asset: EquipmentAsset) => getAssetDisplayName(asset).toLowerCase().includes(trimmedSearch.toLowerCase()));
-  const assetToSelect = filteredAssets.find((asset: EquipmentAsset) => getAssetDisplayName(asset).toLowerCase() === trimmedSearch.toLowerCase()) ?? filteredAssets[0];
-  const handleSelect = (assetId: string) => {
-    const selected = allAssets.find((asset: EquipmentAsset) => asset.id === assetId);
-    onChange(selected ? { id: selected.id, asset: getAssetDisplayName(selected), divisionCode: selected.divisionCode } : undefined);
-    setSearch(selected ? getAssetDisplayName(selected) : '');
-    setIsOpen(false);
-  };
-  const handleSearchChange = (event: React.ChangeEvent<HTMLInputElement>) => {
-    setSearch(event.target.value);
-    setIsOpen(true);
-    if (value) {
-      onChange(undefined);
-    }
-  };
-
-  return (
-    <div className="relative">
-      <Input className={`bg-background pr-10 ${value ? 'font-semibold' : ''}`} value={inputValue} onChange={handleSearchChange} onFocus={() => setIsOpen(true)} onBlur={() => window.setTimeout(() => setIsOpen(false), 150)} onKeyDown={(event: React.KeyboardEvent<HTMLInputElement>) => { if (event.key === 'Enter' && assetToSelect?.id) { event.preventDefault(); handleSelect(assetToSelect.id); } }} placeholder="Search assets" />
-      <ChevronDown className="pointer-events-none absolute right-3 top-3 h-4 w-4 text-muted-foreground" />
-      {isOpen ? (
-        <div className="absolute z-20 mt-1 max-h-64 w-full overflow-auto rounded-md border border-border bg-popover text-popover-foreground shadow-md">
-          {filteredAssets.length === 0 ? <p className="p-3 text-sm text-muted-foreground">No asset matches “{inputValue}”.</p> : null}
-          {filteredAssets.map((asset: EquipmentAsset) => (
-            <button key={asset.id} type="button" className={`flex w-full items-center gap-2 border-b border-border px-3 py-2 text-left text-sm last:border-b-0 hover:bg-muted focus:bg-muted focus:outline-none ${value === asset.id ? 'font-semibold' : ''}`} onMouseDown={(event: React.MouseEvent<HTMLButtonElement>) => event.preventDefault()} onClick={() => handleSelect(asset.id)}>
-              <Check className={`h-4 w-4 ${value === asset.id ? '' : 'invisible'}`} />
-              <span>{getAssetDisplayName(asset)}</span>
-            </button>
-          ))}
-        </div>
-      ) : null}
-    </div>
-  );
-}
-
 export default function ManagerDashboardPage() {
   const [search, setSearch] = useState<string>('');
   const [selectedDate, setSelectedDate] = useState<Date>(startOfDay(new Date()));
   const [exportWeekDate, setExportWeekDate] = useState<Date>(startOfDay(new Date()));
-  const [isExporting, setIsExporting] = useState(false);
   const [openEmployeeKeys, setOpenEmployeeKeys] = useState<string[]>([]);
   const [editingEntryId, setEditingEntryId] = useState<string>('');
   const [editValues, setEditValues] = useState<EditableEntry | null>(null);
@@ -329,19 +206,6 @@ export default function ManagerDashboardPage() {
     });
     return [...groups.values()].reduce((total: number, dayEntries: ShopTimeEntry[]) => total + getDayPayMinutes(dayEntries).totalMinutes, 0);
   }, [weeklyEntries]);
-
-  const pendingPtoRequests = useMemo(() => {
-    return timeEntries
-      .filter((entry: ShopTimeEntry) => isPtoEntry(entry) && entry.ptoApproval === 'Pending')
-      .map((entry: ShopTimeEntry) => ({
-        ...entry,
-        employeeName: getEntryEmployeeName(entry, employees),
-        dateLabel: entry.clockIn ? format(new Date(entry.clockIn), 'EEE, MMM d') : 'Unknown date',
-        ptoHours: getPtoHours(entry),
-        ptoType: entry.pTOTypeKey ? ShopTimeEntryPTOTypeKeyToLabel[entry.pTOTypeKey] : 'PTO',
-      }))
-      .sort((a, b) => new Date(a.clockIn ?? '').getTime() - new Date(b.clockIn ?? '').getTime());
-  }, [timeEntries, employees]);
 
   const rangeViewEmployee = useMemo(() => {
     if (!rangeViewEmployeeId) return null;
@@ -1008,104 +872,6 @@ export default function ManagerDashboardPage() {
     }
   };
 
-  const handlePtoApproval = async (entryId: string, approval: ShopTimeEntryPTOApprovalKey) => {
-    try {
-      await updateTimeEntry.mutateAsync({
-        id: entryId,
-        changedFields: { ptoApproval: approval },
-      });
-      toast.success(`PTO request ${approval.toLowerCase()}.`);
-    } catch (error: unknown) {
-      toast.error(error instanceof Error ? error.message : 'Unable to update PTO approval.');
-    }
-  };
-
-  const handleExportWeeklyPayroll = async () => {
-    if (weeklyEntries.length === 0) {
-      toast.info(`No time entries are available for ${formatWeekRangeLabel(exportWeekDate)}.`);
-      return;
-    }
-
-    const dayKeys = Array.from({ length: 7 }, (_value, index) => format(addDays(exportWeekRange.start, index), 'yyyy-MM-dd'));
-    const entriesByEmployee = new Map<string, ShopTimeEntry[]>();
-    weeklyEntries.forEach((entry: ShopTimeEntry) => {
-      const employeeKey = getEntryEmployeeKey(entry);
-      const currentEntries = entriesByEmployee.get(employeeKey) ?? [];
-      currentEntries.push(entry);
-      entriesByEmployee.set(employeeKey, currentEntries);
-    });
-
-    const payrollEmployees = Array.from(entriesByEmployee.entries())
-      .map(([employeeKey, entries]: [string, ShopTimeEntry[]]) => {
-        const firstEntry = entries[0];
-        const employeeName = firstEntry ? getEntryEmployeeName(firstEntry, employees) : 'Unknown employee';
-        const employeeNumber = firstEntry ? getEntryEmployeeNumber(firstEntry, employees) : employeeKey;
-        const sortedEntries = [...entries].sort((entryA: ShopTimeEntry, entryB: ShopTimeEntry) => new Date(entryA.clockIn ?? '').getTime() - new Date(entryB.clockIn ?? '').getTime());
-        const entriesByDay = new Map<string, ShopTimeEntry[]>();
-        sortedEntries.forEach((entry: ShopTimeEntry) => {
-          const dayKey = getEntryWorkDateKey(entry);
-          const dayEntries = entriesByDay.get(dayKey) ?? [];
-          dayEntries.push(entry);
-          entriesByDay.set(dayKey, dayEntries);
-        });
-        const dayHours = dayKeys.map((dayKey) => getDayPayMinutes(entriesByDay.get(dayKey) ?? []).totalMinutes);
-        const noLunchDays = dayKeys.flatMap((dayKey, index) => {
-          const pay = getDayPayMinutes(entriesByDay.get(dayKey) ?? []);
-          return pay.noLunch ? [format(addDays(exportWeekRange.start, index), 'EEE M/d')] : [];
-        });
-        return {
-          name: employeeName,
-          number: employeeNumber,
-          dayHours,
-          noLunchDays,
-          weekHours: dayHours.reduce((total, minutes) => total + minutes, 0),
-          rows: sortedEntries.map((entry: ShopTimeEntry) => {
-            const dayEntries = entriesByDay.get(getEntryWorkDateKey(entry)) ?? [entry];
-            return {
-              workDate: getEntryWorkDateKey(entry),
-              punchIn: entry.clockIn ? format(new Date(entry.clockIn), 'M/d/yyyy p') : '',
-              punchOut: entry.clockOut ? format(new Date(entry.clockOut), 'M/d/yyyy p') : '',
-              hours: Math.round((getEntryPaidMinutes(dayEntries, entry) / 60) * 100) / 100,
-              lunch: isPtoEntry(entry) ? '' : lunchCsvLabel(dayEntries),
-              ptoTime: isPtoEntry(entry) ? `${getPtoHours(entry)} hours` : '',
-              ptoType: entry.pTOTypeKey ? ShopTimeEntryPTOTypeKeyToLabel[entry.pTOTypeKey] : '',
-              division: getEntryDivision(entry, assets) || 'Unassigned',
-              asset: getEntryAssetName(entry, assets),
-              jobNumber: getEntryJobNumber(entry) || '',
-              payType: isPtoEntry(entry) ? '' : ShopTimeEntryPayTypeKeyToLabel[entry.payTypeKey ?? DEFAULT_PAY_TYPE],
-              status: entry.clockOut ? 'Complete' : 'Active',
-              notes: getEmployeeNotes(entry.notes),
-            };
-          }),
-        };
-      })
-      .sort((employeeA, employeeB) =>
-        employeeA.name.localeCompare(employeeB.name) || employeeA.number.localeCompare(employeeB.number),
-      );
-
-    setIsExporting(true);
-    try {
-      const blob = await buildPayrollWorkbookBlob({
-        weekStart: exportWeekRange.start,
-        weekEnd: exportWeekRange.end,
-        employees: payrollEmployees,
-      });
-      const url = URL.createObjectURL(blob);
-      const link = document.createElement('a');
-      link.href = url;
-      link.download = `timecards-${format(exportWeekRange.start, 'yyyy-MM-dd')}-to-${format(exportWeekRange.end, 'yyyy-MM-dd')}.xlsx`;
-      document.body.appendChild(link);
-      link.click();
-      document.body.removeChild(link);
-      URL.revokeObjectURL(url);
-      toast.success(`Excel workbook exported for ${payrollEmployees.length} employee${payrollEmployees.length === 1 ? '' : 's'} · ${formatWeekRangeLabel(exportWeekDate)}.`);
-    } catch (error: unknown) {
-      toast.error(error instanceof Error ? error.message : 'Unable to export the Excel workbook.');
-    } finally {
-      setIsExporting(false);
-    }
-  };
-
   if (userLoading || !user) {
     return (
       <main className="mx-auto flex w-full max-w-3xl flex-1 flex-col gap-6 p-4 sm:p-6 lg:p-8">
@@ -1145,31 +911,7 @@ export default function ManagerDashboardPage() {
   return (
     <main className="mx-auto flex w-full max-w-6xl flex-1 flex-col gap-6 p-4 sm:p-6 lg:p-8">
 
-      {pendingPtoRequests.length > 0 ? (
-        <Card className="border-l-4 border-l-amber-400 bg-card text-card-foreground shadow-sm">
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2 text-xl text-amber-600 dark:text-amber-400">
-              <CalendarIcon className="h-5 w-5" /> Pending PTO requests ({pendingPtoRequests.length})
-            </CardTitle>
-            <p className="text-sm text-muted-foreground">Review and approve or deny PTO requests from all employees.</p>
-          </CardHeader>
-          <CardContent className="space-y-3">
-            {pendingPtoRequests.map((pto) => (
-              <div key={pto.id} className="flex flex-col gap-3 rounded-lg border border-amber-200 bg-amber-50/50 p-4 dark:border-amber-900 dark:bg-amber-950/20 sm:flex-row sm:items-center sm:justify-between">
-                <div>
-                  <p className="font-semibold text-foreground">{pto.employeeName}</p>
-                  <p className="text-sm text-muted-foreground">{pto.dateLabel} · {pto.ptoHours} hours · {pto.ptoType}</p>
-                  <Badge variant="outline" className="mt-1 border-amber-300 text-amber-700 dark:border-amber-700 dark:text-amber-400">{ShopTimeEntryPTOApprovalKeyToLabel[pto.ptoApproval!]}</Badge>
-                </div>
-                <div className="flex gap-2">
-                  <Button type="button" size="sm" onClick={() => void handlePtoApproval(pto.id, 'Approved')} disabled={updateTimeEntry.isPending}><Check className="mr-1 h-4 w-4" /> Approve</Button>
-                  <Button type="button" size="sm" variant="destructive" onClick={() => void handlePtoApproval(pto.id, 'Denied')} disabled={updateTimeEntry.isPending}><X className="mr-1 h-4 w-4" /> Deny</Button>
-                </div>
-              </div>
-            ))}
-          </CardContent>
-        </Card>
-      ) : null}
+      <PtoApprovalPanel timeEntries={timeEntries} employees={employees} />
 
       <Card className="border-l-4 border-l-primary bg-card text-card-foreground shadow-sm">
         <CardHeader>
@@ -1923,55 +1665,7 @@ export default function ManagerDashboardPage() {
         </Card>
       ) : null}
 
-      <Card className="bg-card text-card-foreground shadow-sm">
-        <CardHeader>
-          <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
-            <div>
-              <CardTitle className="flex items-center gap-2 text-xl"><Download className="h-5 w-5" /> Weekly timecard export</CardTitle>
-              <p className="mt-1 text-sm text-muted-foreground">Choose a Sunday-Saturday payroll week, then export one Excel workbook.</p>
-            </div>
-            <Button type="button" variant="secondary" onClick={() => void handleExportWeeklyPayroll()} disabled={weeklyEntries.length === 0 || isExporting} className="w-full sm:w-auto">
-              <Download className="mr-2 h-4 w-4" /> {isExporting ? 'Building Excel…' : `Export ${formatWeekRangeLabel(exportWeekDate)} Excel`}
-            </Button>
-          </div>
-        </CardHeader>
-        <CardContent>
-          <div className="flex flex-col gap-3 rounded-lg border border-border bg-background p-3 sm:flex-row sm:items-center sm:justify-between">
-            <div>
-              <p className="text-sm font-medium text-foreground">Export week</p>
-              <p className="text-sm text-muted-foreground">{formatWeekRangeLabel(exportWeekDate)} · {weeklyEntries.length} entries · {formatDuration(weeklyPayrollMinutes)}</p>
-            </div>
-            <div className="flex items-center gap-1 rounded-md border border-border bg-card p-1 text-card-foreground">
-              <Button type="button" variant="ghost" size="icon" aria-label="Previous export week" onClick={() => setExportWeekDate((currentDate: Date) => addWeeks(currentDate, -1))}>
-                <ChevronLeft className="h-4 w-4" />
-              </Button>
-              <Popover>
-                <PopoverTrigger asChild>
-                  <Button type="button" variant="outline" className="min-w-56 justify-start bg-background">
-                    <CalendarIcon className="mr-2 h-4 w-4" />
-                    {formatWeekRangeLabel(exportWeekDate)}
-                  </Button>
-                </PopoverTrigger>
-                <PopoverContent className="w-auto p-0" align="end">
-                  <Calendar
-                    mode="single"
-                    selected={exportWeekDate}
-                    onSelect={(date: Date | undefined) => {
-                      if (date) {
-                        setExportWeekDate(startOfDay(date));
-                      }
-                    }}
-                    initialFocus
-                  />
-                </PopoverContent>
-              </Popover>
-              <Button type="button" variant="ghost" size="icon" aria-label="Next export week" onClick={() => setExportWeekDate((currentDate: Date) => addWeeks(currentDate, 1))}>
-                <ChevronRight className="h-4 w-4" />
-              </Button>
-            </div>
-          </div>
-        </CardContent>
-      </Card>
+      <PayrollExportCard exportWeekDate={exportWeekDate} onExportWeekDateChange={setExportWeekDate} weeklyEntries={weeklyEntries} weeklyPayrollMinutes={weeklyPayrollMinutes} employees={employees} assets={assets} />
 
     </main>
   );

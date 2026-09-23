@@ -1,6 +1,6 @@
 import { useMemo, useRef, useState } from 'react';
 import { addHours, format, startOfDay } from 'date-fns';
-import { CalendarIcon, Check, ChevronDown, Clock, Plus, RefreshCw, TimerReset, X } from 'lucide-react';
+import { CalendarIcon, Check, Clock, Plus, RefreshCw, TimerReset, X } from 'lucide-react';
 import { toast } from 'sonner';
 
 import { Badge } from '@/components/ui/badge';
@@ -13,6 +13,7 @@ import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Textarea } from '@/components/ui/textarea';
 import { VoiceNoteButton } from '@/components/voice-note-button';
+import { AssetPicker } from '@/components/asset-picker';
 import { useAllEquipmentAssets, useCreateShopTimeEntry, useShopEmployeeList, useShopTimeEntryList, useUpdateShopTimeEntry } from '@/hooks/use-shop-data';
 import type { EquipmentAsset } from '@/models/equipment-asset';
 import { mapShopEmployees, type AppShopEmployee } from '@/lib/shop-employees';
@@ -27,7 +28,8 @@ import {
   roundClockInUpToQuarterHour,
   stripNoLunchMarker,
 } from '@/lib/time-rules';
-import { ShopTimeEntryPTOTypeKeyToLabel, DEFAULT_PAY_TYPE, type ShopTimeEntry, type ShopTimeEntryPTOTimeKey, type ShopTimeEntryPTOTypeKey } from '@/models/shop-time-entry';
+import { getAssetDisplayName, getTimeEntryAssetName, getEntryJobNumber, PTO_TIME_KEY_BY_HOURS, getPtoClockInIso } from '@/lib/entry-helpers';
+import { ShopTimeEntryPTOTypeKeyToLabel, DEFAULT_PAY_TYPE, type ShopTimeEntry, type ShopTimeEntryPTOTypeKey } from '@/models/shop-time-entry';
 
 type PtoHours = 4 | 8;
 type ClockInConfirmation = {
@@ -38,102 +40,13 @@ type ClockInConfirmation = {
   clockIn: string;
 };
 
-
-type AssetPickerProps = {
-  assets: EquipmentAsset[];
-  value: string;
-  onChange: (asset: Pick<EquipmentAsset, 'id' | 'asset' | 'divisionCode'> | undefined) => void;
-  currentAsset?: Pick<EquipmentAsset, 'id' | 'asset' | 'divisionCode'>;
-};
-
 const getNowIso = () => new Date().toISOString();
 const getWorkDate = (dateTime: string) => format(new Date(dateTime), 'yyyy-MM-dd');
-const PTO_TIME_KEY_BY_HOURS: Record<PtoHours, ShopTimeEntryPTOTimeKey> = { 4: 'PTOTimeKey04', 8: 'PTOTimeKey18' };
-const getAssetDisplayName = (asset?: EquipmentAsset | Pick<EquipmentAsset, 'id' | 'asset'> | null) => asset?.asset || 'Unassigned asset';
-const getEntryJobNumber = (entry: ShopTimeEntry) => entry.jobNumber ?? '';
-
-const getPtoClockInIso = (date: Date) => {
-  const ptoDate = startOfDay(date);
-  ptoDate.setHours(8, 0, 0, 0);
-  return ptoDate.toISOString();
-};
 
 
 
-function getTimeEntryAssetName(entry: ShopTimeEntry, assets: EquipmentAsset[]) {
-  if (isPtoEntry(entry)) return 'PTO';
-  const matchedAsset = entry.asset?.id ? assets.find((asset: EquipmentAsset) => asset.id === entry.asset?.id) : undefined;
-  if (entry.asset?.asset || matchedAsset) return entry.asset?.asset || getAssetDisplayName(matchedAsset);
-  const timeEntryParts = entry.timeEntry.split(' - ');
-  const savedAssetName = timeEntryParts.length > 1 ? timeEntryParts.slice(1).join(' - ').trim() : '';
-  if (savedAssetName && savedAssetName !== 'Time entry') return savedAssetName;
-  if (getEntryJobNumber(entry)) return `Job ${getEntryJobNumber(entry)}`;
-  return entry.assetDivision ? `Division ${String(entry.assetDivision)}` : 'Unassigned asset';
-}
 
-function AssetPicker({ assets, value, onChange, currentAsset }: AssetPickerProps) {
-  const [search, setSearch] = useState<string>('');
-  const [isOpen, setIsOpen] = useState<boolean>(false);
-  const trimmedSearch = search.trim();
-  const searchedAssets = assets;
-  const searchedAssetsLoading = false;
-  const allAssets = useMemo(() => {
-    const assetsById = new Map<string, EquipmentAsset>();
-    [...assets, ...searchedAssets, ...(currentAsset ? [currentAsset as EquipmentAsset] : [])].forEach((asset: EquipmentAsset) => {
-      if (asset.id) assetsById.set(asset.id, asset);
-    });
-    return Array.from(assetsById.values()).sort((assetA: EquipmentAsset, assetB: EquipmentAsset) =>
-      getAssetDisplayName(assetA).localeCompare(getAssetDisplayName(assetB), undefined, { numeric: true, sensitivity: 'base' }),
-    );
-  }, [assets, currentAsset, searchedAssets]);
-  const selectedAsset = allAssets.find((asset: EquipmentAsset) => asset.id === value);
-  const inputValue = search || (selectedAsset ? getAssetDisplayName(selectedAsset) : '');
-  const filteredAssets = allAssets.filter((asset: EquipmentAsset) => asset.id && getAssetDisplayName(asset).toLowerCase().includes(trimmedSearch.toLowerCase()));
-  const assetToSelect = filteredAssets.find((asset: EquipmentAsset) => getAssetDisplayName(asset).toLowerCase() === trimmedSearch.toLowerCase()) ?? filteredAssets[0];
-  const handleSelect = (assetId: string) => {
-    const selected = allAssets.find((asset: EquipmentAsset) => asset.id === assetId);
-    onChange(selected ? { id: selected.id, asset: getAssetDisplayName(selected), divisionCode: selected.divisionCode } : undefined);
-    setSearch(selected ? getAssetDisplayName(selected) : '');
-    setIsOpen(false);
-  };
-
-  return (
-    <div className="relative">
-      <Input
-        className={`bg-background pr-10 ${value ? 'font-semibold' : ''}`}
-        value={inputValue}
-        onChange={(event: React.ChangeEvent<HTMLInputElement>) => {
-          setSearch(event.target.value);
-          setIsOpen(true);
-          if (value) onChange(undefined);
-        }}
-        onFocus={() => setIsOpen(true)}
-        onBlur={() => window.setTimeout(() => setIsOpen(false), 150)}
-        onKeyDown={(event: React.KeyboardEvent<HTMLInputElement>) => {
-          if (event.key === 'Enter' && assetToSelect?.id) {
-            event.preventDefault();
-            handleSelect(assetToSelect.id);
-          }
-        }}
-      />
-      <ChevronDown className="pointer-events-none absolute right-3 top-3 h-4 w-4 text-muted-foreground" />
-      {isOpen ? (
-        <div className="absolute z-20 mt-1 max-h-64 w-full overflow-auto rounded-md border border-border bg-popover text-popover-foreground shadow-md">
-          {searchedAssetsLoading ? <p className="p-3 text-sm text-muted-foreground">Searching assets...</p> : null}
-          {!searchedAssetsLoading && filteredAssets.length === 0 ? <p className="p-3 text-sm text-muted-foreground">No asset matches “{inputValue}”.</p> : null}
-          {filteredAssets.map((asset: EquipmentAsset) => (
-            <button key={asset.id} type="button" className={`flex w-full items-center gap-2 border-b border-border px-3 py-2 text-left text-sm last:border-b-0 hover:bg-muted focus:bg-muted focus:outline-none ${value === asset.id ? 'font-semibold' : ''}`} onMouseDown={(event: React.MouseEvent<HTMLButtonElement>) => event.preventDefault()} onClick={() => handleSelect(asset.id)}>
-              <Check className={`h-4 w-4 ${value === asset.id ? '' : 'invisible'}`} />
-              <span>{getAssetDisplayName(asset)}</span>
-            </button>
-          ))}
-        </div>
-      ) : null}
-    </div>
-  );
-}
-
-export default function HomePage() {
+export default function TimecardPage() {
   const [employeeCode, setEmployeeCode] = useState<string>('');
   const [selectedEmployeeId, setSelectedEmployeeId] = useState<string>('');
   const [selectedAssetId, setSelectedAssetId] = useState<string>('');

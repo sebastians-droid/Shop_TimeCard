@@ -363,9 +363,12 @@ async function deactivateAsset(id) {
   await dataverseFetch('PATCH', `/swank_equipmentassets(${id})`, { statecode: 1, statuscode: 2 });
 }
 
-async function listTimeEntries() {
+async function listTimeEntries({ from, to } = {}) {
+  let filter = 'statecode eq 0';
+  if (from) filter += ` and swank_clockin ge ${from}`;
+  if (to) filter += ` and swank_clockin le ${to}`;
   const rows = await listAll(
-    '/swank_shoptimeentries?$select=swank_shoptimeentryid,swank_timeentry,swank_clockin,swank_clockout,swank_hours,swank_jobnumber,swank_notes,swank_workdate,swank_assetdivision,crcce_division,swank_ptotime,swank_ptotype,swank_paytype,swank_oncall,swank_ptoapproval,_swank_employee_value,_swank_asset_value&$expand=swank_Employee($select=swank_shopemployeeid,swank_autonumber,swank_empnum),swank_Asset($select=swank_equipmentassetid,swank_assetidentifier,swank_divisioncode)&$orderby=swank_clockin desc',
+    `/swank_shoptimeentries?$select=swank_shoptimeentryid,swank_timeentry,swank_clockin,swank_clockout,swank_hours,swank_jobnumber,swank_notes,swank_workdate,swank_assetdivision,crcce_division,swank_ptotime,swank_ptotype,swank_paytype,swank_oncall,swank_ptoapproval,_swank_employee_value,_swank_asset_value&$expand=swank_Employee($select=swank_shopemployeeid,swank_autonumber,swank_empnum),swank_Asset($select=swank_equipmentassetid,swank_assetidentifier,swank_divisioncode)&$filter=${filter}&$orderby=swank_clockin desc`,
   );
   return rows.map(mapTimeEntry);
 }

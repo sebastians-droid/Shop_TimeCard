@@ -134,10 +134,15 @@ async function handleRequest(request) {
     }
 
     if (method === 'GET' && (pathname === '/api/time-entries' || pathname === '/api/timeEntries')) {
-      return json(200, { entries: await listTimeEntries() });
+      requireUser(request);
+      const url = new URL(request.url, 'https://timecard.local');
+      const from = url.searchParams.get('from') || undefined;
+      const to = url.searchParams.get('to') || undefined;
+      return json(200, { entries: await listTimeEntries({ from, to }) });
     }
 
     if (method === 'POST' && (pathname === '/api/time-entries' || pathname === '/api/timeEntries')) {
+      requireUser(request);
       const record = await readJson(request);
       return json(201, await createTimeEntry(record));
     }
@@ -145,6 +150,7 @@ async function handleRequest(request) {
     const entryMatch = pathname.match(/^\/api\/time-entries\/([0-9a-f-]{36})$/i)
       || pathname.match(/^\/api\/timeEntries\/([0-9a-f-]{36})$/i);
     if (entryMatch && method === 'PATCH') {
+      requireUser(request);
       const record = await readJson(request);
       return json(200, await updateTimeEntry(entryMatch[1], record));
     }
