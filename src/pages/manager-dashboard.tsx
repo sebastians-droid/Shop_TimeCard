@@ -248,6 +248,8 @@ export default function ManagerDashboardPage() {
   const [rangeViewEmployeeId, setRangeViewEmployeeId] = useState('');
   const [rangeViewRange, setRangeViewRange] = useState<DateRange | undefined>(undefined);
   const [rangeOpenDay, setRangeOpenDay] = useState('');
+  const [rangeAddingForDay, setRangeAddingForDay] = useState('');
+  const [rangePtoForDay, setRangePtoForDay] = useState('');
   const queryClient = useQueryClient();
   const { data: user, isLoading: userLoading } = useUser();
   const { data: shopEmployees = [], isLoading: employeesLoading } = useShopEmployeeList();
@@ -355,7 +357,7 @@ export default function ManagerDashboardPage() {
         .filter((entry: ShopTimeEntry) => entry.employee?.id === rangeViewEmployeeId && entry.clockIn?.startsWith(dayKey))
         .sort((a: ShopTimeEntry, b: ShopTimeEntry) => new Date(a.clockIn ?? '').getTime() - new Date(b.clockIn ?? '').getTime());
       const pay = getDayPayMinutes(dayEntries);
-      return { day, dayKey, entries: dayEntries, totalMinutes: pay.totalMinutes };
+      return { day, dayKey, entries: dayEntries, totalMinutes: pay.totalMinutes, noLunch: pay.noLunch, lunchDeducted: pay.lunchDeducted, onCall: dayEntries.some((entry: ShopTimeEntry) => entry.onCall) };
     });
   }, [rangeViewEmployeeId, rangeViewRange, timeEntries]);
 
@@ -696,6 +698,304 @@ export default function ManagerDashboardPage() {
       }
       await queryClient.invalidateQueries({ queryKey: ['shopTimeEntry-list'] });
       toast.success(checked ? `On-call saved for ${summary.employeeName}.` : `On-call removed for ${summary.employeeName}.`);
+    } catch (error: unknown) {
+      if (previousEntries) {
+        queryClient.setQueryData(['shopTimeEntry-list'], previousEntries);
+      } else {
+        await queryClient.invalidateQueries({ queryKey: ['shopTimeEntry-list'] });
+      }
+      toast.error(error instanceof Error ? error.message : 'Unable to update on-call setting.');
+    } finally {
+      setOnCallUpdatingKey('');
+    }
+  };
+
+  const handleRangeClearEdits = () => {
+    setEditingEntryId('');
+    setEditValues(null);
+    setRangeAddingForDay('');
+    setNewEntryDraft(null);
+    setRangePtoForDay('');
+    setPtoDraft(null);
+  };
+
+  const handleRangeStartEdit = (entry: ShopTimeEntry) => {
+    setRangeAddingForDay('');
+    setNewEntryDraft(null);
+    setRangePtoForDay('');
+    setPtoDraft(null);
+    setEditingEntryId(entry.id);
+    setEditValues({
+      assetId: entry.asset?.id ?? '',
+      assetRecord: entry.asset,
+      division: String(entry.assetDivision ?? ''),
+      jobNumber: getEntryJobNumber(entry),
+      payTypeKey: entry.payTypeKey ?? DEFAULT_PAY_TYPE,
+      clockInTime: formatTimeForInput(entry.clockIn),
+      clockOutTime: formatTimeForInput(entry.clockOut),
+    });
+  };
+
+  const handleRangeStartAddEntry = (dayKey: string) => {
+    setEditingEntryId('');
+    setEditValues(null);
+    setRangePtoForDay('');
+    setPtoDraft(null);
+    setRangeAddingForDay(dayKey);
+    setNewEntryDraft(emptyEntryDraft(rangeViewEmployeeId));
+    setRangeOpenDay(dayKey);
+  };
+
+  const handleRangeCancelAddEntry = () => {
+    setRangeAddingForDay('');
+    setNewEntryDraft(null);
+  };
+
+  const handleRangeStartPto = (dayKey: string) => {
+    setEditingEntryId('');
+    setEditValues(null);
+    setRangeAddingForDay('');
+    setNewEntryDraft(null);
+    setRangePtoForDay(dayKey);
+    setPtoDraft(emptyPtoDraft(rangeViewEmployeeId));
+    setRangeOpenDay(dayKey);
+  };
+
+  const handleRangeCancelPto = () => {
+    setRangePtoForDay('');
+    setPtoDraft(null);
+  };
+
+  const handleRangeSaveEdit = async (entry: ShopTimeEntry, dayEntries: ShopTimeEntry[]) => {
+    if (!editValues) return;
+
+    const selectedAsset = editValues.assetId ? editValues.assetRecord ?? assets.find((asset: EquipmentAsset) => asset.id === editValues.assetId) : undefined;
+    const manualDivision = editValues.division.trim();
+    const manualJobNumber = editValues.jobNumber.trim();
+
+    if (!editValues.clockInTime || !entry.clockIn) {
+      toast.error('Clock-in time is required.');
+      return;
+    }
+
+    const clockIn = mergeDateAndTime(entry.clockIn, editValues.clockInTime);
+    const clockOut = editValues.clockOutTime ? mergeDateAndTime(entry.clockIn, editValues.clockOutTime) : undefined;
+    const label = selectedAsset ? getAssetDisplayName(selectedAsset) : manualJobNumber || (manualDivision ? `Division ${manualDivision}` : getEntryAssetName(entry, assets) || 'Time entry');
+    const notes = entry.notes ?? '';
+    const updatedEntry = { ...entry, clockIn, clockOut };
+    const employeeDayEntries = dayEntries
+      .filter((row: ShopTimeEntry) => getEntryEmployeeKey(row) === getEntryEmployeeKey(entry))
+      .map((row: ShopTimeEntry) => (row.id === entry.id ? updatedEntry : row));
+
+    try {
+      await updateTimeEntry.mutateAsync({
+        id: entry.id,
+        changedFields: {
+          timeEntry: `${getEntryEmployeeName(entry, employees)} - ${label}`,
+          asset: selectedAsset ? { id: selectedAsset.id, asset: getAssetDisplayName(selectedAsset) } : entry.asset,
+          assetDivision: selectedAsset ? selectedAsset.divisionCode : manualDivision ? Number(manualDivision) : entry.assetDivision,
+          notes: notes || undefined,
+          clockIn,
+          clockOut,
+          division: !selectedAsset && manualDivision ? Number(manualDivision) : undefined,
+          jobNumber: manualJobNumber || undefined,
+          payTypeKey: isPtoEntry(entry) ? entry.payTypeKey : editValues.payTypeKey,
+          hours: clockOut ? getEntryPaidMinutes(employeeDayEntries, updatedEntry) / 60 : undefined,
+          pTOTimeKey: isPtoEntry(entry) && (getPtoHours(entry) === 4 || getPtoHours(entry) === 8) ? PTO_TIME_KEY_BY_HOURS[getPtoHours(entry) as 4 | 8] : entry.pTOTimeKey,
+          workDate: format(new Date(clockIn), 'yyyy-MM-dd'),
+        },
+      });
+      handleCancelEdit();
+      toast.success('Timecard row updated.');
+    } catch (error: unknown) {
+      toast.error(error instanceof Error ? error.message : 'Unable to update timecard row.');
+    }
+  };
+
+  const handleRangeSaveNewEntry = async (day: Date) => {
+    if (!newEntryDraft) return;
+
+    const employee = employees.find((row: AppShopEmployee) => row.id === newEntryDraft.employeeId);
+    if (!employee) {
+      toast.error('Choose an employee for this time entry.');
+      return;
+    }
+    if (!newEntryDraft.clockInTime) {
+      toast.error('Clock-in time is required.');
+      return;
+    }
+    if (!newEntryDraft.clockOutTime) {
+      toast.error('Clock-out time is required for manager-added entries.');
+      return;
+    }
+
+    const clockIn = combineSelectedDateAndTime(day, newEntryDraft.clockInTime);
+    const clockOut = combineSelectedDateAndTime(day, newEntryDraft.clockOutTime);
+    if (new Date(clockOut).getTime() <= new Date(clockIn).getTime()) {
+      toast.error('Clock-out must be after clock-in.');
+      return;
+    }
+
+    const selectedAsset = newEntryDraft.assetId
+      ? newEntryDraft.assetRecord ?? assets.find((asset: EquipmentAsset) => asset.id === newEntryDraft.assetId)
+      : undefined;
+    const manualDivision = newEntryDraft.division.trim();
+    const manualJobNumber = newEntryDraft.jobNumber.trim();
+    if (manualDivision && !Number.isFinite(Number(manualDivision))) {
+      toast.error('Division must be a number.');
+      return;
+    }
+    const label = selectedAsset
+      ? getAssetDisplayName(selectedAsset)
+      : manualJobNumber || (manualDivision ? `Division ${manualDivision}` : 'Time entry');
+    const dayKey = format(day, 'yyyy-MM-dd');
+    const existingDayEntries = timeEntries.filter(
+      (entry: ShopTimeEntry) => entry.employee?.id === employee.id && entry.clockIn?.startsWith(dayKey),
+    );
+    const dayAlreadyNoLunch = getDayPayMinutes(existingDayEntries).noLunch;
+    const provisionalId = `new-${Date.now()}`;
+    const provisionalEntry: ShopTimeEntry = {
+      id: provisionalId,
+      timeEntry: `${employee.employeeName} - ${label}`,
+      employee: { id: employee.id, autoNumber: employee.autoNumber },
+      asset: selectedAsset ? { id: selectedAsset.id, asset: getAssetDisplayName(selectedAsset) } : undefined,
+      assetDivision: selectedAsset ? selectedAsset.divisionCode : manualDivision ? Number(manualDivision) : undefined,
+      clockIn,
+      clockOut,
+      jobNumber: manualJobNumber || undefined,
+      notes: applyNoLunchMarker(undefined, dayAlreadyNoLunch),
+      workDate: dayKey,
+    };
+    const dayEntriesForPay = [...existingDayEntries, provisionalEntry];
+    const hours = getEntryPaidMinutes(dayEntriesForPay, provisionalEntry) / 60;
+
+    try {
+      await createTimeEntry.mutateAsync({
+        timeEntry: provisionalEntry.timeEntry,
+        employee: { id: employee.id, autoNumber: employee.autoNumber },
+        asset: selectedAsset ? { id: selectedAsset.id, asset: getAssetDisplayName(selectedAsset) } : undefined,
+        assetDivision: selectedAsset ? selectedAsset.divisionCode : manualDivision ? Number(manualDivision) : undefined,
+        division: selectedAsset ? selectedAsset.divisionCode : manualDivision ? Number(manualDivision) : undefined,
+        jobNumber: manualJobNumber || undefined,
+        payTypeKey: newEntryDraft.payTypeKey,
+        clockIn,
+        clockOut,
+        hours,
+        workDate: dayKey,
+        notes: applyNoLunchMarker(undefined, dayAlreadyNoLunch),
+      });
+      handleRangeCancelAddEntry();
+      toast.success(`Time entry added for ${employee.employeeName}.`);
+    } catch (error: unknown) {
+      toast.error(error instanceof Error ? error.message : 'Unable to add time entry.');
+    }
+  };
+
+  const handleRangeSavePto = async (day: Date) => {
+    if (!ptoDraft) return;
+    const employee = employees.find((row: AppShopEmployee) => row.id === ptoDraft.employeeId);
+    if (!employee) {
+      toast.error('Choose an employee for this PTO.');
+      return;
+    }
+    if (!ptoDraft.type) {
+      toast.error('Choose a PTO type.');
+      return;
+    }
+
+    const clockIn = getPtoClockInIso(day);
+    const clockOut = addHours(new Date(clockIn), ptoDraft.hours).toISOString();
+    const dayKey = format(day, 'yyyy-MM-dd');
+    const typeLabel = ShopTimeEntryPTOTypeKeyToLabel[ptoDraft.type];
+
+    try {
+      await createTimeEntry.mutateAsync({
+        timeEntry: `${employee.employeeName} - PTO`,
+        pTOTimeKey: PTO_TIME_KEY_BY_HOURS[ptoDraft.hours],
+        pTOTypeKey: ptoDraft.type,
+        employee: { id: employee.id, autoNumber: employee.autoNumber },
+        jobNumber: 'PTO',
+        clockIn,
+        clockOut,
+        hours: ptoDraft.hours,
+        workDate: dayKey,
+        ptoApproval: 'Approved' as ShopTimeEntryPTOApprovalKey,
+        notes: `${ptoDraft.hours} hours ${typeLabel} PTO submitted for ${format(day, 'MMM d, yyyy')}.`,
+      });
+      handleRangeCancelPto();
+      toast.success(`${ptoDraft.hours} hours ${typeLabel} PTO added for ${employee.employeeName} on ${format(day, 'MMM d')}.`);
+    } catch (error: unknown) {
+      toast.error(error instanceof Error ? error.message : 'Unable to add PTO.');
+    }
+  };
+
+  const handleRangeNoLunchChange = async (dayEntries: ShopTimeEntry[], dayKey: string, checked: boolean) => {
+    const laborEntries = dayEntries.filter((entry: ShopTimeEntry) => !isPtoEntry(entry));
+    if (laborEntries.length === 0) {
+      toast.info('Clock time for this employee first, then lunch can be overridden.');
+      return;
+    }
+
+    const entryIds = new Set(laborEntries.map((entry: ShopTimeEntry) => entry.id));
+    const previousEntries = queryClient.getQueryData<ShopTimeEntry[]>(['shopTimeEntry-list']);
+
+    queryClient.setQueryData<ShopTimeEntry[]>(['shopTimeEntry-list'], (current) =>
+      (current ?? []).map((entry: ShopTimeEntry) =>
+        entryIds.has(entry.id) ? { ...entry, notes: applyNoLunchMarker(entry.notes, checked) } : entry,
+      ),
+    );
+
+    const updatingKey = `${rangeViewEmployeeId}-${dayKey}`;
+    setLunchUpdatingKey(updatingKey);
+    try {
+      for (const entry of laborEntries) {
+        const nextNotes = applyNoLunchMarker(entry.notes, checked);
+        await apiFetch<ShopTimeEntry>(`/api/time-entries/${entry.id}`, {
+          method: 'PATCH',
+          body: JSON.stringify({ notes: nextNotes }),
+        });
+      }
+      await queryClient.invalidateQueries({ queryKey: ['shopTimeEntry-list'] });
+      toast.success(checked ? `No lunch saved for ${rangeViewEmployee?.employeeName ?? 'employee'}.` : `Lunch deduction restored for ${rangeViewEmployee?.employeeName ?? 'employee'}.`);
+    } catch (error: unknown) {
+      if (previousEntries) {
+        queryClient.setQueryData(['shopTimeEntry-list'], previousEntries);
+      } else {
+        await queryClient.invalidateQueries({ queryKey: ['shopTimeEntry-list'] });
+      }
+      toast.error(error instanceof Error ? error.message : 'Unable to update lunch setting.');
+    } finally {
+      setLunchUpdatingKey('');
+    }
+  };
+
+  const handleRangeOnCallChange = async (dayEntries: ShopTimeEntry[], dayKey: string, checked: boolean) => {
+    const laborEntries = dayEntries.filter((entry: ShopTimeEntry) => !isPtoEntry(entry));
+    if (laborEntries.length === 0) {
+      toast.info('Clock time for this employee first, then on-call can be toggled.');
+      return;
+    }
+
+    const entryIds = new Set(laborEntries.map((entry: ShopTimeEntry) => entry.id));
+    const previousEntries = queryClient.getQueryData<ShopTimeEntry[]>(['shopTimeEntry-list']);
+
+    queryClient.setQueryData<ShopTimeEntry[]>(['shopTimeEntry-list'], (current) =>
+      (current ?? []).map((entry: ShopTimeEntry) =>
+        entryIds.has(entry.id) ? { ...entry, onCall: checked } : entry,
+      ),
+    );
+
+    const updatingKey = `${rangeViewEmployeeId}-${dayKey}`;
+    setOnCallUpdatingKey(updatingKey);
+    try {
+      for (const entry of laborEntries) {
+        await apiFetch<ShopTimeEntry>(`/api/time-entries/${entry.id}`, {
+          method: 'PATCH',
+          body: JSON.stringify({ onCall: checked }),
+        });
+      }
+      await queryClient.invalidateQueries({ queryKey: ['shopTimeEntry-list'] });
+      toast.success(checked ? `On-call saved for ${rangeViewEmployee?.employeeName ?? 'employee'}.` : `On-call removed for ${rangeViewEmployee?.employeeName ?? 'employee'}.`);
     } catch (error: unknown) {
       if (previousEntries) {
         queryClient.setQueryData(['shopTimeEntry-list'], previousEntries);
@@ -1356,7 +1656,7 @@ export default function ManagerDashboardPage() {
             <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
               <div className="flex items-center gap-3 flex-wrap">
                 <CardTitle className="flex items-center gap-2 text-xl"><CalendarRange className="h-5 w-5" /> Date range</CardTitle>
-                <Select value={rangeViewEmployeeId} onValueChange={(id: string) => { setRangeViewEmployeeId(id); setRangeOpenDay(''); }}>
+                <Select value={rangeViewEmployeeId} onValueChange={(id: string) => { setRangeViewEmployeeId(id); setRangeOpenDay(''); handleRangeClearEdits(); }}>
                   <SelectTrigger className="w-auto min-w-48 bg-background">
                     <SelectValue placeholder="Select employee" />
                   </SelectTrigger>
@@ -1376,10 +1676,10 @@ export default function ManagerDashboardPage() {
                     </Button>
                   </PopoverTrigger>
                   <PopoverContent className="w-auto p-0" align="end">
-                    <Calendar mode="range" selected={rangeViewRange} onSelect={(range: DateRange | undefined) => { setRangeViewRange(range); setRangeOpenDay(''); }} numberOfMonths={2} />
+                    <Calendar mode="range" selected={rangeViewRange} onSelect={(range: DateRange | undefined) => { setRangeViewRange(range); setRangeOpenDay(''); handleRangeClearEdits(); }} numberOfMonths={2} />
                   </PopoverContent>
                 </Popover>
-                <Button type="button" variant="outline" onClick={() => setRangeViewEmployeeId('')}><X className="mr-2 h-4 w-4" /> Close</Button>
+                <Button type="button" variant="outline" onClick={() => { setRangeViewEmployeeId(''); handleRangeClearEdits(); }}><X className="mr-2 h-4 w-4" /> Close</Button>
               </div>
             </div>
           </CardHeader>
@@ -1390,45 +1690,226 @@ export default function ManagerDashboardPage() {
               <p className="rounded-lg bg-muted p-4 text-sm text-muted-foreground">Click a second date to complete the range.</p>
             ) : null}
 
-            {rangeViewDays.map(({ day, dayKey, entries: dayEntries, totalMinutes: dayMinutes }) => (
+            {rangeViewDays.map(({ day, dayKey, entries: dayEntries, totalMinutes: dayMinutes, noLunch: dayNoLunch, onCall: dayOnCall }) => (
               <Collapsible key={dayKey} open={rangeOpenDay === dayKey} onOpenChange={() => setRangeOpenDay(rangeOpenDay === dayKey ? '' : dayKey)} asChild>
                 <section className="rounded-lg border border-border bg-background">
                   <CollapsibleTrigger asChild>
                     <button type="button" className="flex w-full items-center justify-between p-3 text-left">
                       <div>
                         <p className="font-semibold text-sm">{format(day, 'EEEE, MMM d')}</p>
-                        <p className="text-xs text-muted-foreground">{dayEntries.length} {dayEntries.length === 1 ? 'entry' : 'entries'} · {formatDuration(dayMinutes)}</p>
+                        <p className="text-xs text-muted-foreground">{dayEntries.length} {dayEntries.length === 1 ? 'entry' : 'entries'} · {formatDuration(dayMinutes)}{dayNoLunch ? ' · No lunch' : ''}</p>
                       </div>
                       <div className="flex items-center gap-2">
                         {dayEntries.length === 0 ? <Badge variant="outline">No entries</Badge> : <Badge variant="secondary">{formatDuration(dayMinutes)}</Badge>}
+                        {dayNoLunch ? <Badge variant="secondary">No lunch</Badge> : null}
+                        {dayOnCall ? <Badge variant="secondary"><Phone className="mr-1 h-3 w-3" />On Call</Badge> : null}
                         <ChevronDown className={`h-4 w-4 transition-transform ${rangeOpenDay === dayKey ? 'rotate-180' : ''}`} />
                       </div>
                     </button>
                   </CollapsibleTrigger>
                   <CollapsibleContent>
+                    <div className="flex flex-wrap gap-2 border-t border-border px-3 py-2">
+                      <NoLunchCheckbox checked={dayNoLunch} disabled={lunchUpdatingKey === `${rangeViewEmployeeId}-${dayKey}`} onCheckedChange={(checked: boolean) => void handleRangeNoLunchChange(dayEntries, dayKey, checked)} />
+                      <button
+                        type="button"
+                        role="checkbox"
+                        aria-checked={dayOnCall}
+                        disabled={onCallUpdatingKey === `${rangeViewEmployeeId}-${dayKey}`}
+                        onClick={(event) => { event.preventDefault(); event.stopPropagation(); if (onCallUpdatingKey !== `${rangeViewEmployeeId}-${dayKey}`) void handleRangeOnCallChange(dayEntries, dayKey, !dayOnCall); }}
+                        className={`flex items-center gap-2.5 rounded-lg border px-3 py-2 text-left text-sm transition-colors disabled:opacity-60 ${dayOnCall ? 'border-primary bg-primary/10' : 'border-border bg-card hover:bg-muted'}`}
+                      >
+                        <span className={`flex h-5 w-5 shrink-0 items-center justify-center rounded border ${dayOnCall ? 'border-primary bg-primary text-primary-foreground' : 'border-muted-foreground/40 bg-background'}`}>
+                          {dayOnCall ? <Phone className="h-3.5 w-3.5" /> : null}
+                        </span>
+                        <span className="font-medium text-foreground">On Call</span>
+                      </button>
+                    </div>
                     <div className="space-y-2 border-t border-border p-3">
                       {dayEntries.length === 0 ? <p className="text-sm text-muted-foreground">No entries for this day.</p> : null}
-                      {dayEntries.map((entry: ShopTimeEntry) => (
-                        <div key={entry.id} className="rounded-lg border border-border bg-card p-3 text-card-foreground">
-                          <div className="flex flex-wrap items-center justify-between gap-2">
-                            <div>
-                              <p className="font-medium text-sm">{getEntryAssetName(entry, assets) || 'Time entry'}</p>
-                              <p className="text-xs text-muted-foreground">
-                                {entry.clockIn ? format(new Date(entry.clockIn), 'p') : '—'} – {entry.clockOut ? format(new Date(entry.clockOut), 'p') : 'Active'}
-                                {isPtoEntry(entry) ? ` · ${getPtoHours(entry)}h PTO` : ''}
-                                {!isPtoEntry(entry) ? ` · Div ${getEntryDivision(entry, assets) || '—'}` : ''}
-                                {getEntryJobNumber(entry) ? ` · Job ${getEntryJobNumber(entry)}` : ''}
-                              </p>
+                      {dayEntries.map((entry: ShopTimeEntry) => {
+                        const isRangeEditing = editingEntryId === entry.id;
+                        return (
+                          <div key={entry.id} className="rounded-lg border border-border bg-card p-3 text-card-foreground">
+                            {isRangeEditing && editValues ? (
+                              <div className="space-y-3">
+                                <div className="space-y-2">
+                                  <p className="text-xs text-muted-foreground">Asset / job</p>
+                                  <AssetPicker assets={assets} value={editValues.assetId} onChange={(asset: Pick<EquipmentAsset, 'id' | 'asset' | 'divisionCode'> | undefined) => setEditValues({ ...editValues, assetId: asset?.id ?? '', assetRecord: asset, division: asset?.divisionCode ? String(asset.divisionCode) : editValues.division })} currentAsset={editValues.assetRecord ?? entry.asset} />
+                                  <div className="grid gap-3 sm:grid-cols-2">
+                                    <div className="space-y-2">
+                                      <Label htmlFor={`range-div-${entry.id}`}>Division</Label>
+                                      <Input id={`range-div-${entry.id}`} value={editValues.division} onChange={(event: React.ChangeEvent<HTMLInputElement>) => setEditValues({ ...editValues, division: event.target.value.replace(/\D/g, '') })} placeholder="Optional division code" />
+                                    </div>
+                                    <div className="space-y-2">
+                                      <Label htmlFor={`range-job-${entry.id}`}>Job Number</Label>
+                                      <Input id={`range-job-${entry.id}`} value={editValues.jobNumber} onChange={(event: React.ChangeEvent<HTMLInputElement>) => setEditValues({ ...editValues, jobNumber: event.target.value })} placeholder="Optional job note" />
+                                    </div>
+                                  </div>
+                                  {!isPtoEntry(entry) ? (
+                                    <div className="space-y-2">
+                                      <Label htmlFor={`range-pay-${entry.id}`}>Pay type</Label>
+                                      <Select value={editValues.payTypeKey} onValueChange={(value: ShopTimeEntryPayTypeKey) => setEditValues({ ...editValues, payTypeKey: value })}>
+                                        <SelectTrigger id={`range-pay-${entry.id}`} className="w-full bg-background"><SelectValue placeholder="Select pay type" /></SelectTrigger>
+                                        <SelectContent>{Object.entries(ShopTimeEntryPayTypeKeyToLabel).map(([key, label]) => (<SelectItem key={key} value={key}>{label}</SelectItem>))}</SelectContent>
+                                      </Select>
+                                    </div>
+                                  ) : null}
+                                </div>
+                                <div className="grid gap-3 sm:grid-cols-3">
+                                  <div className="space-y-2">
+                                    <Label htmlFor={`range-ci-${entry.id}`}>Clock in</Label>
+                                    <Input id={`range-ci-${entry.id}`} type="time" value={editValues.clockInTime} onChange={(event: React.ChangeEvent<HTMLInputElement>) => setEditValues({ ...editValues, clockInTime: event.target.value })} />
+                                  </div>
+                                  <div className="space-y-2">
+                                    <Label htmlFor={`range-co-${entry.id}`}>Clock out</Label>
+                                    <Input id={`range-co-${entry.id}`} type="time" value={editValues.clockOutTime} onChange={(event: React.ChangeEvent<HTMLInputElement>) => setEditValues({ ...editValues, clockOutTime: event.target.value })} />
+                                  </div>
+                                  <div className="space-y-2">
+                                    <Label>Duration</Label>
+                                    <p className="font-semibold text-sm">{formatDuration(getEntryPaidMinutes(dayEntries, entry))}</p>
+                                  </div>
+                                </div>
+                                <div className="flex gap-2">
+                                  <Button type="button" size="sm" onClick={() => void handleRangeSaveEdit(entry, dayEntries)} disabled={updateTimeEntry.isPending}><Check className="mr-1 h-3 w-3" /> Save</Button>
+                                  <Button type="button" size="sm" variant="outline" onClick={handleCancelEdit}><X className="mr-1 h-3 w-3" /> Cancel</Button>
+                                </div>
+                              </div>
+                            ) : (
+                              <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                                <div>
+                                  <div className="flex flex-wrap items-center gap-2">
+                                    <p className="font-medium text-sm">{getEntryAssetName(entry, assets) || 'Time entry'}</p>
+                                    {isPtoEntry(entry) && entry.pTOTypeKey ? <Badge variant="outline">{ShopTimeEntryPTOTypeKeyToLabel[entry.pTOTypeKey]}</Badge> : null}
+                                    {!isPtoEntry(entry) ? <Badge variant="outline">{ShopTimeEntryPayTypeKeyToLabel[entry.payTypeKey ?? DEFAULT_PAY_TYPE]}</Badge> : null}
+                                  </div>
+                                  <p className="text-xs text-muted-foreground">
+                                    {entry.clockIn ? format(new Date(entry.clockIn), 'p') : '—'} – {entry.clockOut ? format(new Date(entry.clockOut), 'p') : 'Active'}
+                                    {isPtoEntry(entry) ? ` · ${getPtoHours(entry)}h PTO` : ` · Div ${getEntryDivision(entry, assets) || '—'}`}
+                                    {getEntryJobNumber(entry) ? ` · Job ${getEntryJobNumber(entry)}` : ''}
+                                    {' · '}{formatDuration(getEntryPaidMinutes(dayEntries, entry))}
+                                  </p>
+                                </div>
+                                <div className="flex items-center gap-1.5">
+                                  {entry.onCall ? <Badge variant="secondary"><Phone className="mr-1 h-3 w-3" />On Call</Badge> : null}
+                                  <Badge variant={entry.clockOut ? 'outline' : 'default'}>{entry.clockOut ? 'Complete' : 'Active'}</Badge>
+                                  <Button type="button" variant="outline" size="sm" onClick={() => handleRangeStartEdit(entry)}><Pencil className="mr-1 h-3 w-3" /> Edit</Button>
+                                  <AlertDialog>
+                                    <AlertDialogTrigger asChild>
+                                      <Button type="button" variant="destructive" size="sm" disabled={deleteTimeEntry.isPending}><Trash2 className="mr-1 h-3 w-3" /> Delete</Button>
+                                    </AlertDialogTrigger>
+                                    <AlertDialogContent>
+                                      <AlertDialogHeader>
+                                        <AlertDialogTitle>Delete this time entry?</AlertDialogTitle>
+                                        <AlertDialogDescription>
+                                          This removes {rangeViewEmployee?.employeeName ?? 'this employee'}&apos;s {format(day, 'MMM d')} time entry for {getEntryAssetName(entry, assets)} from Dataverse and the weekly timecard export.
+                                        </AlertDialogDescription>
+                                      </AlertDialogHeader>
+                                      <AlertDialogFooter>
+                                        <AlertDialogCancel>Cancel</AlertDialogCancel>
+                                        <AlertDialogAction onClick={() => void handleDeleteEntry(entry)}>Delete time entry</AlertDialogAction>
+                                      </AlertDialogFooter>
+                                    </AlertDialogContent>
+                                  </AlertDialog>
+                                </div>
+                              </div>
+                            )}
+                            {getEmployeeNotes(entry.notes) ? <p className="mt-2 border-t border-border pt-2 text-xs text-muted-foreground">{getEmployeeNotes(entry.notes)}</p> : null}
+                          </div>
+                        );
+                      })}
+                      {rangeAddingForDay === dayKey && newEntryDraft ? (
+                        <div className="space-y-3 rounded-lg border border-dashed border-border bg-muted p-3">
+                          <div className="flex items-center justify-between gap-3">
+                            <p className="font-medium text-sm text-foreground">Add time entry for {format(day, 'MMM d')}</p>
+                            <Button type="button" size="icon" variant="ghost" aria-label="Cancel add entry" onClick={handleRangeCancelAddEntry}><X className="h-4 w-4" /></Button>
+                          </div>
+                          <div className="space-y-2">
+                            <Label>Equipment asset</Label>
+                            <AssetPicker
+                              assets={assets}
+                              value={newEntryDraft.assetId}
+                              onChange={(asset: Pick<EquipmentAsset, 'id' | 'asset' | 'divisionCode'> | undefined) =>
+                                setNewEntryDraft({
+                                  ...newEntryDraft,
+                                  assetId: asset?.id ?? '',
+                                  assetRecord: asset,
+                                  division: asset?.divisionCode !== undefined ? String(asset.divisionCode) : newEntryDraft.division,
+                                })
+                              }
+                              currentAsset={newEntryDraft.assetRecord}
+                            />
+                          </div>
+                          <div className="grid gap-3 sm:grid-cols-2">
+                            <div className="space-y-2">
+                              <Label htmlFor={`range-add-div-${dayKey}`}>Division</Label>
+                              <Input id={`range-add-div-${dayKey}`} className="bg-background" value={newEntryDraft.division} onChange={(event: React.ChangeEvent<HTMLInputElement>) => setNewEntryDraft({ ...newEntryDraft, division: event.target.value.replace(/\D/g, '') })} placeholder="Optional division code" />
                             </div>
-                            <div className="flex items-center gap-1.5">
-                              {isPtoEntry(entry) && entry.pTOTypeKey ? <Badge variant="outline">{ShopTimeEntryPTOTypeKeyToLabel[entry.pTOTypeKey]}</Badge> : null}
-                              {!isPtoEntry(entry) ? <Badge variant="outline">{ShopTimeEntryPayTypeKeyToLabel[entry.payTypeKey ?? DEFAULT_PAY_TYPE]}</Badge> : null}
-                              {entry.onCall ? <Badge variant="secondary"><Phone className="mr-1 h-3 w-3" />On Call</Badge> : null}
-                              <Badge variant={entry.clockOut ? 'outline' : 'default'}>{entry.clockOut ? 'Complete' : 'Active'}</Badge>
+                            <div className="space-y-2">
+                              <Label htmlFor={`range-add-job-${dayKey}`}>Job number</Label>
+                              <Input id={`range-add-job-${dayKey}`} className="bg-background" value={newEntryDraft.jobNumber} onChange={(event: React.ChangeEvent<HTMLInputElement>) => setNewEntryDraft({ ...newEntryDraft, jobNumber: event.target.value })} placeholder="Optional job note" />
                             </div>
                           </div>
+                          <div className="space-y-2">
+                            <Label htmlFor={`range-add-pay-${dayKey}`}>Pay type</Label>
+                            <Select value={newEntryDraft.payTypeKey} onValueChange={(value: ShopTimeEntryPayTypeKey) => setNewEntryDraft({ ...newEntryDraft, payTypeKey: value })}>
+                              <SelectTrigger id={`range-add-pay-${dayKey}`} className="w-full bg-background"><SelectValue placeholder="Select pay type" /></SelectTrigger>
+                              <SelectContent>{Object.entries(ShopTimeEntryPayTypeKeyToLabel).map(([key, label]) => (<SelectItem key={key} value={key}>{label}</SelectItem>))}</SelectContent>
+                            </Select>
+                          </div>
+                          <div className="grid gap-3 sm:grid-cols-2">
+                            <div className="space-y-2">
+                              <Label htmlFor={`range-add-ci-${dayKey}`}>Clock in</Label>
+                              <Input id={`range-add-ci-${dayKey}`} className="bg-background" type="time" value={newEntryDraft.clockInTime} onChange={(event: React.ChangeEvent<HTMLInputElement>) => setNewEntryDraft({ ...newEntryDraft, clockInTime: event.target.value })} />
+                            </div>
+                            <div className="space-y-2">
+                              <Label htmlFor={`range-add-co-${dayKey}`}>Clock out</Label>
+                              <Input id={`range-add-co-${dayKey}`} className="bg-background" type="time" value={newEntryDraft.clockOutTime} onChange={(event: React.ChangeEvent<HTMLInputElement>) => setNewEntryDraft({ ...newEntryDraft, clockOutTime: event.target.value })} />
+                            </div>
+                          </div>
+                          <div className="flex gap-2">
+                            <Button type="button" size="sm" onClick={() => void handleRangeSaveNewEntry(day)} disabled={createTimeEntry.isPending}>Save time entry</Button>
+                            <Button type="button" size="sm" variant="outline" onClick={handleRangeCancelAddEntry}>Cancel</Button>
+                          </div>
                         </div>
-                      ))}
+                      ) : null}
+                      {rangePtoForDay === dayKey && ptoDraft ? (
+                        <div className="space-y-3 rounded-lg border border-dashed border-border bg-muted p-3">
+                          <div className="flex items-center justify-between gap-3">
+                            <p className="font-medium text-sm text-foreground">Add PTO for {format(day, 'MMM d')}</p>
+                            <Button type="button" size="icon" variant="ghost" aria-label="Cancel PTO" onClick={handleRangeCancelPto}><X className="h-4 w-4" /></Button>
+                          </div>
+                          <div className="grid gap-3 sm:grid-cols-2">
+                            <div className="space-y-2">
+                              <Label htmlFor={`range-pto-type-${dayKey}`}>PTO type</Label>
+                              <Select value={ptoDraft.type || undefined} onValueChange={(value: ShopTimeEntryPTOTypeKey) => setPtoDraft({ ...ptoDraft, type: value })}>
+                                <SelectTrigger id={`range-pto-type-${dayKey}`} className="w-full bg-background"><SelectValue placeholder="Select PTO type" /></SelectTrigger>
+                                <SelectContent>{Object.entries(ShopTimeEntryPTOTypeKeyToLabel).map(([key, label]) => (<SelectItem key={key} value={key}>{label}</SelectItem>))}</SelectContent>
+                              </Select>
+                            </div>
+                            <div className="space-y-2">
+                              <Label>PTO hours</Label>
+                              <div className="grid grid-cols-2 gap-2">
+                                <Button type="button" size="sm" variant={ptoDraft.hours === 4 ? 'default' : 'outline'} onClick={() => setPtoDraft({ ...ptoDraft, hours: 4 })}>4 hours</Button>
+                                <Button type="button" size="sm" variant={ptoDraft.hours === 8 ? 'default' : 'outline'} onClick={() => setPtoDraft({ ...ptoDraft, hours: 8 })}>8 hours</Button>
+                              </div>
+                            </div>
+                          </div>
+                          <div className="flex gap-2">
+                            <Button type="button" size="sm" onClick={() => void handleRangeSavePto(day)} disabled={createTimeEntry.isPending}>Save PTO</Button>
+                            <Button type="button" size="sm" variant="outline" onClick={handleRangeCancelPto}>Cancel</Button>
+                          </div>
+                        </div>
+                      ) : null}
+                      {rangeAddingForDay !== dayKey && rangePtoForDay !== dayKey ? (
+                        <div className="grid gap-2 sm:grid-cols-2">
+                          <Button type="button" variant="outline" size="sm" className="w-full justify-center border-dashed" onClick={() => handleRangeStartAddEntry(dayKey)}>
+                            <Plus className="mr-1 h-3 w-3" /> Add time entry
+                          </Button>
+                          <Button type="button" variant="outline" size="sm" className="w-full justify-center border-dashed" onClick={() => handleRangeStartPto(dayKey)}>
+                            <Plus className="mr-1 h-3 w-3" /> Add PTO
+                          </Button>
+                        </div>
+                      ) : null}
                     </div>
                   </CollapsibleContent>
                 </section>

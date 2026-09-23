@@ -14,8 +14,22 @@ async function azureHandler(request) {
 }
 
 app.http('employees', {
+  methods: ['GET', 'POST'],
+  authLevel: 'anonymous',
+  handler: azureHandler,
+});
+
+app.http('employeesById', {
+  methods: ['PATCH', 'DELETE'],
+  authLevel: 'anonymous',
+  route: 'employees/{id}',
+  handler: azureHandler,
+});
+
+app.http('lookupEmployees', {
   methods: ['GET'],
   authLevel: 'anonymous',
+  route: 'lookup-employees',
   handler: azureHandler,
 });
 
@@ -26,8 +40,15 @@ app.http('me', {
 });
 
 app.http('assets', {
-  methods: ['GET'],
+  methods: ['GET', 'POST'],
   authLevel: 'anonymous',
+  handler: azureHandler,
+});
+
+app.http('assetsById', {
+  methods: ['PATCH', 'DELETE'],
+  authLevel: 'anonymous',
+  route: 'assets/{id}',
   handler: azureHandler,
 });
 

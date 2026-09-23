@@ -1,6 +1,7 @@
 const {
   diagnose,
   listEmployees,
+  listLookupEmployees,
   listAssets,
   createAsset,
   updateAsset,
@@ -84,6 +85,10 @@ async function handleRequest(request) {
 
     if (method === 'GET' && pathname === '/api/employees') {
       return json(200, { employees: await listEmployees() });
+    }
+
+    if (method === 'GET' && pathname === '/api/lookup-employees') {
+      return json(200, { employees: await listLookupEmployees() });
     }
 
     if (method === 'GET' && pathname === '/api/assets') {

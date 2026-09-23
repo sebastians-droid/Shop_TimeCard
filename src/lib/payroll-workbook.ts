@@ -167,8 +167,12 @@ export async function buildPayrollWorkbookBlob(data: PayrollWeekExport): Promise
       let accumulated = 0;
       for (const detail of dayRows) {
         const hours = detail.hours;
-        if (hours <= 0 || detail.ptoTime) {
+        if (hours <= 0) {
           rtOtMap.set(detail, { rt: 0, ot: 0 });
+          continue;
+        }
+        if (detail.ptoTime) {
+          rtOtMap.set(detail, { rt: hours, ot: 0 });
           continue;
         }
         const rtRemaining = Math.max(0, RT_THRESHOLD - accumulated);

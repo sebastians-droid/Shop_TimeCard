@@ -229,6 +229,8 @@ function mapAsset(row) {
     assetDetail: row.swank_assetdetails || undefined,
     divisionCode: toNumber(row.swank_divisioncode),
     divisionKey: row['swank_divisionname@OData.Community.Display.V1.FormattedValue'] || undefined,
+    equipmentCategory: row.swank_equipmentcategory ?? undefined,
+    equipmentCategoryLabel: row['swank_equipmentcategory@OData.Community.Display.V1.FormattedValue'] || undefined,
   };
 }
 
@@ -330,7 +332,7 @@ async function listEmployees() {
 
 async function listAssets() {
   const rows = await listAll(
-    '/swank_equipmentassets?$select=swank_equipmentassetid,swank_assetidentifier,swank_assetdetails,swank_divisioncode,swank_divisionname&$filter=statecode eq 0&$orderby=swank_assetidentifier',
+    '/swank_equipmentassets?$select=swank_equipmentassetid,swank_assetidentifier,swank_assetdetails,swank_divisioncode,swank_divisionname,swank_equipmentcategory&$filter=statecode eq 0&$orderby=swank_assetidentifier',
   );
   return rows.map(mapAsset).filter((row) => row.id && row.asset);
 }
@@ -341,6 +343,7 @@ async function createAsset(record) {
   if (record.assetDetail) payload.swank_assetdetails = record.assetDetail;
   if (record.divisionCode !== undefined) payload.swank_divisioncode = record.divisionCode;
   if (record.divisionPicklist !== undefined) payload.swank_divisionname = record.divisionPicklist;
+  if (record.equipmentCategory !== undefined) payload.swank_equipmentcategory = record.equipmentCategory;
   const created = await dataverseFetch('POST', '/swank_equipmentassets', payload);
   return mapAsset(created);
 }
@@ -351,6 +354,7 @@ async function updateAsset(id, record) {
   if (record.assetDetail !== undefined) payload.swank_assetdetails = record.assetDetail || null;
   if (record.divisionCode !== undefined) payload.swank_divisioncode = record.divisionCode;
   if (record.divisionPicklist !== undefined) payload.swank_divisionname = record.divisionPicklist;
+  if (record.equipmentCategory !== undefined) payload.swank_equipmentcategory = record.equipmentCategory;
   const updated = await dataverseFetch('PATCH', `/swank_equipmentassets(${id})`, payload);
   return mapAsset(updated);
 }
@@ -392,6 +396,17 @@ async function updateShopEmployee(id, record) {
 
 async function deactivateShopEmployee(id) {
   await dataverseFetch('PATCH', `/swank_shopemployees(${id})`, { statecode: 1, statuscode: 2 });
+}
+
+async function listLookupEmployees() {
+  const rows = await listAll(
+    '/swank_employees?$select=swank_employeeid,swank_name,swank_empnum&$filter=statecode eq 0&$orderby=swank_name',
+  );
+  return rows.map((row) => ({
+    id: row.swank_employeeid,
+    name: row.swank_name || '',
+    empNum: toNumber(row.swank_empnum),
+  })).filter((row) => row.id && row.name);
 }
 
 async function ensureShopEmployeeDisplayName(shopEmployeeId) {
@@ -465,6 +480,7 @@ module.exports = {
   loadConfig,
   diagnose,
   listEmployees,
+  listLookupEmployees,
   listAssets,
   createAsset,
   updateAsset,

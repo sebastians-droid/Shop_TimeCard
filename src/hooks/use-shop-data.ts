@@ -15,6 +15,18 @@ export function useShopEmployeeList(_options?: unknown) {
   });
 }
 
+export type LookupEmployee = { id: string; name: string; empNum?: number };
+
+export function useLookupEmployees() {
+  return useQuery({
+    queryKey: ['lookupEmployee-list'],
+    queryFn: async () => {
+      const data = await apiFetch<{ employees: LookupEmployee[] }>('/api/lookup-employees');
+      return data.employees;
+    },
+  });
+}
+
 export function useAllEquipmentAssets() {
   return useQuery({
     queryKey: ['equipmentAsset-list', 'all-assets'],
@@ -83,7 +95,7 @@ export function useDeleteShopTimeEntry() {
 export function useCreateAsset() {
   const client = useQueryClient();
   return useMutation({
-    mutationFn: (record: Omit<EquipmentAsset, 'id'> & { divisionPicklist?: number }) =>
+    mutationFn: (record: Omit<EquipmentAsset, 'id'> & { divisionPicklist?: number; equipmentCategory?: number }) =>
       apiFetch<EquipmentAsset>('/api/assets', {
         method: 'POST',
         body: JSON.stringify(record),
@@ -97,7 +109,7 @@ export function useCreateAsset() {
 export function useUpdateAsset() {
   const client = useQueryClient();
   return useMutation({
-    mutationFn: ({ id, ...fields }: { id: string } & Partial<EquipmentAsset> & { divisionPicklist?: number }) =>
+    mutationFn: ({ id, ...fields }: { id: string } & Partial<EquipmentAsset> & { divisionPicklist?: number; equipmentCategory?: number }) =>
       apiFetch<EquipmentAsset>(`/api/assets/${id}`, {
         method: 'PATCH',
         body: JSON.stringify(fields),

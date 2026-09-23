@@ -16,6 +16,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import {
   useAllEquipmentAssets, useCreateAsset, useUpdateAsset, useDeactivateAsset,
   useShopEmployeeList, useCreateShopEmployee, useUpdateShopEmployee, useDeactivateShopEmployee,
+  useLookupEmployees, type LookupEmployee,
 } from '@/hooks/use-shop-data';
 import type { EquipmentAsset } from '@/models/equipment-asset';
 import type { ShopEmployee } from '@/models/shop-employee';
@@ -44,10 +45,50 @@ function picklistForCode(code: number) {
   return DIVISIONS.find(d => d.code === code)?.picklist;
 }
 
+const EQUIPMENT_CATEGORIES = [
+  { value: 0, label: 'AIR COMPRESSORS' }, { value: 1, label: 'AIR SCREED' }, { value: 2, label: 'ATVS' },
+  { value: 3, label: 'AUTOMOBILE' }, { value: 4, label: 'ASPHALT PAVERS' }, { value: 5, label: 'POWER BUGGY' },
+  { value: 6, label: 'BEADBLASTER' }, { value: 7, label: 'BULL DOZERS' }, { value: 8, label: 'HYDRO CRANES' },
+  { value: 9, label: 'TRUCK CRANES' }, { value: 10, label: 'CRAWLER CRANES' }, { value: 11, label: 'CONCRETE PAVER' },
+  { value: 12, label: 'CONCRETE TRUCKS' }, { value: 13, label: 'POLY MIXER' }, { value: 14, label: 'POLY PAVER' },
+  { value: 15, label: 'POLY PAVER ATTACHMENTS' }, { value: 16, label: 'CONCRETE PLANT' },
+  { value: 17, label: 'CONCRETE PLANT BLOWER' }, { value: 18, label: 'CONCRETE PLANT PRESSURE WASHER' },
+  { value: 19, label: 'CRASH ATTENUATORS' }, { value: 20, label: 'CONVEYORS' }, { value: 21, label: 'DECK FINISHERS' },
+  { value: 22, label: 'CORECUT DEEP SAW' }, { value: 23, label: 'DEEP SAWS' }, { value: 24, label: 'DOWEL HOLE DRILLS' },
+  { value: 25, label: 'DRILLS' }, { value: 26, label: 'DUMP TRUCKS' }, { value: 27, label: 'EPOXY INJECTION MACHINE' },
+  { value: 28, label: 'ELECTRIC CUTTERS' }, { value: 29, label: 'EXCAVATORS' }, { value: 30, label: 'EXCAVATOR ATTACHMENTS' },
+  { value: 31, label: 'SWANK FARM' }, { value: 32, label: 'FLASHING ARROWS' }, { value: 33, label: 'FLAT TRUCKS' },
+  { value: 34, label: 'FLOOR GRINDER' }, { value: 35, label: 'FORK LIFTS' }, { value: 36, label: 'FRONT LOADERS' },
+  { value: 37, label: 'FRONT LOADER ATTACHMENT' }, { value: 38, label: 'GENERATORS' }, { value: 39, label: 'GROOVERS' },
+  { value: 40, label: 'GRINDERS' }, { value: 41, label: 'GROUND HEATER' }, { value: 42, label: 'GROUND MACHINE' },
+  { value: 43, label: 'HVE' }, { value: 44, label: 'LIGHT PLANTS' }, { value: 45, label: 'LIFE BOATS' },
+  { value: 46, label: 'MAN LIFTS' }, { value: 47, label: 'BUCKET TRUCKS' }, { value: 48, label: 'MECHANIC TRUCKS' },
+  { value: 49, label: 'MESSAGE BOARDS' }, { value: 50, label: 'SPEED MONITORS' }, { value: 51, label: 'TRAFFIC ALERT RADIOS' },
+  { value: 52, label: 'TRAFFIC SIGNALS' }, { value: 53, label: 'OFF ROAD TRUCKS' }, { value: 54, label: 'PICK UP TRUCKS' },
+  { value: 55, label: 'PILE DRIVERS' }, { value: 56, label: 'PIT INCINERATOR' }, { value: 57, label: 'POWER BROOMS' },
+  { value: 58, label: 'WATER PUMPS' }, { value: 59, label: 'S/S PUMPS' }, { value: 60, label: 'RAMMER HAMMERS' },
+  { value: 61, label: 'ROAD GRADER' }, { value: 62, label: 'ROCK SAWS' }, { value: 63, label: 'ROLLERS' },
+  { value: 64, label: 'ROTOMILLS' }, { value: 65, label: 'ROTOMILL ATTACHMENTS' }, { value: 66, label: 'ROUTERS' },
+  { value: 67, label: 'SANDBLASTERS' }, { value: 68, label: 'SHOT BLASTER' }, { value: 69, label: 'STRUCTURAL IMAGING' },
+  { value: 70, label: 'SAWS' }, { value: 71, label: 'RAISED PAVEMENT SAW' }, { value: 72, label: 'SLIP FORM PAVER' },
+  { value: 73, label: 'STRAW BLOWER' }, { value: 74, label: 'STRIPPING WAGONS' }, { value: 75, label: 'SURVEY EQUIPMENT' },
+  { value: 76, label: 'SWEEPER TRUCKS' }, { value: 77, label: 'BOX TRAILERS' }, { value: 78, label: 'DROP DECK TRAILER' },
+  { value: 79, label: 'FLAT BED TRAILERS' }, { value: 80, label: 'GROUT SILO TRAILER' }, { value: 81, label: 'HOT BOX TRAILERS' },
+  { value: 82, label: 'LOWBOY TRAILERS' }, { value: 83, label: 'TRAILERS' }, { value: 84, label: 'TRENCHER' },
+  { value: 85, label: 'TRENCHER TRUCK' }, { value: 86, label: 'TRUCK TRACTORS' }, { value: 87, label: 'TUGS' },
+  { value: 88, label: 'WALL SAWS' }, { value: 89, label: 'HYDRO POWER PACK' }, { value: 90, label: 'WATER BLASTERS' },
+  { value: 91, label: 'WELDERS' }, { value: 92, label: 'POWER WELDER ATTACHMENT' }, { value: 93, label: 'WOOD CHIPPER' },
+] as const;
+
+function categoryLabel(value?: number) {
+  if (value == null) return '';
+  return EQUIPMENT_CATEGORIES.find(c => c.value === value)?.label ?? '';
+}
+
 // ─── Asset editor ────────────────────────────────────────────────────────────
 
-type AssetDraft = { asset: string; assetDetail: string; divisionCode: string };
-const emptyAssetDraft: AssetDraft = { asset: '', assetDetail: '', divisionCode: '' };
+type AssetDraft = { asset: string; assetDetail: string; divisionCode: string; equipmentCategory: string };
+const emptyAssetDraft: AssetDraft = { asset: '', assetDetail: '', divisionCode: '', equipmentCategory: '' };
 
 function AssetForm({ draft, onChange, onSave, onCancel, saving, title }: {
   draft: AssetDraft;
@@ -69,8 +110,15 @@ function AssetForm({ draft, onChange, onSave, onCancel, saving, title }: {
             <Input value={draft.asset} onChange={e => onChange({ ...draft, asset: e.target.value })} placeholder="e.g. PT500" />
           </div>
           <div>
-            <Label>Details</Label>
-            <Input value={draft.assetDetail} onChange={e => onChange({ ...draft, assetDetail: e.target.value })} placeholder="Optional description" />
+            <Label>Equipment Category</Label>
+            <Select value={draft.equipmentCategory} onValueChange={v => onChange({ ...draft, equipmentCategory: v })}>
+              <SelectTrigger><SelectValue placeholder="Select category" /></SelectTrigger>
+              <SelectContent>
+                {EQUIPMENT_CATEGORIES.map(c => (
+                  <SelectItem key={c.value} value={String(c.value)}>{c.label}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
           </div>
           <div>
             <Label>Division</Label>
@@ -83,6 +131,10 @@ function AssetForm({ draft, onChange, onSave, onCancel, saving, title }: {
               </SelectContent>
             </Select>
           </div>
+        </div>
+        <div>
+          <Label>Details</Label>
+          <Input value={draft.assetDetail} onChange={e => onChange({ ...draft, assetDetail: e.target.value })} placeholder="Optional description" />
         </div>
         <div className="flex gap-2 justify-end">
           <Button variant="outline" size="sm" onClick={onCancel} disabled={saving}><X className="h-4 w-4" /> Cancel</Button>
@@ -125,7 +177,7 @@ function AssetsSection() {
   function startEdit(a: EquipmentAsset) {
     setAdding(false);
     setEditingId(a.id);
-    setDraft({ asset: a.asset, assetDetail: a.assetDetail || '', divisionCode: a.divisionCode != null ? String(a.divisionCode) : '' });
+    setDraft({ asset: a.asset, assetDetail: a.assetDetail || '', divisionCode: a.divisionCode != null ? String(a.divisionCode) : '', equipmentCategory: a.equipmentCategory != null ? String(a.equipmentCategory) : '' });
   }
 
   function cancel() {
@@ -141,6 +193,7 @@ function AssetsSection() {
         assetDetail: draft.assetDetail.trim() || undefined,
         divisionCode: divCode,
         divisionPicklist: picklistForCode(divCode),
+        equipmentCategory: draft.equipmentCategory ? Number(draft.equipmentCategory) : undefined,
       });
       toast.success(`Asset ${draft.asset.trim()} created`);
       cancel();
@@ -158,6 +211,7 @@ function AssetsSection() {
         asset: draft.asset.trim(),
         assetDetail: draft.assetDetail.trim() || undefined,
         divisionCode: divCode,
+        equipmentCategory: draft.equipmentCategory ? Number(draft.equipmentCategory) : undefined,
         divisionPicklist: picklistForCode(divCode),
       });
       toast.success(`Asset ${draft.asset.trim()} updated`);
@@ -203,28 +257,30 @@ function AssetsSection() {
             <thead>
               <tr className="border-b bg-muted/50 text-left">
                 <th className="px-3 py-2 font-medium">Asset</th>
-                <th className="px-3 py-2 font-medium hidden sm:table-cell">Details</th>
+                <th className="px-3 py-2 font-medium hidden md:table-cell">Category</th>
                 <th className="px-3 py-2 font-medium">Division</th>
+                <th className="px-3 py-2 font-medium hidden sm:table-cell">Details</th>
                 <th className="px-3 py-2 font-medium w-24"></th>
               </tr>
             </thead>
             <tbody>
               {filtered.length === 0 && (
-                <tr><td colSpan={4} className="px-3 py-6 text-center text-muted-foreground">No assets found.</td></tr>
+                <tr><td colSpan={5} className="px-3 py-6 text-center text-muted-foreground">No assets found.</td></tr>
               )}
               {filtered.map(a => editingId === a.id ? (
                 <tr key={a.id}>
-                  <td colSpan={4} className="p-2">
+                  <td colSpan={5} className="p-2">
                     <AssetForm draft={draft} onChange={setDraft} onSave={saveEdit} onCancel={cancel} saving={updateMut.isPending} title={`Edit ${a.asset}`} />
                   </td>
                 </tr>
               ) : (
                 <tr key={a.id} className="border-b last:border-0 hover:bg-muted/30">
                   <td className="px-3 py-2 font-medium">{a.asset}</td>
-                  <td className="px-3 py-2 text-muted-foreground hidden sm:table-cell">{a.assetDetail || '—'}</td>
+                  <td className="px-3 py-2 text-muted-foreground hidden md:table-cell">{categoryLabel(a.equipmentCategory) || '—'}</td>
                   <td className="px-3 py-2">
                     <Badge variant="outline">{divisionLabel(a.divisionCode)}</Badge>
                   </td>
+                  <td className="px-3 py-2 text-muted-foreground hidden sm:table-cell">{a.assetDetail || '—'}</td>
                   <td className="px-3 py-2">
                     <div className="flex gap-1 justify-end">
                       <Button variant="ghost" size="icon-sm" onClick={() => startEdit(a)} title="Edit">
@@ -261,17 +317,24 @@ function AssetsSection() {
 
 // ─── Employee editor ─────────────────────────────────────────────────────────
 
-type EmployeeDraft = { autoNumber: string; empNum: string };
-const emptyEmployeeDraft: EmployeeDraft = { autoNumber: '', empNum: '' };
+type EmployeeDraft = { empNum: string; matchedLookup: LookupEmployee | null };
+const emptyEmployeeDraft: EmployeeDraft = { empNum: '', matchedLookup: null };
 
-function EmployeeForm({ draft, onChange, onSave, onCancel, saving, title }: {
+function EmployeeForm({ draft, onChange, onSave, onCancel, saving, title, lookupEmployees }: {
   draft: EmployeeDraft;
   onChange: (d: EmployeeDraft) => void;
   onSave: () => void;
   onCancel: () => void;
   saving: boolean;
   title: string;
+  lookupEmployees: LookupEmployee[];
 }) {
+  const suggestions = useMemo(() => {
+    const q = draft.empNum.trim();
+    if (!q || draft.matchedLookup) return [];
+    return lookupEmployees.filter(e => String(e.empNum ?? '').includes(q)).slice(0, 8);
+  }, [draft.empNum, draft.matchedLookup, lookupEmployees]);
+
   return (
     <Card className="border-border bg-card shadow-sm">
       <CardHeader className="pb-3">
@@ -280,17 +343,46 @@ function EmployeeForm({ draft, onChange, onSave, onCancel, saving, title }: {
       <CardContent className="space-y-3">
         <div className="grid gap-3 sm:grid-cols-2">
           <div>
-            <Label>Display Name</Label>
-            <Input value={draft.autoNumber} onChange={e => onChange({ ...draft, autoNumber: e.target.value })} placeholder="Employee name or code" />
+            <Label>Employee Number</Label>
+            <Input
+              type="number"
+              value={draft.empNum}
+              onChange={e => {
+                const val = e.target.value;
+                const exact = lookupEmployees.find(emp => String(emp.empNum) === val.trim());
+                onChange({ empNum: val, matchedLookup: exact ?? null });
+              }}
+              placeholder="e.g. 1234"
+            />
+            {suggestions.length > 0 && (
+              <div className="mt-1 max-h-40 overflow-auto rounded-md border border-border bg-popover text-sm shadow-md">
+                {suggestions.map(emp => (
+                  <button
+                    key={emp.id}
+                    type="button"
+                    className="flex w-full items-center justify-between border-b border-border px-3 py-2 text-left last:border-0 hover:bg-muted"
+                    onClick={() => onChange({ empNum: String(emp.empNum ?? ''), matchedLookup: emp })}
+                  >
+                    <span className="font-medium">{emp.empNum}</span>
+                    <span className="text-muted-foreground">{emp.name}</span>
+                  </button>
+                ))}
+              </div>
+            )}
           </div>
           <div>
-            <Label>Employee Number</Label>
-            <Input type="number" value={draft.empNum} onChange={e => onChange({ ...draft, empNum: e.target.value })} placeholder="e.g. 1234" />
+            <Label>Employee Name</Label>
+            <Input
+              value={draft.matchedLookup?.name ?? ''}
+              readOnly
+              className={draft.matchedLookup ? 'font-semibold bg-muted' : 'bg-muted'}
+              placeholder={draft.empNum ? 'No match found' : 'Auto-populated from employee number'}
+            />
           </div>
         </div>
         <div className="flex gap-2 justify-end">
           <Button variant="outline" size="sm" onClick={onCancel} disabled={saving}><X className="h-4 w-4" /> Cancel</Button>
-          <Button size="sm" onClick={onSave} disabled={saving || !draft.autoNumber.trim()}>
+          <Button size="sm" onClick={onSave} disabled={saving || !draft.matchedLookup}>
             <Check className="h-4 w-4" /> {saving ? 'Saving…' : 'Save'}
           </Button>
         </div>
@@ -301,6 +393,7 @@ function EmployeeForm({ draft, onChange, onSave, onCancel, saving, title }: {
 
 function EmployeesSection() {
   const { data: employees = [], isLoading } = useShopEmployeeList();
+  const { data: lookupEmployees = [] } = useLookupEmployees();
   const createMut = useCreateShopEmployee();
   const updateMut = useUpdateShopEmployee();
   const deactivateMut = useDeactivateShopEmployee();
@@ -329,7 +422,8 @@ function EmployeesSection() {
   function startEdit(e: ShopEmployee) {
     setAdding(false);
     setEditingId(e.id);
-    setDraft({ autoNumber: e.autoNumber || '', empNum: e.empNum != null ? String(e.empNum) : '' });
+    const matched = lookupEmployees.find(l => l.empNum === e.empNum) ?? null;
+    setDraft({ empNum: e.empNum != null ? String(e.empNum) : '', matchedLookup: matched });
   }
 
   function cancel() {
@@ -338,12 +432,14 @@ function EmployeesSection() {
   }
 
   async function saveNew() {
+    if (!draft.matchedLookup) return;
     try {
       await createMut.mutateAsync({
-        autoNumber: draft.autoNumber.trim(),
-        empNum: draft.empNum ? Number(draft.empNum) : undefined,
+        autoNumber: draft.matchedLookup.name,
+        empNum: draft.matchedLookup.empNum,
+        employeeId: draft.matchedLookup.id,
       });
-      toast.success(`Employee ${draft.autoNumber.trim()} created`);
+      toast.success(`Employee ${draft.matchedLookup.name} added`);
       cancel();
     } catch (e: unknown) {
       toast.error((e as Error).message);
@@ -351,14 +447,15 @@ function EmployeesSection() {
   }
 
   async function saveEdit() {
-    if (!editingId) return;
+    if (!editingId || !draft.matchedLookup) return;
     try {
       await updateMut.mutateAsync({
         id: editingId,
-        autoNumber: draft.autoNumber.trim(),
-        empNum: draft.empNum ? Number(draft.empNum) : undefined,
+        autoNumber: draft.matchedLookup.name,
+        empNum: draft.matchedLookup.empNum,
+        employeeId: draft.matchedLookup.id,
       });
-      toast.success(`Employee ${draft.autoNumber.trim()} updated`);
+      toast.success(`Employee ${draft.matchedLookup.name} updated`);
       cancel();
     } catch (e: unknown) {
       toast.error((e as Error).message);
@@ -389,7 +486,7 @@ function EmployeesSection() {
 
       {adding && (
         <div className="mb-4">
-          <EmployeeForm draft={draft} onChange={setDraft} onSave={saveNew} onCancel={cancel} saving={createMut.isPending} title="New Employee" />
+          <EmployeeForm draft={draft} onChange={setDraft} onSave={saveNew} onCancel={cancel} saving={createMut.isPending} title="New Employee" lookupEmployees={lookupEmployees} />
         </div>
       )}
 
@@ -413,7 +510,7 @@ function EmployeesSection() {
               {filtered.map(emp => editingId === emp.id ? (
                 <tr key={emp.id}>
                   <td colSpan={4} className="p-2">
-                    <EmployeeForm draft={draft} onChange={setDraft} onSave={saveEdit} onCancel={cancel} saving={updateMut.isPending} title={`Edit ${emp.autoNumber || 'Employee'}`} />
+                    <EmployeeForm draft={draft} onChange={setDraft} onSave={saveEdit} onCancel={cancel} saving={updateMut.isPending} title={`Edit ${emp.autoNumber || 'Employee'}`} lookupEmployees={lookupEmployees} />
                   </td>
                 </tr>
               ) : (

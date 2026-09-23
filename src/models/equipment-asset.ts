@@ -4,4 +4,6 @@ export interface EquipmentAsset {
   assetDetail?: string;
   divisionCode?: number;
   divisionKey?: string;
+  equipmentCategory?: number;
+  equipmentCategoryLabel?: string;
 }
