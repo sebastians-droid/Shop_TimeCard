@@ -17,8 +17,10 @@ const {
 } = require('./dataverse');
 const { issueSpeechToken } = require('./speech');
 const { requireUser, requireManager } = require('./auth');
-const { sendSms } = require('./sms');
-const { runSync } = require('./employee-sync');
+let sendSms = async () => ({ sent: false, reason: 'SMS module not loaded' });
+let runSync = async () => { throw new Error('Sync module not loaded'); };
+try { ({ sendSms } = require('./sms')); } catch { /* SMS optional */ }
+try { ({ runSync } = require('./employee-sync')); } catch { /* Sync optional */ }
 
 function json(status, body) {
   return {
