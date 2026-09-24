@@ -7,5 +7,7 @@
   "speech_key": "YOUR-AZURE-SPEECH-KEY",
   "speech_region": "eastus",
   "speech_custom_endpoint_id": "",
-  "speech_max_seconds": 30
+  "speech_max_seconds": 30,
+  "acs_connection_string": "YOUR-ACS-CONNECTION-STRING",
+  "acs_phone_number": "+1XXXXXXXXXX"
 }

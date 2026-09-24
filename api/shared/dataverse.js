@@ -95,6 +95,12 @@ function loadConfig() {
     tenantId: cleanEnv('DATAVERSE_TENANT_ID') || fileCfg.tenant_id || '',
     clientId: cleanEnv('DATAVERSE_CLIENT_ID') || fileCfg.client_id || '',
     clientSecret: cleanEnv('DATAVERSE_CLIENT_SECRET') || fileCfg.client_secret || '',
+    acsConnectionString: cleanEnv('ACS_CONNECTION_STRING') || fileCfg.acs_connection_string || '',
+    acsPhoneNumber: cleanEnv('ACS_PHONE_NUMBER') || fileCfg.acs_phone_number || '',
+    syncClientId: cleanEnv('SYNC_CLIENT_ID') || fileCfg.sync_client_id || '',
+    syncClientSecret: cleanEnv('SYNC_CLIENT_SECRET') || fileCfg.sync_client_secret || '',
+    sharePointSite: cleanEnv('SHAREPOINT_SITE') || fileCfg.sharepoint_site || '',
+    sharePointFilePath: cleanEnv('SHAREPOINT_FILE_PATH') || fileCfg.sharepoint_file_path || '',
     managerEmails,
   };
   return cachedConfig;
@@ -412,6 +418,22 @@ async function listLookupEmployees() {
   })).filter((row) => row.id && row.name);
 }
 
+async function getEmployeePhone(shopEmployeeId) {
+  if (!shopEmployeeId) return null;
+  try {
+    const row = await dataverseFetch(
+      'GET',
+      `/swank_shopemployees(${shopEmployeeId})?$select=swank_autonumber&$expand=swank_Employee($select=swank_name,swank_phonenum)`,
+    );
+    return {
+      name: row.swank_Employee?.swank_name || row.swank_autonumber || '',
+      phone: row.swank_Employee?.swank_phonenum || null,
+    };
+  } catch {
+    return null;
+  }
+}
+
 async function ensureShopEmployeeDisplayName(shopEmployeeId) {
   if (!shopEmployeeId) return;
   try {
@@ -482,6 +504,7 @@ async function diagnose() {
 module.exports = {
   loadConfig,
   diagnose,
+  getEmployeePhone,
   listEmployees,
   listLookupEmployees,
   listAssets,

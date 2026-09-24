@@ -25,7 +25,6 @@ import {
   getPtoHours,
   isPtoEntry,
   notesHaveNoLunch,
-  roundClockInUpToQuarterHour,
   stripNoLunchMarker,
 } from '@/lib/time-rules';
 import { getAssetDisplayName, getTimeEntryAssetName, getEntryJobNumber, PTO_TIME_KEY_BY_HOURS, getPtoClockInIso } from '@/lib/entry-helpers';
@@ -155,8 +154,7 @@ export default function TimecardPage() {
       return;
     }
     const nowIso = getNowIso();
-    const isFirstLaborClockIn = !employeeTodayEntries.some((entry: ShopTimeEntry) => !isPtoEntry(entry));
-    const clockIn = isFirstLaborClockIn ? roundClockInUpToQuarterHour(nowIso) : nowIso;
+    const clockIn = nowIso;
     const selectedAssetForEntry = selectedAssetId ? selectedAsset : undefined;
     const manualDivision = division.trim();
     const manualJobNumber = jobNumber.trim();

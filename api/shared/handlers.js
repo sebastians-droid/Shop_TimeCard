@@ -1,5 +1,6 @@
 const {
   diagnose,
+  getEmployeePhone,
   listEmployees,
   listLookupEmployees,
   listAssets,
@@ -16,6 +17,8 @@ const {
 } = require('./dataverse');
 const { issueSpeechToken } = require('./speech');
 const { requireUser, requireManager } = require('./auth');
+const { sendSms } = require('./sms');
+const { runSync } = require('./employee-sync');
 
 function json(status, body) {
   return {
@@ -152,13 +155,33 @@ async function handleRequest(request) {
     if (entryMatch && method === 'PATCH') {
       requireUser(request);
       const record = await readJson(request);
-      return json(200, await updateTimeEntry(entryMatch[1], record));
+      const updated = await updateTimeEntry(entryMatch[1], record);
+
+      if (record.ptoApproval === 'Approved' || record.ptoApproval === 'Denied') {
+        const empId = updated.employee?.id;
+        const empInfo = empId ? await getEmployeePhone(empId) : null;
+        if (empInfo?.phone) {
+          const status = record.ptoApproval === 'Approved' ? 'APPROVED' : 'DENIED';
+          const date = updated.workDate || 'the requested date';
+          const hours = updated.hours ?? '';
+          const msg = `Swank Shop Hub: Your ${hours}h PTO request for ${date} has been ${status}.`;
+          sendSms(empInfo.phone, msg).catch(() => {});
+        }
+      }
+
+      return json(200, updated);
     }
 
     if (entryMatch && method === 'DELETE') {
       requireManager(request);
       await deleteTimeEntry(entryMatch[1]);
       return json(204, {});
+    }
+
+    if (method === 'POST' && pathname === '/api/employee-sync') {
+      requireManager(request);
+      const result = await runSync({ excelPath: process.env.SYNC_EXCEL_PATH || undefined });
+      return json(200, result);
     }
 
     return json(404, { error: `Not found: ${method} ${pathname}` });
