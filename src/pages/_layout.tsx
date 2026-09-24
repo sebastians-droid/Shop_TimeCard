@@ -25,6 +25,7 @@ export default function Layout() {
           {!isHome && (
             <nav className="flex gap-1.5 flex-wrap" aria-label="Primary navigation">
               <NavLink to="/timecard" className={navLinkClassName}>Timecard</NavLink>
+              <NavLink to="/mechanic-log" className={navLinkClassName}>Mechanic Log</NavLink>
               <NavLink to="/manager" className={navLinkClassName}>Manager</NavLink>
               <NavLink to="/admin" className={navLinkClassName}>Assets & Employees</NavLink>
             </nav>

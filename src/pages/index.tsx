@@ -1,5 +1,5 @@
 import { Link } from 'react-router-dom';
-import { Clock, LayoutDashboard, Wrench } from 'lucide-react';
+import { ClipboardList, Clock, LayoutDashboard, Wrench } from 'lucide-react';
 
 const sections = [
   {
@@ -8,6 +8,13 @@ const sections = [
     title: 'Timecard',
     description: 'Clock in and out on equipment and log daily labor hours.',
     iconBg: 'bg-blue-700',
+  },
+  {
+    to: '/mechanic-log',
+    icon: ClipboardList,
+    title: 'Mechanic Log',
+    description: 'View your work history, daily hours, and overtime breakdown.',
+    iconBg: 'bg-teal-700',
   },
   {
     to: '/manager',
@@ -23,7 +30,7 @@ const sections = [
     description: 'Add, update, or deactivate equipment assets and shop employee records.',
     iconBg: 'bg-emerald-700',
   },
-] as const;
+];
 
 export default function HomePage() {
   return (
@@ -35,7 +42,7 @@ export default function HomePage() {
           </h1>
         </div>
 
-        <div className="grid gap-4 sm:grid-cols-3">
+        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
           {sections.map(({ to, icon: Icon, title, description, iconBg }) => (
             <Link key={to} to={to} className="group">
               <div className="relative h-full rounded-xl border border-border bg-card p-6 transition-all hover:shadow-md hover:border-primary/25 hover:-translate-y-0.5">

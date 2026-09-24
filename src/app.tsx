@@ -9,6 +9,7 @@ import ErrorBoundary from '@/components/system/error-boundary';
 import HomePage from '@/pages/index';
 import TimecardPage from '@/pages/timecard';
 import ManagerDashboardPage from '@/pages/manager-dashboard';
+import MechanicLogPage from '@/pages/mechanic-log';
 import AdminPage from '@/pages/admin';
 import NotFoundPage from '@/pages/not-found';
 
@@ -22,6 +23,7 @@ function App() {
             <Route path="/" element={<Layout />}>
               <Route index element={<HomePage />} />
               <Route path="timecard" element={<TimecardPage />} />
+              <Route path="mechanic-log" element={<MechanicLogPage />} />
               <Route path="manager" element={<ManagerDashboardPage />} />
               <Route path="admin" element={<AdminPage />} />
               <Route path="*" element={<NotFoundPage />} />
