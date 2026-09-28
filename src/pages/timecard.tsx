@@ -39,6 +39,8 @@ type ClockInConfirmation = {
   clockIn: string;
 };
 
+const TIMECARD_NOTICE = 'Total Hours Worked will not accurately be reflected until Time Card is completed by Admin. Job Start times may differ from Clock In times.';
+
 const getNowIso = () => new Date().toISOString();
 const getWorkDate = (dateTime: string) => format(new Date(dateTime), 'yyyy-MM-dd');
 
@@ -371,6 +373,7 @@ export default function TimecardPage() {
             <CardHeader><div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between"><div><CardTitle className="text-xl">{selectedEmployee.employeeName}</CardTitle><p className="mt-1 text-sm text-muted-foreground">Employee {selectedEmployee.employeeCode} · {format(new Date(), 'EEEE, MMM d')}</p></div><div className="flex flex-wrap gap-2"><Button type="button" variant="outline" onClick={() => void handleReloadTables()} disabled={assetsLoading || entriesLoading}><RefreshCw className="mr-2 h-4 w-4" /> Reload tables</Button><Button type="button" variant="outline" onClick={handleResetEmployee}>Change employee</Button></div></div></CardHeader>
           </Card>
 
+          <Card className="border-l-4 border-l-primary bg-card text-card-foreground shadow-sm"><CardContent className="flex flex-col gap-3 p-4 sm:flex-row sm:items-center sm:justify-between"><div className="min-w-0"><p className="font-semibold">Daily equipment timecard</p><p className="mt-1 text-sm text-muted-foreground">{todayPay.noLunch ? `No lunch deducted. ${TIMECARD_NOTICE}` : `30-minute lunch deducted. ${TIMECARD_NOTICE}`}</p></div><div className="grid grid-cols-3 gap-2 text-center sm:min-w-80"><div className="rounded-md bg-muted px-3 py-2 text-muted-foreground"><p className="text-xs">Entries</p><p className="text-lg font-semibold text-foreground">{employeeTodayEntries.length}</p></div><div className="rounded-md bg-muted px-3 py-2 text-muted-foreground"><p className="text-xs">Hours</p><p className="text-lg font-semibold text-foreground">{selectedEmployee ? (todayPay.totalMinutes / 60).toFixed(1) : '0.0'}</p></div><div className="rounded-md bg-muted px-3 py-2 text-muted-foreground"><p className="text-xs">Status</p><p className="text-sm font-semibold text-foreground">{employeeActiveEntry ? 'Clocked in' : 'Ready'}</p></div></div></CardContent></Card>
 
           <Card className="bg-card text-card-foreground shadow-sm">
             <CardHeader><div className="flex flex-col gap-1"><CardTitle className="flex items-center gap-2 text-xl"><TimerReset className="h-5 w-5" /> Today’s asset timecard</CardTitle><p className="text-sm text-muted-foreground">Asset on the left, clock-in time and actions on the right.</p></div></CardHeader>
@@ -490,7 +493,6 @@ export default function TimecardPage() {
           </Card>
         </section>
       )}
-      <Card className="border-l-4 border-l-primary bg-card text-card-foreground shadow-sm"><CardContent className="flex flex-col gap-3 p-4 sm:flex-row sm:items-center sm:justify-between"><div className="min-w-0"><p className="font-semibold">Daily equipment timecard</p><p className="mt-1 text-sm text-muted-foreground">{todayPay.lunchDeducted ? '30-minute lunch deducted. Asset time is rounded to the nearest 15 minutes.' : todayPay.noLunch ? 'No lunch deducted. Asset time is rounded to the nearest 15 minutes.' : 'Today’s rounded asset time and PTO at a glance.'}</p></div><div className="grid grid-cols-3 gap-2 text-center sm:min-w-80"><div className="rounded-md bg-muted px-3 py-2 text-muted-foreground"><p className="text-xs">Entries</p><p className="text-lg font-semibold text-foreground">{employeeTodayEntries.length}</p></div><div className="rounded-md bg-muted px-3 py-2 text-muted-foreground"><p className="text-xs">Hours</p><p className="text-lg font-semibold text-foreground">{selectedEmployee ? (todayPay.totalMinutes / 60).toFixed(1) : '0.0'}</p></div><div className="rounded-md bg-muted px-3 py-2 text-muted-foreground"><p className="text-xs">Status</p><p className="text-sm font-semibold text-foreground">{employeeActiveEntry ? 'Clocked in' : 'Ready'}</p></div></div></CardContent></Card>
     </main>
   );
 }
