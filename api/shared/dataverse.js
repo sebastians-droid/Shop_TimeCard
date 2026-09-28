@@ -45,14 +45,16 @@ let cachedToken = { value: '', expiresAt: 0 };
 let cachedConfig = null;
 
 function readJsonIfExists(filePath) {
+  if (!fs.existsSync(filePath)) return null;
   try {
-    if (fs.existsSync(filePath)) {
-      return JSON.parse(fs.readFileSync(filePath, 'utf8'));
-    }
-  } catch {
-    // ignore malformed local files
+    // Strip a UTF-8 BOM; editors and PowerShell add one and JSON.parse rejects it.
+    return JSON.parse(fs.readFileSync(filePath, 'utf8').replace(/^\uFEFF/, ''));
+  } catch (error) {
+    // Loud on purpose: silently skipping a present-but-broken config caused a
+    // fallback to another project's credentials.
+    console.warn(`[config] ${filePath} exists but could not be parsed: ${error.message}`);
+    return null;
   }
-  return null;
 }
 
 function cleanEnv(name) {
@@ -95,8 +97,6 @@ function loadConfig() {
     tenantId: cleanEnv('DATAVERSE_TENANT_ID') || fileCfg.tenant_id || '',
     clientId: cleanEnv('DATAVERSE_CLIENT_ID') || fileCfg.client_id || '',
     clientSecret: cleanEnv('DATAVERSE_CLIENT_SECRET') || fileCfg.client_secret || '',
-    acsConnectionString: cleanEnv('ACS_CONNECTION_STRING') || fileCfg.acs_connection_string || '',
-    acsPhoneNumber: cleanEnv('ACS_PHONE_NUMBER') || fileCfg.acs_phone_number || '',
     syncClientId: cleanEnv('SYNC_CLIENT_ID') || fileCfg.sync_client_id || '',
     syncClientSecret: cleanEnv('SYNC_CLIENT_SECRET') || fileCfg.sync_client_secret || '',
     sharePointSite: cleanEnv('SHAREPOINT_SITE') || fileCfg.sharepoint_site || '',
@@ -418,22 +418,6 @@ async function listLookupEmployees() {
   })).filter((row) => row.id && row.name);
 }
 
-async function getEmployeePhone(shopEmployeeId) {
-  if (!shopEmployeeId) return null;
-  try {
-    const row = await dataverseFetch(
-      'GET',
-      `/swank_shopemployees(${shopEmployeeId})?$select=swank_autonumber&$expand=swank_Employee($select=swank_name,swank_phonenum)`,
-    );
-    return {
-      name: row.swank_Employee?.swank_name || row.swank_autonumber || '',
-      phone: row.swank_Employee?.swank_phonenum || null,
-    };
-  } catch {
-    return null;
-  }
-}
-
 async function ensureShopEmployeeDisplayName(shopEmployeeId) {
   if (!shopEmployeeId) return;
   try {
@@ -504,7 +488,6 @@ async function diagnose() {
 module.exports = {
   loadConfig,
   diagnose,
-  getEmployeePhone,
   listEmployees,
   listLookupEmployees,
   listAssets,

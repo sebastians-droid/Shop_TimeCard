@@ -1,6 +1,5 @@
 const {
   diagnose,
-  getEmployeePhone,
   listEmployees,
   listLookupEmployees,
   listAssets,
@@ -17,9 +16,7 @@ const {
 } = require('./dataverse');
 const { issueSpeechToken } = require('./speech');
 const { requireUser, requireManager } = require('./auth');
-let sendSms = async () => ({ sent: false, reason: 'SMS module not loaded' });
 let runSync = async () => { throw new Error('Sync module not loaded'); };
-try { ({ sendSms } = require('./sms')); } catch { /* SMS optional */ }
 try { ({ runSync } = require('./employee-sync')); } catch { /* Sync optional */ }
 
 function json(status, body) {
@@ -157,21 +154,7 @@ async function handleRequest(request) {
     if (entryMatch && method === 'PATCH') {
       requireUser(request);
       const record = await readJson(request);
-      const updated = await updateTimeEntry(entryMatch[1], record);
-
-      if (record.ptoApproval === 'Approved' || record.ptoApproval === 'Denied') {
-        const empId = updated.employee?.id;
-        const empInfo = empId ? await getEmployeePhone(empId) : null;
-        if (empInfo?.phone) {
-          const status = record.ptoApproval === 'Approved' ? 'APPROVED' : 'DENIED';
-          const date = updated.workDate || 'the requested date';
-          const hours = updated.hours ?? '';
-          const msg = `Swank Shop Hub: Your ${hours}h PTO request for ${date} has been ${status}.`;
-          sendSms(empInfo.phone, msg).catch(() => {});
-        }
-      }
-
-      return json(200, updated);
+      return json(200, await updateTimeEntry(entryMatch[1], record));
     }
 
     if (entryMatch && method === 'DELETE') {

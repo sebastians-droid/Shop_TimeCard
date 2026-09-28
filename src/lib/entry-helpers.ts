@@ -71,8 +71,22 @@ export const getEntryEmployeeNumber = (entry: ShopTimeEntry, employees: AppShopE
   return String(employeeRecord?.employeeCode ?? entry.employee?.autoNumber ?? '—');
 };
 
+export const isInOpenPayrollWeek = (entry: ShopTimeEntry) => {
+  const iso = entry.clockIn ?? entry.workDate;
+  if (!iso) return false;
+  const now = new Date();
+  const entryDate = new Date(iso);
+  return entryDate >= startOfWeek(now, { weekStartsOn: 0 }) && entryDate <= endOfWeek(now, { weekStartsOn: 0 });
+};
+
 export const getEntryDivision = (entry: ShopTimeEntry, assets: EquipmentAsset[]) => {
   const matchedAsset = entry.asset?.id ? assets.find((asset: EquipmentAsset) => asset.id === entry.asset?.id) : undefined;
+  // Entries in the current payroll week track the asset's live division so a
+  // reassignment applies to work that hasn't been paid yet. Earlier weeks keep
+  // the division recorded at clock-in so already-exported payroll stays stable.
+  if (matchedAsset?.divisionCode !== undefined && isInOpenPayrollWeek(entry)) {
+    return String(matchedAsset.divisionCode);
+  }
   return String(entry.assetDivision ?? matchedAsset?.divisionCode ?? '');
 };
 

@@ -15,7 +15,7 @@ import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover
 import { useAllEquipmentAssets, useShopEmployeeList, useShopTimeEntryList } from '@/hooks/use-shop-data';
 import { mapShopEmployees, type AppShopEmployee } from '@/lib/shop-employees';
 import { formatDuration, getDayPayMinutes, getEntryPaidMinutes, getPtoHours, isPtoEntry } from '@/lib/time-rules';
-import { getTimeEntryAssetName, getEntryJobNumber } from '@/lib/entry-helpers';
+import { getTimeEntryAssetName, getEntryDivision, getEntryJobNumber } from '@/lib/entry-helpers';
 import { divisionLabel } from '@/lib/reference-data';
 import {
   ShopTimeEntryPayTypeKeyToLabel,
@@ -348,7 +348,8 @@ export default function MechanicLogPage() {
                             const paidMinutes = getEntryPaidMinutes(d.entries, entry);
                             const assetName = getTimeEntryAssetName(entry, assets);
                             const jobNum = getEntryJobNumber(entry);
-                            const div = entry.assetDivision != null ? divisionLabel(entry.assetDivision) : '';
+                            const effectiveDivision = getEntryDivision(entry, assets);
+                            const div = effectiveDivision ? divisionLabel(Number(effectiveDivision)) : '';
                             return (
                               <div key={entry.id} className="rounded-lg border border-border bg-background p-3">
                                 <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">

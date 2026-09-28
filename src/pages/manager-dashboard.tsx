@@ -241,7 +241,7 @@ export default function ManagerDashboardPage() {
     setEditValues({
       assetId: entry.asset?.id ?? '',
       assetRecord: entry.asset,
-      division: String(entry.assetDivision ?? ''),
+      division: getEntryDivision(entry, assets),
       jobNumber: getEntryJobNumber(entry),
       payTypeKey: entry.payTypeKey ?? DEFAULT_PAY_TYPE,
       clockInTime: formatTimeForInput(entry.clockIn),
@@ -592,7 +592,7 @@ export default function ManagerDashboardPage() {
     setEditValues({
       assetId: entry.asset?.id ?? '',
       assetRecord: entry.asset,
-      division: String(entry.assetDivision ?? ''),
+      division: getEntryDivision(entry, assets),
       jobNumber: getEntryJobNumber(entry),
       payTypeKey: entry.payTypeKey ?? DEFAULT_PAY_TYPE,
       clockInTime: formatTimeForInput(entry.clockIn),

@@ -8,6 +8,8 @@
   "speech_region": "eastus",
   "speech_custom_endpoint_id": "",
   "speech_max_seconds": 30,
-  "acs_connection_string": "YOUR-ACS-CONNECTION-STRING",
-  "acs_phone_number": "+1XXXXXXXXXX"
+  "sync_client_id": "YOUR-EMPLOYEE-SYNC-CLIENT-ID",
+  "sync_client_secret": "YOUR-EMPLOYEE-SYNC-CLIENT-SECRET",
+  "sharepoint_site": "tenant.sharepoint.com:/sites/YourSite:",
+  "sharepoint_file_path": "Shared Documents/premployee.xlsx"
 }

@@ -27,7 +27,7 @@ import {
   notesHaveNoLunch,
   stripNoLunchMarker,
 } from '@/lib/time-rules';
-import { getAssetDisplayName, getTimeEntryAssetName, getEntryJobNumber, PTO_TIME_KEY_BY_HOURS, getPtoClockInIso } from '@/lib/entry-helpers';
+import { getAssetDisplayName, getTimeEntryAssetName, getEntryDivision, getEntryJobNumber, PTO_TIME_KEY_BY_HOURS, getPtoClockInIso } from '@/lib/entry-helpers';
 import { ShopTimeEntryPTOTypeKeyToLabel, DEFAULT_PAY_TYPE, type ShopTimeEntry, type ShopTimeEntryPTOTypeKey } from '@/models/shop-time-entry';
 
 type PtoHours = 4 | 8;
@@ -127,6 +127,13 @@ export default function TimecardPage() {
     toast.success(`Verified ${matchedEmployee.employeeName}.`);
   };
 
+  // The kiosk can sit on this page all day, so its cached asset and employee
+  // lists would otherwise never pick up division changes or new hires.
+  const refreshReferenceData = () => {
+    void refetchAssets();
+    void refetchEmployees();
+  };
+
   const handleResetEmployee = () => {
     if (returnToSignInTimer.current !== undefined) {
       window.clearTimeout(returnToSignInTimer.current);
@@ -137,6 +144,7 @@ export default function TimecardPage() {
     setSelectedEmployeeId('');
     resetEntryForm();
     setShowPtoForm(false);
+    refreshReferenceData();
   };
 
   const handleReloadTables = async () => {
@@ -208,6 +216,7 @@ export default function TimecardPage() {
         setSelectedEmployeeId('');
         setShowPtoForm(false);
         returnToSignInTimer.current = undefined;
+        refreshReferenceData();
       }, 3000);
     } catch (error: unknown) {
       toast.error(error instanceof Error ? error.message : 'Unable to clock in.');
@@ -266,7 +275,7 @@ export default function TimecardPage() {
     setEditingEntryId(entry.id);
     setEditingAssetId(entry.asset?.id ?? '');
     setEditingAssetRecord(entry.asset);
-    setEditingDivision(entry.assetDivision !== undefined ? String(entry.assetDivision) : '');
+    setEditingDivision(getEntryDivision(entry, assets));
     setEditingJobNumber(getEntryJobNumber(entry));
     setEditingNotesEntryId('');
     setEditingNotes(stripNoLunchMarker(entry.notes));
@@ -409,7 +418,7 @@ export default function TimecardPage() {
                           </div>
                         </div>
                       ) : (
-                        <div className="space-y-1"><div className="flex flex-wrap items-center gap-2">{isPtoEntry(entry) ? <Badge variant="secondary">PTO</Badge> : null}{entry.pTOTypeKey ? <Badge variant="outline">{ShopTimeEntryPTOTypeKeyToLabel[entry.pTOTypeKey]}</Badge> : null}<p className="text-sm text-muted-foreground">{isPtoEntry(entry) ? 'Paid time off' : 'Asset'}</p></div><p className="text-lg font-semibold">{getTimeEntryAssetName(entry, assets)}</p><p className="text-sm text-muted-foreground">{isPtoEntry(entry) ? `${getPtoHours(entry) || Math.round(entry.hours ?? 0)} hours submitted` : `Division ${entry.assetDivision ?? '—'} · Job ${getEntryJobNumber(entry) || '—'}`}</p></div>
+                        <div className="space-y-1"><div className="flex flex-wrap items-center gap-2">{isPtoEntry(entry) ? <Badge variant="secondary">PTO</Badge> : null}{entry.pTOTypeKey ? <Badge variant="outline">{ShopTimeEntryPTOTypeKeyToLabel[entry.pTOTypeKey]}</Badge> : null}<p className="text-sm text-muted-foreground">{isPtoEntry(entry) ? 'Paid time off' : 'Asset'}</p></div><p className="text-lg font-semibold">{getTimeEntryAssetName(entry, assets)}</p><p className="text-sm text-muted-foreground">{isPtoEntry(entry) ? `${getPtoHours(entry) || Math.round(entry.hours ?? 0)} hours submitted` : `Division ${getEntryDivision(entry, assets) || '—'} · Job ${getEntryJobNumber(entry) || '—'}`}</p></div>
                       )}
                       {editingNotesEntryId === entry.id ? (
                         <div className="mt-3 space-y-2">
