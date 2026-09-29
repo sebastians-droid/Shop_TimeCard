@@ -446,7 +446,7 @@ export default function ManagerDashboardPage() {
           </div>
         </CardHeader>
         <CardContent className="grid gap-4 sm:grid-cols-4">
-          <StatTile label="Employees clocked in" value={employeeSummaries.length} />
+          <StatTile label="Employees logged today" value={employeeSummaries.length} />
           <StatTile label="Currently active" value={activeEmployeeCount} />
           <StatTile label="Total shop time" value={totalHours} />
           <StatTile
