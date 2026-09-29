@@ -7,7 +7,9 @@ app.timer('employeeSync', {
     context.log('Employee sync timer triggered');
     try {
       const result = await runSync();
-      context.log(`Sync result: ${result.created} created, ${result.updated} updated, ${result.deactivated} inactive, ${result.unchanged} unchanged`);
+      context.log(
+        `Sync result: ${result.created} created, ${result.updated} updated, ${result.deactivated} inactive, ${result.unchanged} unchanged`,
+      );
     } catch (error) {
       context.error('Employee sync failed:', error.message || error);
     }

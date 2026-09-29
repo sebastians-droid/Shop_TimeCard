@@ -4,7 +4,9 @@ const path = require('node:path');
 function cleanEnv(name) {
   const raw = process.env[name];
   if (!raw) return '';
-  return String(raw).trim().replace(/^['"]+|['"]+$/g, '');
+  return String(raw)
+    .trim()
+    .replace(/^['"]+|['"]+$/g, '');
 }
 
 function loadSpeechConfig() {

@@ -15,19 +15,9 @@ import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover
 import { useAllEquipmentAssets, useShopEmployeeList, useShopTimeEntryList } from '@/hooks/use-shop-data';
 import { mapShopEmployees, type AppShopEmployee } from '@/lib/shop-employees';
 import { formatDuration, getDayPayMinutes, getEntryPaidMinutes, getPtoHours, getRawDurationMinutes, isPtoEntry } from '@/lib/time-rules';
-import {
-  EMPLOYEE_CODE_NOT_FOUND,
-  findEmployeeByCode,
-  getEntryAssetName,
-  getEntryDivision,
-  getEntryJobNumber,
-} from '@/lib/entry-helpers';
+import { EMPLOYEE_CODE_NOT_FOUND, findEmployeeByCode, getEntryAssetName, getEntryDivision, getEntryJobNumber } from '@/lib/entry-helpers';
 import { divisionLabel } from '@/lib/reference-data';
-import {
-  ShopTimeEntryPayTypeKeyToLabel,
-  ShopTimeEntryPTOTypeKeyToLabel,
-  type ShopTimeEntry,
-} from '@/models/shop-time-entry';
+import { ShopTimeEntryPayTypeKeyToLabel, ShopTimeEntryPTOTypeKeyToLabel, type ShopTimeEntry } from '@/models/shop-time-entry';
 
 function computeRtOt(dayEntries: ShopTimeEntry[]): { rt: number; ot: number } {
   const RT_THRESHOLD_HOURS = 8;
@@ -59,7 +49,13 @@ export default function MechanicLogPage() {
     to: endOfWeek(now, { weekStartsOn: 0 }),
   });
 
-  const { data: shopEmployees = [], isLoading: employeesLoading, isError: employeesFailed, error: employeesError, refetch: refetchEmployees } = useShopEmployeeList();
+  const {
+    data: shopEmployees = [],
+    isLoading: employeesLoading,
+    isError: employeesFailed,
+    error: employeesError,
+    refetch: refetchEmployees,
+  } = useShopEmployeeList();
   const employees = useMemo(() => mapShopEmployees(shopEmployees), [shopEmployees]);
   const { data: assets = [] } = useAllEquipmentAssets();
   const { data: timeEntries = [] } = useShopTimeEntryList();
@@ -109,9 +105,7 @@ export default function MechanicLogPage() {
   const dayData = useMemo(() => {
     return days.map((day) => {
       const dateKey = format(day, 'yyyy-MM-dd');
-      const entries = filteredEntries.filter(
-        (entry: ShopTimeEntry) => entry.clockIn?.startsWith(dateKey),
-      );
+      const entries = filteredEntries.filter((entry: ShopTimeEntry) => entry.clockIn?.startsWith(dateKey));
       const dayPay = getDayPayMinutes(entries);
       const { rt, ot } = computeRtOt(entries);
       const totalHours = dayPay.totalMinutes / 60;
@@ -199,7 +193,9 @@ export default function MechanicLogPage() {
                   <p className="mt-1 break-words text-destructive/80">
                     {employeesError instanceof Error ? employeesError.message : 'Grant the app user Read on Shop Employee, then retry.'}
                   </p>
-                  <Button type="button" variant="outline" className="mt-3" onClick={() => void refetchEmployees()}>Retry</Button>
+                  <Button type="button" variant="outline" className="mt-3" onClick={() => void refetchEmployees()}>
+                    Retry
+                  </Button>
                 </div>
               ) : null}
               <Button className="h-12" type="submit" disabled={employeesLoading || employeesFailed || employeeCode.trim().length === 0}>
@@ -216,11 +212,11 @@ export default function MechanicLogPage() {
               <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
                 <div>
                   <CardTitle className="text-xl">{selectedEmployee.employeeName}</CardTitle>
-                  <p className="mt-1 text-sm text-muted-foreground">
-                    Employee {selectedEmployee.employeeCode} · Mechanic Log
-                  </p>
+                  <p className="mt-1 text-sm text-muted-foreground">Employee {selectedEmployee.employeeCode} · Mechanic Log</p>
                 </div>
-                <Button type="button" variant="outline" onClick={handleResetEmployee}>Change employee</Button>
+                <Button type="button" variant="outline" onClick={handleResetEmployee}>
+                  Change employee
+                </Button>
               </div>
             </CardHeader>
           </Card>
@@ -269,25 +265,15 @@ export default function MechanicLogPage() {
                 <PopoverTrigger asChild>
                   <Button type="button" variant="outline" className="w-full justify-start text-left font-normal sm:w-auto">
                     <CalendarIcon className="mr-2 h-4 w-4" />
-                    {dateRange?.from ? (
-                      dateRange.to ? (
-                        `${format(dateRange.from, 'MMM d, yyyy')} – ${format(dateRange.to, 'MMM d, yyyy')}`
-                      ) : (
-                        format(dateRange.from, 'MMM d, yyyy')
-                      )
-                    ) : (
-                      'Pick a date range'
-                    )}
+                    {dateRange?.from
+                      ? dateRange.to
+                        ? `${format(dateRange.from, 'MMM d, yyyy')} – ${format(dateRange.to, 'MMM d, yyyy')}`
+                        : format(dateRange.from, 'MMM d, yyyy')
+                      : 'Pick a date range'}
                   </Button>
                 </PopoverTrigger>
                 <PopoverContent className="w-auto p-0" align="start">
-                  <Calendar
-                    mode="range"
-                    selected={dateRange}
-                    onSelect={setDateRange}
-                    numberOfMonths={2}
-                    initialFocus
-                  />
+                  <Calendar mode="range" selected={dateRange} onSelect={setDateRange} numberOfMonths={2} initialFocus />
                 </PopoverContent>
               </Popover>
             </CardContent>
@@ -377,17 +363,11 @@ export default function MechanicLogPage() {
                                   </div>
                                   <div className="flex flex-wrap items-center gap-1.5">
                                     {entry.payTypeKey && entry.payTypeKey in ShopTimeEntryPayTypeKeyToLabel && (
-                                      <Badge variant="outline">
-                                        {ShopTimeEntryPayTypeKeyToLabel[entry.payTypeKey]}
-                                      </Badge>
+                                      <Badge variant="outline">{ShopTimeEntryPayTypeKeyToLabel[entry.payTypeKey]}</Badge>
                                     )}
-                                    {isPtoEntry(entry) && (
-                                      <Badge variant="secondary">PTO {getPtoHours(entry)}h</Badge>
-                                    )}
+                                    {isPtoEntry(entry) && <Badge variant="secondary">PTO {getPtoHours(entry)}h</Badge>}
                                     {entry.pTOTypeKey && entry.pTOTypeKey in ShopTimeEntryPTOTypeKeyToLabel && (
-                                      <Badge variant="outline">
-                                        {ShopTimeEntryPTOTypeKeyToLabel[entry.pTOTypeKey]}
-                                      </Badge>
+                                      <Badge variant="outline">{ShopTimeEntryPTOTypeKeyToLabel[entry.pTOTypeKey]}</Badge>
                                     )}
                                     {entry.onCall && <Badge variant="secondary">On Call</Badge>}
                                   </div>

@@ -103,10 +103,7 @@ export function useCreateAsset() {
 export function useUpdateAsset() {
   const client = useQueryClient();
   return useMutation({
-    mutationFn: ({
-      id,
-      ...fields
-    }: { id: string } & Partial<EquipmentAsset> & { divisionPicklist?: number; equipmentCategory?: number }) =>
+    mutationFn: ({ id, ...fields }: { id: string } & Partial<EquipmentAsset> & { divisionPicklist?: number; equipmentCategory?: number }) =>
       apiFetch<EquipmentAsset>(`/api/assets/${id}`, {
         method: 'PATCH',
         body: JSON.stringify(fields),
@@ -180,13 +177,7 @@ export function useScheduleList(from?: string, to?: string) {
 export function useUpsertSchedule() {
   const client = useQueryClient();
   return useMutation({
-    mutationFn: (record: {
-      scheduleKey: string;
-      employeeId: string;
-      scheduleDate: string;
-      scheduledStart?: string;
-      onCall?: boolean;
-    }) =>
+    mutationFn: (record: { scheduleKey: string; employeeId: string; scheduleDate: string; scheduledStart?: string; onCall?: boolean }) =>
       apiFetch<MechanicScheduleRow>('/api/schedules', {
         method: 'PATCH',
         body: JSON.stringify(record),

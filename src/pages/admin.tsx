@@ -3,9 +3,15 @@ import { Check, Pencil, Plus, Search, Trash2, X } from 'lucide-react';
 import { toast } from 'sonner';
 
 import {
-  AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
-  AlertDialogDescription, AlertDialogFooter, AlertDialogHeader,
-  AlertDialogTitle, AlertDialogTrigger,
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+  AlertDialogTrigger,
 } from '@/components/ui/alert-dialog';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -15,9 +21,15 @@ import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { AccessCheckingCard, ManagerAccessDeniedCard } from '@/components/system/access-cards';
 import {
-  useAllEquipmentAssets, useCreateAsset, useUpdateAsset, useDeactivateAsset,
-  useShopEmployeeList, useCreateShopEmployee, useDeactivateShopEmployee,
-  useLookupEmployees, type LookupEmployee,
+  useAllEquipmentAssets,
+  useCreateAsset,
+  useUpdateAsset,
+  useDeactivateAsset,
+  useShopEmployeeList,
+  useCreateShopEmployee,
+  useDeactivateShopEmployee,
+  useLookupEmployees,
+  type LookupEmployee,
 } from '@/hooks/use-shop-data';
 import type { EquipmentAsset } from '@/models/equipment-asset';
 import type { ShopEmployee } from '@/models/shop-employee';
@@ -29,7 +41,14 @@ import { DIVISIONS, EQUIPMENT_CATEGORIES, divisionLabel, picklistForCode, catego
 type AssetDraft = { asset: string; assetDetail: string; divisionCode: string; equipmentCategory: string };
 const emptyAssetDraft: AssetDraft = { asset: '', assetDetail: '', divisionCode: '', equipmentCategory: '' };
 
-function AssetForm({ draft, onChange, onSave, onCancel, saving, title }: {
+function AssetForm({
+  draft,
+  onChange,
+  onSave,
+  onCancel,
+  saving,
+  title,
+}: {
   draft: AssetDraft;
   onChange: (d: AssetDraft) => void;
   onSave: () => void;
@@ -46,26 +65,34 @@ function AssetForm({ draft, onChange, onSave, onCancel, saving, title }: {
         <div className="grid gap-3 sm:grid-cols-3">
           <div>
             <Label>Asset ID</Label>
-            <Input value={draft.asset} onChange={e => onChange({ ...draft, asset: e.target.value })} placeholder="e.g. PT500" />
+            <Input value={draft.asset} onChange={(e) => onChange({ ...draft, asset: e.target.value })} placeholder="e.g. PT500" />
           </div>
           <div>
             <Label>Equipment Category</Label>
-            <Select value={draft.equipmentCategory} onValueChange={v => onChange({ ...draft, equipmentCategory: v })}>
-              <SelectTrigger><SelectValue placeholder="Select category" /></SelectTrigger>
+            <Select value={draft.equipmentCategory} onValueChange={(v) => onChange({ ...draft, equipmentCategory: v })}>
+              <SelectTrigger>
+                <SelectValue placeholder="Select category" />
+              </SelectTrigger>
               <SelectContent>
-                {EQUIPMENT_CATEGORIES.map(c => (
-                  <SelectItem key={c.value} value={String(c.value)}>{c.label}</SelectItem>
+                {EQUIPMENT_CATEGORIES.map((c) => (
+                  <SelectItem key={c.value} value={String(c.value)}>
+                    {c.label}
+                  </SelectItem>
                 ))}
               </SelectContent>
             </Select>
           </div>
           <div>
             <Label>Division</Label>
-            <Select value={draft.divisionCode} onValueChange={v => onChange({ ...draft, divisionCode: v })}>
-              <SelectTrigger><SelectValue placeholder="Select division" /></SelectTrigger>
+            <Select value={draft.divisionCode} onValueChange={(v) => onChange({ ...draft, divisionCode: v })}>
+              <SelectTrigger>
+                <SelectValue placeholder="Select division" />
+              </SelectTrigger>
               <SelectContent>
-                {DIVISIONS.map(d => (
-                  <SelectItem key={d.code} value={String(d.code)}>{d.code} — {d.label}</SelectItem>
+                {DIVISIONS.map((d) => (
+                  <SelectItem key={d.code} value={String(d.code)}>
+                    {d.code} — {d.label}
+                  </SelectItem>
                 ))}
               </SelectContent>
             </Select>
@@ -73,10 +100,16 @@ function AssetForm({ draft, onChange, onSave, onCancel, saving, title }: {
         </div>
         <div>
           <Label>Details</Label>
-          <Input value={draft.assetDetail} onChange={e => onChange({ ...draft, assetDetail: e.target.value })} placeholder="Optional description" />
+          <Input
+            value={draft.assetDetail}
+            onChange={(e) => onChange({ ...draft, assetDetail: e.target.value })}
+            placeholder="Optional description"
+          />
         </div>
         <div className="flex gap-2 justify-end">
-          <Button variant="outline" size="sm" onClick={onCancel} disabled={saving}><X className="h-4 w-4" /> Cancel</Button>
+          <Button variant="outline" size="sm" onClick={onCancel} disabled={saving}>
+            <X className="h-4 w-4" /> Cancel
+          </Button>
           <Button size="sm" onClick={onSave} disabled={saving || !draft.asset.trim() || !draft.divisionCode}>
             <Check className="h-4 w-4" /> {saving ? 'Saving…' : 'Save'}
           </Button>
@@ -100,10 +133,11 @@ function AssetsSection() {
   const filtered = useMemo(() => {
     if (!search.trim()) return assets;
     const q = search.toLowerCase();
-    return assets.filter(a =>
-      a.asset.toLowerCase().includes(q) ||
-      (a.assetDetail || '').toLowerCase().includes(q) ||
-      divisionLabel(a.divisionCode).toLowerCase().includes(q)
+    return assets.filter(
+      (a) =>
+        a.asset.toLowerCase().includes(q) ||
+        (a.assetDetail || '').toLowerCase().includes(q) ||
+        divisionLabel(a.divisionCode).toLowerCase().includes(q),
     );
   }, [assets, search]);
 
@@ -116,7 +150,12 @@ function AssetsSection() {
   function startEdit(a: EquipmentAsset) {
     setAdding(false);
     setEditingId(a.id);
-    setDraft({ asset: a.asset, assetDetail: a.assetDetail || '', divisionCode: a.divisionCode != null ? String(a.divisionCode) : '', equipmentCategory: a.equipmentCategory != null ? String(a.equipmentCategory) : '' });
+    setDraft({
+      asset: a.asset,
+      assetDetail: a.assetDetail || '',
+      divisionCode: a.divisionCode != null ? String(a.divisionCode) : '',
+      equipmentCategory: a.equipmentCategory != null ? String(a.equipmentCategory) : '',
+    });
   }
 
   function cancel() {
@@ -172,13 +211,17 @@ function AssetsSection() {
   return (
     <section>
       <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-        <h2 className="text-xl font-semibold">Equipment Assets <Badge variant="secondary">{assets.length}</Badge></h2>
+        <h2 className="text-xl font-semibold">
+          Equipment Assets <Badge variant="secondary">{assets.length}</Badge>
+        </h2>
         <div className="flex gap-2">
           <div className="relative flex-1 sm:w-64">
             <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
-            <Input className="pl-8" placeholder="Search assets…" value={search} onChange={e => setSearch(e.target.value)} />
+            <Input className="pl-8" placeholder="Search assets…" value={search} onChange={(e) => setSearch(e.target.value)} />
           </div>
-          <Button size="sm" onClick={startAdd} disabled={adding}><Plus className="h-4 w-4" /> Add</Button>
+          <Button size="sm" onClick={startAdd} disabled={adding}>
+            <Plus className="h-4 w-4" /> Add
+          </Button>
         </div>
       </div>
 
@@ -204,48 +247,63 @@ function AssetsSection() {
             </thead>
             <tbody>
               {filtered.length === 0 && (
-                <tr><td colSpan={5} className="px-3 py-6 text-center text-muted-foreground">No assets found.</td></tr>
+                <tr>
+                  <td colSpan={5} className="px-3 py-6 text-center text-muted-foreground">
+                    No assets found.
+                  </td>
+                </tr>
               )}
-              {filtered.map(a => editingId === a.id ? (
-                <tr key={a.id}>
-                  <td colSpan={5} className="p-2">
-                    <AssetForm draft={draft} onChange={setDraft} onSave={saveEdit} onCancel={cancel} saving={updateMut.isPending} title={`Edit ${a.asset}`} />
-                  </td>
-                </tr>
-              ) : (
-                <tr key={a.id} className="border-b last:border-0 hover:bg-muted/30">
-                  <td className="px-3 py-2 font-medium">{a.asset}</td>
-                  <td className="px-3 py-2 text-muted-foreground hidden md:table-cell">{categoryLabel(a.equipmentCategory) || '—'}</td>
-                  <td className="px-3 py-2">
-                    <Badge variant="outline">{divisionLabel(a.divisionCode)}</Badge>
-                  </td>
-                  <td className="px-3 py-2 text-muted-foreground hidden sm:table-cell">{a.assetDetail || '—'}</td>
-                  <td className="px-3 py-2">
-                    <div className="flex gap-1 justify-end">
-                      <Button variant="ghost" size="icon-sm" onClick={() => startEdit(a)} title="Edit">
-                        <Pencil className="h-3.5 w-3.5" />
-                      </Button>
-                      <AlertDialog>
-                        <AlertDialogTrigger asChild>
-                          <Button variant="ghost" size="icon-sm" title="Deactivate">
-                            <Trash2 className="h-3.5 w-3.5 text-destructive" />
-                          </Button>
-                        </AlertDialogTrigger>
-                        <AlertDialogContent>
-                          <AlertDialogHeader>
-                            <AlertDialogTitle>Deactivate {a.asset}?</AlertDialogTitle>
-                            <AlertDialogDescription>This will deactivate the asset. It can be reactivated later in Dataverse.</AlertDialogDescription>
-                          </AlertDialogHeader>
-                          <AlertDialogFooter>
-                            <AlertDialogCancel>Cancel</AlertDialogCancel>
-                            <AlertDialogAction onClick={() => handleDeactivate(a)}>Deactivate</AlertDialogAction>
-                          </AlertDialogFooter>
-                        </AlertDialogContent>
-                      </AlertDialog>
-                    </div>
-                  </td>
-                </tr>
-              ))}
+              {filtered.map((a) =>
+                editingId === a.id ? (
+                  <tr key={a.id}>
+                    <td colSpan={5} className="p-2">
+                      <AssetForm
+                        draft={draft}
+                        onChange={setDraft}
+                        onSave={saveEdit}
+                        onCancel={cancel}
+                        saving={updateMut.isPending}
+                        title={`Edit ${a.asset}`}
+                      />
+                    </td>
+                  </tr>
+                ) : (
+                  <tr key={a.id} className="border-b last:border-0 hover:bg-muted/30">
+                    <td className="px-3 py-2 font-medium">{a.asset}</td>
+                    <td className="px-3 py-2 text-muted-foreground hidden md:table-cell">{categoryLabel(a.equipmentCategory) || '—'}</td>
+                    <td className="px-3 py-2">
+                      <Badge variant="outline">{divisionLabel(a.divisionCode)}</Badge>
+                    </td>
+                    <td className="px-3 py-2 text-muted-foreground hidden sm:table-cell">{a.assetDetail || '—'}</td>
+                    <td className="px-3 py-2">
+                      <div className="flex gap-1 justify-end">
+                        <Button variant="ghost" size="icon-sm" onClick={() => startEdit(a)} title="Edit">
+                          <Pencil className="h-3.5 w-3.5" />
+                        </Button>
+                        <AlertDialog>
+                          <AlertDialogTrigger asChild>
+                            <Button variant="ghost" size="icon-sm" title="Deactivate">
+                              <Trash2 className="h-3.5 w-3.5 text-destructive" />
+                            </Button>
+                          </AlertDialogTrigger>
+                          <AlertDialogContent>
+                            <AlertDialogHeader>
+                              <AlertDialogTitle>Deactivate {a.asset}?</AlertDialogTitle>
+                              <AlertDialogDescription>
+                                This will deactivate the asset. It can be reactivated later in Dataverse.
+                              </AlertDialogDescription>
+                            </AlertDialogHeader>
+                            <AlertDialogFooter>
+                              <AlertDialogCancel>Cancel</AlertDialogCancel>
+                              <AlertDialogAction onClick={() => handleDeactivate(a)}>Deactivate</AlertDialogAction>
+                            </AlertDialogFooter>
+                          </AlertDialogContent>
+                        </AlertDialog>
+                      </div>
+                    </td>
+                  </tr>
+                ),
+              )}
             </tbody>
           </table>
         </div>
@@ -259,7 +317,15 @@ function AssetsSection() {
 type EmployeeDraft = { empNum: string; matchedLookup: LookupEmployee | null };
 const emptyEmployeeDraft: EmployeeDraft = { empNum: '', matchedLookup: null };
 
-function EmployeeForm({ draft, onChange, onSave, onCancel, saving, title, lookupEmployees }: {
+function EmployeeForm({
+  draft,
+  onChange,
+  onSave,
+  onCancel,
+  saving,
+  title,
+  lookupEmployees,
+}: {
   draft: EmployeeDraft;
   onChange: (d: EmployeeDraft) => void;
   onSave: () => void;
@@ -271,7 +337,7 @@ function EmployeeForm({ draft, onChange, onSave, onCancel, saving, title, lookup
   const suggestions = useMemo(() => {
     const q = draft.empNum.trim();
     if (!q || draft.matchedLookup) return [];
-    return lookupEmployees.filter(e => String(e.empNum ?? '').includes(q)).slice(0, 8);
+    return lookupEmployees.filter((e) => String(e.empNum ?? '').includes(q)).slice(0, 8);
   }, [draft.empNum, draft.matchedLookup, lookupEmployees]);
 
   return (
@@ -286,16 +352,16 @@ function EmployeeForm({ draft, onChange, onSave, onCancel, saving, title, lookup
             <Input
               type="number"
               value={draft.empNum}
-              onChange={e => {
+              onChange={(e) => {
                 const val = e.target.value;
-                const exact = lookupEmployees.find(emp => String(emp.empNum) === val.trim());
+                const exact = lookupEmployees.find((emp) => String(emp.empNum) === val.trim());
                 onChange({ empNum: val, matchedLookup: exact ?? null });
               }}
               placeholder="e.g. 1234"
             />
             {suggestions.length > 0 && (
               <div className="mt-1 max-h-40 overflow-auto rounded-md border border-border bg-popover text-sm shadow-md">
-                {suggestions.map(emp => (
+                {suggestions.map((emp) => (
                   <button
                     key={emp.id}
                     type="button"
@@ -320,7 +386,9 @@ function EmployeeForm({ draft, onChange, onSave, onCancel, saving, title, lookup
           </div>
         </div>
         <div className="flex gap-2 justify-end">
-          <Button variant="outline" size="sm" onClick={onCancel} disabled={saving}><X className="h-4 w-4" /> Cancel</Button>
+          <Button variant="outline" size="sm" onClick={onCancel} disabled={saving}>
+            <X className="h-4 w-4" /> Cancel
+          </Button>
           <Button size="sm" onClick={onSave} disabled={saving || !draft.matchedLookup}>
             <Check className="h-4 w-4" /> {saving ? 'Saving…' : 'Save'}
           </Button>
@@ -343,10 +411,11 @@ function EmployeesSection() {
   const filtered = useMemo(() => {
     if (!search.trim()) return employees;
     const q = search.toLowerCase();
-    return employees.filter(e =>
-      (e.autoNumber || '').toLowerCase().includes(q) ||
-      (e.employee?.name1 || '').toLowerCase().includes(q) ||
-      String(e.empNum || '').includes(q)
+    return employees.filter(
+      (e) =>
+        (e.autoNumber || '').toLowerCase().includes(q) ||
+        (e.employee?.name1 || '').toLowerCase().includes(q) ||
+        String(e.empNum || '').includes(q),
     );
   }, [employees, search]);
 
@@ -386,19 +455,31 @@ function EmployeesSection() {
   return (
     <section>
       <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-        <h2 className="text-xl font-semibold">Shop Employees <Badge variant="secondary">{employees.length}</Badge></h2>
+        <h2 className="text-xl font-semibold">
+          Shop Employees <Badge variant="secondary">{employees.length}</Badge>
+        </h2>
         <div className="flex gap-2">
           <div className="relative flex-1 sm:w-64">
             <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
-            <Input className="pl-8" placeholder="Search employees…" value={search} onChange={e => setSearch(e.target.value)} />
+            <Input className="pl-8" placeholder="Search employees…" value={search} onChange={(e) => setSearch(e.target.value)} />
           </div>
-          <Button size="sm" onClick={startAdd} disabled={adding}><Plus className="h-4 w-4" /> Add</Button>
+          <Button size="sm" onClick={startAdd} disabled={adding}>
+            <Plus className="h-4 w-4" /> Add
+          </Button>
         </div>
       </div>
 
       {adding && (
         <div className="mb-4">
-          <EmployeeForm draft={draft} onChange={setDraft} onSave={saveNew} onCancel={cancel} saving={createMut.isPending} title="New Employee" lookupEmployees={lookupEmployees} />
+          <EmployeeForm
+            draft={draft}
+            onChange={setDraft}
+            onSave={saveNew}
+            onCancel={cancel}
+            saving={createMut.isPending}
+            title="New Employee"
+            lookupEmployees={lookupEmployees}
+          />
         </div>
       )}
 
@@ -416,9 +497,13 @@ function EmployeesSection() {
             </thead>
             <tbody>
               {filtered.length === 0 && (
-                <tr><td colSpan={3} className="px-3 py-6 text-center text-muted-foreground">No employees found.</td></tr>
+                <tr>
+                  <td colSpan={3} className="px-3 py-6 text-center text-muted-foreground">
+                    No employees found.
+                  </td>
+                </tr>
               )}
-              {filtered.map(emp => (
+              {filtered.map((emp) => (
                 <tr key={emp.id} className="border-b last:border-0 hover:bg-muted/30">
                   <td className="px-3 py-2 font-medium">{emp.employee?.name1 || emp.autoNumber || '—'}</td>
                   <td className="px-3 py-2">{emp.empNum ?? '—'}</td>
@@ -433,7 +518,9 @@ function EmployeesSection() {
                         <AlertDialogContent>
                           <AlertDialogHeader>
                             <AlertDialogTitle>Deactivate {emp.employee?.name1 || emp.autoNumber || 'this employee'}?</AlertDialogTitle>
-                            <AlertDialogDescription>This will deactivate the shop employee record. It can be reactivated later in Dataverse.</AlertDialogDescription>
+                            <AlertDialogDescription>
+                              This will deactivate the shop employee record. It can be reactivated later in Dataverse.
+                            </AlertDialogDescription>
                           </AlertDialogHeader>
                           <AlertDialogFooter>
                             <AlertDialogCancel>Cancel</AlertDialogCancel>

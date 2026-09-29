@@ -18,8 +18,14 @@ const {
 } = require('./dataverse');
 const { issueSpeechToken } = require('./speech');
 const { requireUser, requireManager } = require('./auth');
-let runSync = async () => { throw new Error('Sync module not loaded'); };
-try { ({ runSync } = require('./employee-sync')); } catch { /* Sync optional */ }
+let runSync = async () => {
+  throw new Error('Sync module not loaded');
+};
+try {
+  ({ runSync } = require('./employee-sync'));
+} catch {
+  /* Sync optional */
+}
 
 function json(status, body) {
   return {
@@ -54,9 +60,7 @@ async function readJson(request) {
 }
 
 function clientIp(request) {
-  const forwarded = request.headers?.get?.('x-forwarded-for')
-    || request.headers?.['x-forwarded-for']
-    || '';
+  const forwarded = request.headers?.get?.('x-forwarded-for') || request.headers?.['x-forwarded-for'] || '';
   const first = String(forwarded).split(',')[0].trim();
   return first || undefined;
 }
@@ -161,8 +165,8 @@ async function handleRequest(request) {
       return json(201, await createTimeEntry(record));
     }
 
-    const entryMatch = pathname.match(/^\/api\/time-entries\/([0-9a-f-]{36})$/i)
-      || pathname.match(/^\/api\/timeEntries\/([0-9a-f-]{36})$/i);
+    const entryMatch =
+      pathname.match(/^\/api\/time-entries\/([0-9a-f-]{36})$/i) || pathname.match(/^\/api\/timeEntries\/([0-9a-f-]{36})$/i);
     if (entryMatch && method === 'PATCH') {
       requireUser(request);
       const record = await readJson(request);

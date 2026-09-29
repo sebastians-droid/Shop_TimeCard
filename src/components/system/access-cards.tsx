@@ -48,8 +48,8 @@ export function ManagerAccessDeniedCard({
           </div>
           {showAllowlistHint ? (
             <p className="text-sm text-muted-foreground">
-              Ask the app owner to add this email to the{' '}
-              <span className="font-medium text-foreground">MANAGER_EMAILS</span> Function App setting.
+              Ask the app owner to add this email to the <span className="font-medium text-foreground">MANAGER_EMAILS</span> Function App
+              setting.
             </p>
           ) : null}
         </CardContent>

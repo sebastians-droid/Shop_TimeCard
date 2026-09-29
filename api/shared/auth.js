@@ -19,19 +19,13 @@ function headerGet(request, name) {
 }
 
 function getUser(request) {
-  const principal = decodePrincipal(
-    headerGet(request, 'x-ms-client-principal') || headerGet(request, 'X-MS-CLIENT-PRINCIPAL'),
-  );
+  const principal = decodePrincipal(headerGet(request, 'x-ms-client-principal') || headerGet(request, 'X-MS-CLIENT-PRINCIPAL'));
   const cfg = loadConfig();
   const isProduction = process.env.AZURE_FUNCTIONS_ENVIRONMENT === 'Production' || Boolean(process.env.WEBSITE_SITE_NAME);
   const skipAuth = process.env.DATAVERSE_LOCAL_SKIP_AUTH === '1' || !isProduction;
 
   if (!principal) {
-    const headerEmail = (
-      headerGet(request, 'x-ms-client-principal-name') ||
-      request.user?.username ||
-      ''
-    ).toLowerCase();
+    const headerEmail = (headerGet(request, 'x-ms-client-principal-name') || request.user?.username || '').toLowerCase();
     if (headerEmail) {
       return {
         userId: headerGet(request, 'x-ms-client-principal-id') || request.user?.id || '',
@@ -50,19 +44,14 @@ function getUser(request) {
     };
   }
 
-  const claims = Object.fromEntries(
-    (principal.claims || []).map((claim) => [claim.typ || claim.type, claim.val || claim.value]),
-  );
+  const claims = Object.fromEntries((principal.claims || []).map((claim) => [claim.typ || claim.type, claim.val || claim.value]));
   const email = (
     principal.userDetails ||
     claims['http://schemas.xmlsoap.org/ws/2005/05/identity/claims/emailaddress'] ||
     claims.preferred_username ||
     ''
   ).toLowerCase();
-  const name =
-    claims.name ||
-    claims['http://schemas.xmlsoap.org/ws/2005/05/identity/claims/name'] ||
-    email;
+  const name = claims.name || claims['http://schemas.xmlsoap.org/ws/2005/05/identity/claims/name'] || email;
 
   return {
     userId: principal.userId || '',

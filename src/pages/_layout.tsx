@@ -2,9 +2,7 @@ import { NavLink, Outlet, useLocation } from 'react-router-dom';
 
 const navLinkClassName = ({ isActive }: { isActive: boolean }) =>
   `rounded-md px-3 py-1.5 text-sm font-medium transition-colors ${
-    isActive
-      ? 'bg-white/15 text-white'
-      : 'text-white/70 hover:bg-white/10 hover:text-white'
+    isActive ? 'bg-white/15 text-white' : 'text-white/70 hover:bg-white/10 hover:text-white'
   }`;
 
 export default function Layout() {
@@ -24,10 +22,18 @@ export default function Layout() {
           </NavLink>
           {!isHome && (
             <nav className="flex gap-1.5 flex-wrap" aria-label="Primary navigation">
-              <NavLink to="/timecard" className={navLinkClassName}>Timecard</NavLink>
-              <NavLink to="/mechanic-log" className={navLinkClassName}>Mechanic Log</NavLink>
-              <NavLink to="/manager" className={navLinkClassName}>Manager</NavLink>
-              <NavLink to="/admin" className={navLinkClassName}>Assets & Employees</NavLink>
+              <NavLink to="/timecard" className={navLinkClassName}>
+                Timecard
+              </NavLink>
+              <NavLink to="/mechanic-log" className={navLinkClassName}>
+                Mechanic Log
+              </NavLink>
+              <NavLink to="/manager" className={navLinkClassName}>
+                Manager
+              </NavLink>
+              <NavLink to="/admin" className={navLinkClassName}>
+                Assets & Employees
+              </NavLink>
             </nav>
           )}
         </div>

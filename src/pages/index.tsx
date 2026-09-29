@@ -37,9 +37,7 @@ export default function HomePage() {
     <main className="flex-1 flex items-center justify-center">
       <div className="mx-auto w-full max-w-3xl px-4 py-16 sm:px-6">
         <div className="mb-12 text-center">
-          <h1 className="text-3xl font-bold tracking-tight text-foreground sm:text-4xl">
-            Shop Hub
-          </h1>
+          <h1 className="text-3xl font-bold tracking-tight text-foreground sm:text-4xl">Shop Hub</h1>
         </div>
 
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
@@ -49,18 +47,14 @@ export default function HomePage() {
                 <div className={`mb-4 inline-flex h-10 w-10 items-center justify-center rounded-lg ${iconBg} text-white`}>
                   <Icon className="h-5 w-5" />
                 </div>
-                <h2 className="text-[0.95rem] font-semibold text-foreground mb-1.5 group-hover:text-primary transition-colors">
-                  {title}
-                </h2>
+                <h2 className="text-[0.95rem] font-semibold text-foreground mb-1.5 group-hover:text-primary transition-colors">{title}</h2>
                 <p className="text-sm text-muted-foreground leading-relaxed">{description}</p>
               </div>
             </Link>
           ))}
         </div>
 
-        <p className="mt-10 text-center text-xs text-muted-foreground/60 tracking-wide uppercase">
-          Swank Construction Co.
-        </p>
+        <p className="mt-10 text-center text-xs text-muted-foreground/60 tracking-wide uppercase">Swank Construction Co.</p>
       </div>
     </main>
   );

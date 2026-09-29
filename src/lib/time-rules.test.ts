@@ -261,12 +261,10 @@ describe('formatDuration', () => {
 
 describe('lunchCsvLabel', () => {
   it('describes how lunch was handled for the day', () => {
-    expect(lunchCsvLabel([entry({ id: 'a', clockIn: at(DAY, '07:00'), clockOut: at(DAY, '15:30') })])).toBe(
-      '30 minutes deducted',
+    expect(lunchCsvLabel([entry({ id: 'a', clockIn: at(DAY, '07:00'), clockOut: at(DAY, '15:30') })])).toBe('30 minutes deducted');
+    expect(lunchCsvLabel([entry({ id: 'a', clockIn: at(DAY, '07:00'), clockOut: at(DAY, '15:30'), notes: NO_LUNCH_MARKER })])).toBe(
+      'No lunch',
     );
-    expect(
-      lunchCsvLabel([entry({ id: 'a', clockIn: at(DAY, '07:00'), clockOut: at(DAY, '15:30'), notes: NO_LUNCH_MARKER })]),
-    ).toBe('No lunch');
     expect(lunchCsvLabel([])).toBe('');
   });
 });

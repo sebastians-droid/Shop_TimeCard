@@ -2,15 +2,15 @@ const ExcelJS = require('exceljs');
 const { loadConfig } = require('./dataverse');
 
 const DEPT_LABEL_TO_VALUE = {
-  'CONSTRUCTI': 290180000,
-  'GRIND': 290180001,
-  'MANAGMNT': 290180002,
+  CONSTRUCTI: 290180000,
+  GRIND: 290180001,
+  MANAGMNT: 290180002,
   'MGMT CONST': 290180003,
   'MGMT MILL': 290180004,
   'MGMT S/S': 290180005,
   'MGMT S/SBT': 290180006,
   'MGMT SS VA': 290180007,
-  'MILLING': 290180008,
+  MILLING: 290180008,
   'OFFIC/CONS': 290180009,
   'OFFICE VB': 290180010,
   'OFFICE/PR': 290180019,
@@ -45,10 +45,11 @@ async function getToken() {
     grant_type: 'client_credentials',
     scope: `${cfg.orgUrl}/.default`,
   });
-  const r = await fetch(
-    `https://login.microsoftonline.com/${cfg.tenantId}/oauth2/v2.0/token`,
-    { method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body },
-  );
+  const r = await fetch(`https://login.microsoftonline.com/${cfg.tenantId}/oauth2/v2.0/token`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    body,
+  });
   const data = await r.json();
   if (!data.access_token) throw new Error(data.error_description || 'Token error');
   return data.access_token;
@@ -169,17 +170,13 @@ async function readExcelFromSharePoint() {
 
   if (!siteUrl || !filePath) return null;
 
-  const siteR = await fetch(
-    `https://graph.microsoft.com/v1.0/sites/${siteUrl}`,
-    { headers: { Authorization: `Bearer ${graphToken}` } },
-  );
+  const siteR = await fetch(`https://graph.microsoft.com/v1.0/sites/${siteUrl}`, { headers: { Authorization: `Bearer ${graphToken}` } });
   if (!siteR.ok) throw new Error(`Graph site lookup failed: ${siteR.status}`);
   const site = await siteR.json();
 
-  const driveR = await fetch(
-    `https://graph.microsoft.com/v1.0/sites/${site.id}/drive/root:/${filePath}:/content`,
-    { headers: { Authorization: `Bearer ${graphToken}` } },
-  );
+  const driveR = await fetch(`https://graph.microsoft.com/v1.0/sites/${site.id}/drive/root:/${filePath}:/content`, {
+    headers: { Authorization: `Bearer ${graphToken}` },
+  });
   if (!driveR.ok) throw new Error(`Graph file download failed: ${driveR.status}`);
   return Buffer.from(await driveR.arrayBuffer());
 }
@@ -192,10 +189,11 @@ async function getGraphToken() {
     grant_type: 'client_credentials',
     scope: 'https://graph.microsoft.com/.default',
   });
-  const r = await fetch(
-    `https://login.microsoftonline.com/${cfg.tenantId}/oauth2/v2.0/token`,
-    { method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body },
-  );
+  const r = await fetch(`https://login.microsoftonline.com/${cfg.tenantId}/oauth2/v2.0/token`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    body,
+  });
   const data = await r.json();
   if (!data.access_token) throw new Error(data.error_description || 'Graph token error');
   return data.access_token;
@@ -203,7 +201,10 @@ async function getGraphToken() {
 
 async function runSync({ excelPath, excelBuffer } = {}) {
   const log = [];
-  const info = (msg) => { log.push(msg); console.log(`[sync] ${msg}`); };
+  const info = (msg) => {
+    log.push(msg);
+    console.log(`[sync] ${msg}`);
+  };
 
   info('Starting ComputerEase → Dataverse employee sync');
 
@@ -219,7 +220,7 @@ async function runSync({ excelPath, excelBuffer } = {}) {
     await wb.xlsx.load(buf);
   }
 
-  const ws = wb.worksheets.find(s => s.name.toLowerCase().includes('premployee'));
+  const ws = wb.worksheets.find((s) => s.name.toLowerCase().includes('premployee'));
   if (!ws) throw new Error('Sheet "premployee" not found in workbook');
   info(`Excel sheet "${ws.name}" has ${ws.rowCount} rows`);
 
@@ -256,8 +257,11 @@ async function runSync({ excelPath, excelBuffer } = {}) {
     if (row.swank_empnum != null) dvByEmpNum.set(row.swank_empnum, row);
   }
 
-  const ceEmpNums = new Set(ceEmployees.map(e => e.empNum));
-  let created = 0, updated = 0, deactivated = 0, unchanged = 0;
+  const ceEmpNums = new Set(ceEmployees.map((e) => e.empNum));
+  let created = 0,
+    updated = 0,
+    deactivated = 0,
+    unchanged = 0;
 
   for (const ce of ceEmployees) {
     const existing = dvByEmpNum.get(ce.empNum);

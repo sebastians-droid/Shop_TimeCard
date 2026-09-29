@@ -38,9 +38,7 @@ async function apiFetch<T>(path: string, init?: RequestInit): Promise<T> {
   try {
     data = text ? JSON.parse(text) : {};
   } catch {
-    throw new Error(
-      `Request failed (${response.status}). ${text.replace(/\s+/g, ' ').slice(0, 240) || 'Empty response'}`,
-    );
+    throw new Error(`Request failed (${response.status}). ${text.replace(/\s+/g, ' ').slice(0, 240) || 'Empty response'}`);
   }
   if (!response.ok) {
     throw new Error(readErrorMessage(data, response.status));

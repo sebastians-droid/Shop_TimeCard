@@ -8,7 +8,12 @@ import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { useUpdateShopTimeEntry } from '@/hooks/use-shop-data';
 import { getPtoHours, isPtoEntry } from '@/lib/time-rules';
-import { ShopTimeEntryPTOApprovalKeyToLabel, ShopTimeEntryPTOTypeKeyToLabel, type ShopTimeEntry, type ShopTimeEntryPTOApprovalKey } from '@/models/shop-time-entry';
+import {
+  ShopTimeEntryPTOApprovalKeyToLabel,
+  ShopTimeEntryPTOTypeKeyToLabel,
+  type ShopTimeEntry,
+  type ShopTimeEntryPTOApprovalKey,
+} from '@/models/shop-time-entry';
 import type { AppShopEmployee } from '@/lib/shop-employees';
 import { getEntryEmployeeName } from '@/lib/entry-helpers';
 
@@ -57,15 +62,37 @@ export function PtoApprovalPanel({ timeEntries, employees }: PtoApprovalPanelPro
       </CardHeader>
       <CardContent className="space-y-3">
         {pendingPtoRequests.map((pto) => (
-          <div key={pto.id} className="flex flex-col gap-3 rounded-lg border border-amber-200 bg-amber-50/50 p-4 dark:border-amber-900 dark:bg-amber-950/20 sm:flex-row sm:items-center sm:justify-between">
+          <div
+            key={pto.id}
+            className="flex flex-col gap-3 rounded-lg border border-amber-200 bg-amber-50/50 p-4 dark:border-amber-900 dark:bg-amber-950/20 sm:flex-row sm:items-center sm:justify-between"
+          >
             <div>
               <p className="font-semibold text-foreground">{pto.employeeName}</p>
-              <p className="text-sm text-muted-foreground">{pto.dateLabel} · {pto.ptoHours} hours · {pto.ptoType}</p>
-              <Badge variant="outline" className="mt-1 border-amber-300 text-amber-700 dark:border-amber-700 dark:text-amber-400">{ShopTimeEntryPTOApprovalKeyToLabel[pto.ptoApproval!]}</Badge>
+              <p className="text-sm text-muted-foreground">
+                {pto.dateLabel} · {pto.ptoHours} hours · {pto.ptoType}
+              </p>
+              <Badge variant="outline" className="mt-1 border-amber-300 text-amber-700 dark:border-amber-700 dark:text-amber-400">
+                {ShopTimeEntryPTOApprovalKeyToLabel[pto.ptoApproval!]}
+              </Badge>
             </div>
             <div className="flex gap-2">
-              <Button type="button" size="sm" onClick={() => void handlePtoApproval(pto.id, 'Approved')} disabled={updateTimeEntry.isPending}><Check className="mr-1 h-4 w-4" /> Approve</Button>
-              <Button type="button" size="sm" variant="destructive" onClick={() => void handlePtoApproval(pto.id, 'Denied')} disabled={updateTimeEntry.isPending}><X className="mr-1 h-4 w-4" /> Deny</Button>
+              <Button
+                type="button"
+                size="sm"
+                onClick={() => void handlePtoApproval(pto.id, 'Approved')}
+                disabled={updateTimeEntry.isPending}
+              >
+                <Check className="mr-1 h-4 w-4" /> Approve
+              </Button>
+              <Button
+                type="button"
+                size="sm"
+                variant="destructive"
+                onClick={() => void handlePtoApproval(pto.id, 'Denied')}
+                disabled={updateTimeEntry.isPending}
+              >
+                <X className="mr-1 h-4 w-4" /> Deny
+              </Button>
             </div>
           </div>
         ))}

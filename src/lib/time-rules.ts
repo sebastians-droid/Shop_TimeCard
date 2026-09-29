@@ -63,7 +63,12 @@ export function getRawDurationMinutes(entry: ShopTimeEntry, now = new Date()): n
   return Math.max(0, Math.round((end - start) / 60000));
 }
 
-function getPayableDurationMinutes(entry: ShopTimeEntry, isFirstOfDay: boolean, scheduledStart: string | undefined, now = new Date()): number {
+function getPayableDurationMinutes(
+  entry: ShopTimeEntry,
+  isFirstOfDay: boolean,
+  scheduledStart: string | undefined,
+  now = new Date(),
+): number {
   if (isPtoEntry(entry)) return getPtoHours(entry) * 60;
   if (!entry.clockIn) return 0;
   let effectiveClockIn = entry.clockIn;

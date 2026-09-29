@@ -99,7 +99,8 @@ export const getEntryDivision = (entry: ShopTimeEntry, assets: EquipmentAsset[])
   return String(entry.assetDivision ?? matchedAsset?.divisionCode ?? '');
 };
 
-export const getEntryWorkDateKey = (entry: ShopTimeEntry) => (entry.clockIn ? format(new Date(entry.clockIn), 'yyyy-MM-dd') : 'No clock-in date');
+export const getEntryWorkDateKey = (entry: ShopTimeEntry) =>
+  entry.clockIn ? format(new Date(entry.clockIn), 'yyyy-MM-dd') : 'No clock-in date';
 
 export const getEmployeeNotes = (notes?: string) => stripNoLunchMarker(notes);
 

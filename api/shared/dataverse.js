@@ -60,7 +60,9 @@ function readJsonIfExists(filePath) {
 function cleanEnv(name) {
   const raw = process.env[name];
   if (!raw) return '';
-  return String(raw).trim().replace(/^['"]+|['"]+$/g, '');
+  return String(raw)
+    .trim()
+    .replace(/^['"]+|['"]+$/g, '');
 }
 
 function loadConfig() {
@@ -69,24 +71,16 @@ function loadConfig() {
   const isAzure = Boolean(process.env.WEBSITE_SITE_NAME);
   const root = path.resolve(__dirname, '..', '..');
   const local = isAzure ? null : readJsonIfExists(path.join(root, 'dataverse.local.json'));
-  const mattKurth = isAzure
-    ? null
-    : readJsonIfExists(path.join(root, '..', '..', 'REPO', 'MATT KURTH', 'dataverse.local.json'));
+  const mattKurth = isAzure ? null : readJsonIfExists(path.join(root, '..', '..', 'REPO', 'MATT KURTH', 'dataverse.local.json'));
   const fileCfg = local || mattKurth || {};
 
-  const orgUrl = (
-    cleanEnv('DATAVERSE_ORG_URL') ||
-    fileCfg.org_url ||
-    'https://org9cab1d0f.crm.dynamics.com'
-  ).replace(/\/$/, '');
+  const orgUrl = (cleanEnv('DATAVERSE_ORG_URL') || fileCfg.org_url || 'https://org9cab1d0f.crm.dynamics.com').replace(/\/$/, '');
 
-  const managerEmails = (cleanEnv('MANAGER_EMAILS') || fileCfg.manager_emails || [
-    'alisonh@swankco.com',
-    'bryank@swankco.com',
-    'beaul@swankco.com',
-    'sebastians@swankco.com',
-    'nickl@swankco.com',
-  ].join(','))
+  const managerEmails = (
+    cleanEnv('MANAGER_EMAILS') ||
+    fileCfg.manager_emails ||
+    ['alisonh@swankco.com', 'bryank@swankco.com', 'beaul@swankco.com', 'sebastians@swankco.com', 'nickl@swankco.com'].join(',')
+  )
     .split(',')
     .map((email) => email.trim().toLowerCase())
     .filter(Boolean);
@@ -128,14 +122,11 @@ async function getToken() {
     grant_type: 'client_credentials',
     scope: `${cfg.orgUrl}/.default`,
   });
-  const response = await fetch(
-    `https://login.microsoftonline.com/${cfg.tenantId}/oauth2/v2.0/token`,
-    {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-      body,
-    },
-  );
+  const response = await fetch(`https://login.microsoftonline.com/${cfg.tenantId}/oauth2/v2.0/token`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    body,
+  });
   const text = await response.text();
   let data;
   try {
@@ -181,10 +172,7 @@ async function dataverseFetch(method, urlPath, body) {
     throw error;
   }
   if (!response.ok) {
-    const message =
-      data.error?.message ||
-      data.error_description ||
-      `Dataverse ${method} failed (${response.status})`;
+    const message = data.error?.message || data.error_description || `Dataverse ${method} failed (${response.status})`;
     const error = new Error(message);
     error.status = response.status;
     throw error;
@@ -211,10 +199,7 @@ function toNumber(value) {
 
 function mapShopEmployee(row) {
   const related = row.swank_Employee || {};
-  const name =
-    related.swank_name ||
-    row.swank_employeename ||
-    row['_swank_employee_value@OData.Community.Display.V1.FormattedValue'];
+  const name = related.swank_name || row.swank_employeename || row['_swank_employee_value@OData.Community.Display.V1.FormattedValue'];
   return {
     id: row.swank_shopemployeeid,
     autoNumber: row.swank_autonumber || '',
@@ -264,12 +249,13 @@ function mapTimeEntry(row) {
     clockOutLat: toNumber(row.swank_clockoutlat),
     clockOutLon: toNumber(row.swank_clockoutlon),
     division: toNumber(row.crcce_division),
-    employee: employee.swank_shopemployeeid || row._swank_employee_value
-      ? {
-          id: employee.swank_shopemployeeid || row._swank_employee_value,
-          autoNumber: employee.swank_autonumber || row.swank_employeename || '',
-        }
-      : undefined,
+    employee:
+      employee.swank_shopemployeeid || row._swank_employee_value
+        ? {
+            id: employee.swank_shopemployeeid || row._swank_employee_value,
+            autoNumber: employee.swank_autonumber || row.swank_employeename || '',
+          }
+        : undefined,
     hours: toNumber(row.swank_hours),
     jobNumber: row.swank_jobnumber || undefined,
     notes: row.swank_notes || undefined,
@@ -407,9 +393,7 @@ async function updateShopEmployee(id, record) {
   if (record.autoNumber !== undefined) payload.swank_autonumber = record.autoNumber || null;
   if (record.empNum !== undefined) payload.swank_empnum = record.empNum;
   if (record.employeeId !== undefined) {
-    payload['swank_Employee@odata.bind'] = record.employeeId
-      ? `/swank_employees(${record.employeeId})`
-      : null;
+    payload['swank_Employee@odata.bind'] = record.employeeId ? `/swank_employees(${record.employeeId})` : null;
   }
   const updated = await dataverseFetch('PATCH', `/swank_shopemployees(${id})`, payload);
   return mapShopEmployee(updated);
@@ -423,11 +407,13 @@ async function listLookupEmployees() {
   const rows = await listAll(
     '/swank_employees?$select=swank_employeeid,swank_name,swank_empnum&$filter=statecode eq 0&$orderby=swank_name',
   );
-  return rows.map((row) => ({
-    id: row.swank_employeeid,
-    name: row.swank_name || '',
-    empNum: toNumber(row.swank_empnum),
-  })).filter((row) => row.id && row.name);
+  return rows
+    .map((row) => ({
+      id: row.swank_employeeid,
+      name: row.swank_name || '',
+      empNum: toNumber(row.swank_empnum),
+    }))
+    .filter((row) => row.id && row.name);
 }
 
 async function ensureShopEmployeeDisplayName(shopEmployeeId) {
@@ -447,20 +433,12 @@ async function ensureShopEmployeeDisplayName(shopEmployeeId) {
 
 async function createTimeEntry(record) {
   await ensureShopEmployeeDisplayName(record.employee?.id);
-  const created = await dataverseFetch(
-    'POST',
-    '/swank_shoptimeentries',
-    timeEntryPayload(record, { isCreate: true }),
-  );
+  const created = await dataverseFetch('POST', '/swank_shoptimeentries', timeEntryPayload(record, { isCreate: true }));
   return mapTimeEntry(created);
 }
 
 async function updateTimeEntry(id, record) {
-  const updated = await dataverseFetch(
-    'PATCH',
-    `/swank_shoptimeentries(${id})`,
-    timeEntryPayload(record, { isCreate: false }),
-  );
+  const updated = await dataverseFetch('PATCH', `/swank_shoptimeentries(${id})`, timeEntryPayload(record, { isCreate: false }));
   return mapTimeEntry(updated);
 }
 

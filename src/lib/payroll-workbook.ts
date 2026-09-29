@@ -41,7 +41,11 @@ export type RegularOvertimeSplit = { rt: number; ot: number };
 
 /** Excel rejects these characters in sheet names and caps them at 31 characters. */
 export function excelSheetName(name: string, used: Set<string>): string {
-  const cleaned = name.replace(/[:\\/?*[\]]/g, ' ').replace(/\s+/g, ' ').trim() || 'Employee';
+  const cleaned =
+    name
+      .replace(/[:\\/?*[\]]/g, ' ')
+      .replace(/\s+/g, ' ')
+      .trim() || 'Employee';
   const base = cleaned.slice(0, 31);
   let candidate = base;
   let index = 2;
@@ -161,13 +165,7 @@ export async function buildPayrollWorkbookBlob(data: PayrollWeekExport): Promise
     }
   });
 
-  summary.columns = [
-    { width: 28 },
-    { width: 16 },
-    ...dayHeaders.map(() => ({ width: 12 })),
-    { width: 12 },
-    { width: 28 },
-  ];
+  summary.columns = [{ width: 28 }, { width: 16 }, ...dayHeaders.map(() => ({ width: 12 })), { width: 12 }, { width: 28 }];
 
   const detailHeaders = [
     'Employee',
@@ -232,7 +230,27 @@ export async function buildPayrollWorkbookBlob(data: PayrollWeekExport): Promise
     if (employee.rows.length > 0) {
       const weekRt = [...rtOtMap.values()].reduce((sum, v) => sum + v.rt, 0);
       const weekOt = [...rtOtMap.values()].reduce((sum, v) => sum + v.ot, 0);
-      const total = sheet.addRow(['', '', '', '', 'Employee week total', hoursNumber(employee.weekHours), weekRt > 0 ? Math.round(weekRt * 100) / 100 : '', weekOt > 0 ? Math.round(weekOt * 100) / 100 : '', '', '', '', '', '', '', '', '', '', '', '']);
+      const total = sheet.addRow([
+        '',
+        '',
+        '',
+        '',
+        'Employee week total',
+        hoursNumber(employee.weekHours),
+        weekRt > 0 ? Math.round(weekRt * 100) / 100 : '',
+        weekOt > 0 ? Math.round(weekOt * 100) / 100 : '',
+        '',
+        '',
+        '',
+        '',
+        '',
+        '',
+        '',
+        '',
+        '',
+        '',
+        '',
+      ]);
       total.font = { bold: true };
       total.getCell(6).numFmt = '0.00';
       if (weekRt > 0) total.getCell(7).numFmt = '0.00';

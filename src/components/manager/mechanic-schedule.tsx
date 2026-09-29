@@ -39,12 +39,8 @@ export function MechanicSchedule({ employees, timeEntries }: MechanicSchedulePro
 
   // Query the full month surrounding the selected date for single-day view,
   // and the range for range view — both covered by a wide window.
-  const queryFrom = rangeViewRange?.from
-    ? format(rangeViewRange.from, "yyyy-MM-dd'T'00:00:00'Z'")
-    : `${dayKey}T00:00:00Z`;
-  const queryTo = rangeViewRange?.to
-    ? format(rangeViewRange.to, "yyyy-MM-dd'T'23:59:59'Z'")
-    : `${dayKey}T23:59:59Z`;
+  const queryFrom = rangeViewRange?.from ? format(rangeViewRange.from, "yyyy-MM-dd'T'00:00:00'Z'") : `${dayKey}T00:00:00Z`;
+  const queryTo = rangeViewRange?.to ? format(rangeViewRange.to, "yyyy-MM-dd'T'23:59:59'Z'") : `${dayKey}T23:59:59Z`;
   const { data: schedules = [], isLoading: schedulesLoading } = useScheduleList(queryFrom, queryTo);
   const upsertSchedule = useUpsertSchedule();
 
@@ -72,27 +68,26 @@ export function MechanicSchedule({ employees, timeEntries }: MechanicSchedulePro
     return map;
   }, [timeEntries]);
 
-  const sortedEmployees = useMemo(
-    () => [...employees].sort((a, b) => a.employeeName.localeCompare(b.employeeName)),
-    [employees],
-  );
+  const sortedEmployees = useMemo(() => [...employees].sort((a, b) => a.employeeName.localeCompare(b.employeeName)), [employees]);
 
-  const rangeEmployee = rangeEmployeeId
-    ? employees.find((e) => e.id === rangeEmployeeId) ?? null
-    : null;
+  const rangeEmployee = rangeEmployeeId ? (employees.find((e) => e.id === rangeEmployeeId) ?? null) : null;
 
   const rangeDays = useMemo(() => {
     if (!rangeViewRange?.from || !rangeViewRange?.to) return [];
     return eachDayOfInterval({ start: rangeViewRange.from, end: rangeViewRange.to });
   }, [rangeViewRange]);
 
-  const getStart = (empId: string, dk: string) =>
-    scheduleMap.get(`${empId}-${dk}`)?.scheduledStart ?? DEFAULT_START;
+  const getStart = (empId: string, dk: string) => scheduleMap.get(`${empId}-${dk}`)?.scheduledStart ?? DEFAULT_START;
 
-  const getOnCall = (empId: string, dk: string) =>
-    scheduleMap.get(`${empId}-${dk}`)?.onCall === true;
+  const getOnCall = (empId: string, dk: string) => scheduleMap.get(`${empId}-${dk}`)?.onCall === true;
 
-  const handleSave = (empId: string, empNum: number | undefined, dk: string, field: 'scheduledStart' | 'onCall', value: string | boolean) => {
+  const handleSave = (
+    empId: string,
+    empNum: number | undefined,
+    dk: string,
+    field: 'scheduledStart' | 'onCall',
+    value: string | boolean,
+  ) => {
     const existing = scheduleMap.get(`${empId}-${dk}`);
     upsertSchedule.mutate({
       scheduleKey: `${empNum ?? empId.slice(0, 8)}-${dk}`,
@@ -117,12 +112,23 @@ export function MechanicSchedule({ employees, timeEntries }: MechanicSchedulePro
     }
   };
 
-  const toggleOpen = (key: string) =>
-    setOpenKeys((cur) => cur.includes(key) ? cur.filter((k) => k !== key) : [...cur, key]);
+  const toggleOpen = (key: string) => setOpenKeys((cur) => (cur.includes(key) ? cur.filter((k) => k !== key) : [...cur, key]));
 
   // ── Edit fields used inside expanded rows ──
 
-  function ScheduleFields({ empId, empNum, dk, startTime, onCall }: { empId: string; empNum: number | undefined; dk: string; startTime: string; onCall: boolean }) {
+  function ScheduleFields({
+    empId,
+    empNum,
+    dk,
+    startTime,
+    onCall,
+  }: {
+    empId: string;
+    empNum: number | undefined;
+    dk: string;
+    startTime: string;
+    onCall: boolean;
+  }) {
     const showApplyAll = rangeDays.length > 1;
     return (
       <div className="grid gap-4 sm:grid-cols-2">
@@ -140,7 +146,13 @@ export function MechanicSchedule({ employees, timeEntries }: MechanicSchedulePro
               }}
             />
             {showApplyAll ? (
-              <Button type="button" variant="outline" className="shrink-0" onClick={() => handleApplyAllDays(empId, empNum, 'scheduledStart', startTime)} title={`Apply ${startTime} to all days in range`}>
+              <Button
+                type="button"
+                variant="outline"
+                className="shrink-0"
+                onClick={() => handleApplyAllDays(empId, empNum, 'scheduledStart', startTime)}
+                title={`Apply ${startTime} to all days in range`}
+              >
                 <Copy className="mr-2 h-4 w-4" /> All days
               </Button>
             ) : null}
@@ -150,15 +162,33 @@ export function MechanicSchedule({ employees, timeEntries }: MechanicSchedulePro
           <Label>On Call</Label>
           <div className="flex gap-2">
             <div className="flex flex-1 overflow-hidden rounded-md border border-border">
-              <button type="button" onClick={() => { if (!onCall) handleSave(empId, empNum, dk, 'onCall', true); }} className={`flex flex-1 items-center justify-center gap-1.5 py-2 text-sm font-medium transition-colors ${onCall ? 'bg-destructive text-white' : 'bg-background text-muted-foreground hover:bg-muted'}`}>
+              <button
+                type="button"
+                onClick={() => {
+                  if (!onCall) handleSave(empId, empNum, dk, 'onCall', true);
+                }}
+                className={`flex flex-1 items-center justify-center gap-1.5 py-2 text-sm font-medium transition-colors ${onCall ? 'bg-destructive text-white' : 'bg-background text-muted-foreground hover:bg-muted'}`}
+              >
                 <Phone className="h-3.5 w-3.5" /> Yes
               </button>
-              <button type="button" onClick={() => { if (onCall) handleSave(empId, empNum, dk, 'onCall', false); }} className={`flex flex-1 items-center justify-center py-2 text-sm font-medium transition-colors ${!onCall ? 'bg-background text-foreground' : 'bg-background text-muted-foreground hover:bg-muted'}`}>
+              <button
+                type="button"
+                onClick={() => {
+                  if (onCall) handleSave(empId, empNum, dk, 'onCall', false);
+                }}
+                className={`flex flex-1 items-center justify-center py-2 text-sm font-medium transition-colors ${!onCall ? 'bg-background text-foreground' : 'bg-background text-muted-foreground hover:bg-muted'}`}
+              >
                 No
               </button>
             </div>
             {showApplyAll ? (
-              <Button type="button" variant="outline" className="shrink-0" onClick={() => handleApplyAllDays(empId, empNum, 'onCall', onCall)} title={`Apply "${onCall ? 'On Call' : 'Off'}" to all days in range`}>
+              <Button
+                type="button"
+                variant="outline"
+                className="shrink-0"
+                onClick={() => handleApplyAllDays(empId, empNum, 'onCall', onCall)}
+                title={`Apply "${onCall ? 'On Call' : 'Off'}" to all days in range`}
+              >
                 <Copy className="mr-2 h-4 w-4" /> All days
               </Button>
             ) : null}
@@ -176,17 +206,29 @@ export function MechanicSchedule({ employees, timeEntries }: MechanicSchedulePro
         <CardHeader>
           <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
             <div>
-              <CardTitle className="flex items-center gap-2 text-xl"><CalendarRange className="h-5 w-5" /> {rangeEmployee?.employeeName ?? 'Employee'} — Schedule</CardTitle>
-              <p className="mt-1 text-sm text-muted-foreground">Employee {rangeEmployee?.employeeCode} &middot; Set start times and on-call for a date range.</p>
+              <CardTitle className="flex items-center gap-2 text-xl">
+                <CalendarRange className="h-5 w-5" /> {rangeEmployee?.employeeName ?? 'Employee'} — Schedule
+              </CardTitle>
+              <p className="mt-1 text-sm text-muted-foreground">
+                Employee {rangeEmployee?.employeeCode} &middot; Set start times and on-call for a date range.
+              </p>
             </div>
             <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
-              <Select value={rangeEmployeeId} onValueChange={(v) => { setRangeEmployeeId(v); setRangeOpenDay(''); }}>
+              <Select
+                value={rangeEmployeeId}
+                onValueChange={(v) => {
+                  setRangeEmployeeId(v);
+                  setRangeOpenDay('');
+                }}
+              >
                 <SelectTrigger className="w-auto min-w-48 bg-background">
                   <SelectValue placeholder="Select employee" />
                 </SelectTrigger>
                 <SelectContent>
                   {sortedEmployees.map((emp) => (
-                    <SelectItem key={emp.id} value={emp.id}>{emp.employeeName}</SelectItem>
+                    <SelectItem key={emp.id} value={emp.id}>
+                      {emp.employeeName}
+                    </SelectItem>
                   ))}
                 </SelectContent>
               </Select>
@@ -195,14 +237,34 @@ export function MechanicSchedule({ employees, timeEntries }: MechanicSchedulePro
                   <PopoverTrigger asChild>
                     <Button type="button" variant="outline" className="justify-start bg-background">
                       <CalendarIcon className="mr-2 h-4 w-4" />
-                      {rangeViewRange?.from && rangeViewRange?.to ? `${format(rangeViewRange.from, 'MMM d')} – ${format(rangeViewRange.to, 'MMM d, yyyy')}` : rangeViewRange?.from ? `${format(rangeViewRange.from, 'MMM d, yyyy')} – …` : 'Pick a date range'}
+                      {rangeViewRange?.from && rangeViewRange?.to
+                        ? `${format(rangeViewRange.from, 'MMM d')} – ${format(rangeViewRange.to, 'MMM d, yyyy')}`
+                        : rangeViewRange?.from
+                          ? `${format(rangeViewRange.from, 'MMM d, yyyy')} – …`
+                          : 'Pick a date range'}
                     </Button>
                   </PopoverTrigger>
                   <PopoverContent className="w-auto p-0" align="end">
-                    <Calendar mode="range" selected={rangeViewRange} onSelect={(range: DateRange | undefined) => { setRangeViewRange(range); setRangeOpenDay(''); }} numberOfMonths={2} />
+                    <Calendar
+                      mode="range"
+                      selected={rangeViewRange}
+                      onSelect={(range: DateRange | undefined) => {
+                        setRangeViewRange(range);
+                        setRangeOpenDay('');
+                      }}
+                      numberOfMonths={2}
+                    />
                   </PopoverContent>
                 </Popover>
-                <Button type="button" variant="outline" onClick={() => { setRangeEmployeeId(''); setRangeViewRange(undefined); setRangeOpenDay(''); }}>
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={() => {
+                    setRangeEmployeeId('');
+                    setRangeViewRange(undefined);
+                    setRangeOpenDay('');
+                  }}
+                >
                   <X className="mr-2 h-4 w-4" /> Close
                 </Button>
               </div>
@@ -234,7 +296,11 @@ export function MechanicSchedule({ employees, timeEntries }: MechanicSchedulePro
                         <p className="text-xs text-muted-foreground">Start {startTime}</p>
                       </div>
                       <div className="flex items-center gap-2">
-                        {onCall ? <Badge variant="destructive"><Phone className="mr-1 h-3 w-3" /> On Call</Badge> : null}
+                        {onCall ? (
+                          <Badge variant="destructive">
+                            <Phone className="mr-1 h-3 w-3" /> On Call
+                          </Badge>
+                        ) : null}
                         {ptoEntries?.map((pto) => (
                           <Badge key={pto.id} variant="secondary" className="text-xs">
                             {getPtoHours(pto)}h {pto.pTOTypeKey ? `${ShopTimeEntryPTOTypeKeyToLabel[pto.pTOTypeKey]} PTO` : 'PTO'}
@@ -246,7 +312,13 @@ export function MechanicSchedule({ employees, timeEntries }: MechanicSchedulePro
                   </CollapsibleTrigger>
                   <CollapsibleContent>
                     <div className="border-t border-border px-4 py-3">
-                      <ScheduleFields empId={rangeEmployeeId} empNum={rangeEmployee?.employeeCode} dk={dk} startTime={startTime} onCall={onCall} />
+                      <ScheduleFields
+                        empId={rangeEmployeeId}
+                        empNum={rangeEmployee?.employeeCode}
+                        dk={dk}
+                        startTime={startTime}
+                        onCall={onCall}
+                      />
                     </div>
                   </CollapsibleContent>
                 </section>
@@ -265,8 +337,12 @@ export function MechanicSchedule({ employees, timeEntries }: MechanicSchedulePro
       <CardHeader>
         <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
           <div>
-            <CardTitle className="flex items-center gap-2 text-xl"><CalendarIcon className="h-5 w-5" /> Mechanic Schedule</CardTitle>
-            <p className="mt-1 text-sm text-muted-foreground">{format(selectedDate, 'EEEE, MMM d')} &middot; Set start times and on-call.</p>
+            <CardTitle className="flex items-center gap-2 text-xl">
+              <CalendarIcon className="h-5 w-5" /> Mechanic Schedule
+            </CardTitle>
+            <p className="mt-1 text-sm text-muted-foreground">
+              {format(selectedDate, 'EEEE, MMM d')} &middot; Set start times and on-call.
+            </p>
           </div>
           <Popover>
             <PopoverTrigger asChild>
@@ -276,7 +352,17 @@ export function MechanicSchedule({ employees, timeEntries }: MechanicSchedulePro
               </Button>
             </PopoverTrigger>
             <PopoverContent className="w-auto p-0" align="end">
-              <Calendar mode="single" selected={selectedDate} onSelect={(d) => { if (d) { setSelectedDate(startOfDay(d)); setOpenKeys([]); } }} initialFocus />
+              <Calendar
+                mode="single"
+                selected={selectedDate}
+                onSelect={(d) => {
+                  if (d) {
+                    setSelectedDate(startOfDay(d));
+                    setOpenKeys([]);
+                  }
+                }}
+                initialFocus
+              />
             </PopoverContent>
           </Popover>
         </div>
@@ -296,10 +382,16 @@ export function MechanicSchedule({ employees, timeEntries }: MechanicSchedulePro
                   <button type="button" className="flex w-full items-center justify-between gap-3 p-4 text-left">
                     <div>
                       <p className="font-semibold">{emp.employeeName}</p>
-                      <p className="text-sm text-muted-foreground">Employee {emp.employeeCode} &middot; Start {startTime}</p>
+                      <p className="text-sm text-muted-foreground">
+                        Employee {emp.employeeCode} &middot; Start {startTime}
+                      </p>
                     </div>
                     <div className="flex items-center gap-2">
-                      {onCall ? <Badge variant="destructive"><Phone className="mr-1 h-3 w-3" /> On Call</Badge> : null}
+                      {onCall ? (
+                        <Badge variant="destructive">
+                          <Phone className="mr-1 h-3 w-3" /> On Call
+                        </Badge>
+                      ) : null}
                       {ptoEntries?.map((pto) => (
                         <Badge key={pto.id} variant="secondary" className="text-xs">
                           {getPtoHours(pto)}h {pto.pTOTypeKey ? `${ShopTimeEntryPTOTypeKeyToLabel[pto.pTOTypeKey]} PTO` : 'PTO'}
@@ -312,7 +404,16 @@ export function MechanicSchedule({ employees, timeEntries }: MechanicSchedulePro
                 <CollapsibleContent>
                   <div className="border-t border-border px-4 py-3 space-y-3">
                     <ScheduleFields empId={emp.id} empNum={emp.employeeCode} dk={dayKey} startTime={startTime} onCall={onCall} />
-                    <Button type="button" variant="outline" size="sm" onClick={() => { setRangeEmployeeId(emp.id); setRangeViewRange(undefined); setRangeOpenDay(''); }}>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      onClick={() => {
+                        setRangeEmployeeId(emp.id);
+                        setRangeViewRange(undefined);
+                        setRangeOpenDay('');
+                      }}
+                    >
                       <CalendarRange className="mr-2 h-4 w-4" /> Date range
                     </Button>
                   </div>

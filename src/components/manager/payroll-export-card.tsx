@@ -32,7 +32,12 @@ import {
   getWeekRange,
   formatWeekRangeLabel,
 } from '@/lib/entry-helpers';
-import { ShopTimeEntryPayTypeKeyToLabel, ShopTimeEntryPTOTypeKeyToLabel, DEFAULT_PAY_TYPE, type ShopTimeEntry } from '@/models/shop-time-entry';
+import {
+  ShopTimeEntryPayTypeKeyToLabel,
+  ShopTimeEntryPTOTypeKeyToLabel,
+  DEFAULT_PAY_TYPE,
+  type ShopTimeEntry,
+} from '@/models/shop-time-entry';
 import { entryDistanceMiles } from '@/lib/geolocation';
 import type { MechanicScheduleRow } from '@/hooks/use-shop-data';
 
@@ -46,7 +51,15 @@ type PayrollExportCardProps = {
   schedules?: MechanicScheduleRow[];
 };
 
-export function PayrollExportCard({ exportWeekDate, onExportWeekDateChange, weeklyEntries, weeklyPayrollMinutes, employees, assets, schedules = [] }: PayrollExportCardProps) {
+export function PayrollExportCard({
+  exportWeekDate,
+  onExportWeekDateChange,
+  weeklyEntries,
+  weeklyPayrollMinutes,
+  employees,
+  assets,
+  schedules = [],
+}: PayrollExportCardProps) {
   const [isExporting, setIsExporting] = useState(false);
 
   const exportWeekRange = getWeekRange(exportWeekDate);
@@ -78,7 +91,10 @@ export function PayrollExportCard({ exportWeekDate, onExportWeekDateChange, week
         const firstEntry = entries[0];
         const employeeName = firstEntry ? getEntryEmployeeName(firstEntry, employees) : 'Unknown employee';
         const employeeNumber = firstEntry ? getEntryEmployeeNumber(firstEntry, employees) : employeeKey;
-        const sortedEntries = [...entries].sort((entryA: ShopTimeEntry, entryB: ShopTimeEntry) => new Date(entryA.clockIn ?? '').getTime() - new Date(entryB.clockIn ?? '').getTime());
+        const sortedEntries = [...entries].sort(
+          (entryA: ShopTimeEntry, entryB: ShopTimeEntry) =>
+            new Date(entryA.clockIn ?? '').getTime() - new Date(entryB.clockIn ?? '').getTime(),
+        );
         const entriesByDay = new Map<string, ShopTimeEntry[]>();
         sortedEntries.forEach((entry: ShopTimeEntry) => {
           const dayKey = getEntryWorkDateKey(entry);
@@ -125,9 +141,7 @@ export function PayrollExportCard({ exportWeekDate, onExportWeekDateChange, week
           }),
         };
       })
-      .sort((employeeA, employeeB) =>
-        employeeA.name.localeCompare(employeeB.name) || employeeA.number.localeCompare(employeeB.number),
-      );
+      .sort((employeeA, employeeB) => employeeA.name.localeCompare(employeeB.name) || employeeA.number.localeCompare(employeeB.number));
 
     setIsExporting(true);
     try {
@@ -144,7 +158,9 @@ export function PayrollExportCard({ exportWeekDate, onExportWeekDateChange, week
       link.click();
       document.body.removeChild(link);
       URL.revokeObjectURL(url);
-      toast.success(`Excel workbook exported for ${payrollEmployees.length} employee${payrollEmployees.length === 1 ? '' : 's'} · ${formatWeekRangeLabel(exportWeekDate)}.`);
+      toast.success(
+        `Excel workbook exported for ${payrollEmployees.length} employee${payrollEmployees.length === 1 ? '' : 's'} · ${formatWeekRangeLabel(exportWeekDate)}.`,
+      );
     } catch (error: unknown) {
       toast.error(error instanceof Error ? error.message : 'Unable to export the Excel workbook.');
     } finally {
@@ -157,10 +173,18 @@ export function PayrollExportCard({ exportWeekDate, onExportWeekDateChange, week
       <CardHeader>
         <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
           <div>
-            <CardTitle className="flex items-center gap-2 text-xl"><Download className="h-5 w-5" /> Weekly timecard export</CardTitle>
+            <CardTitle className="flex items-center gap-2 text-xl">
+              <Download className="h-5 w-5" /> Weekly timecard export
+            </CardTitle>
             <p className="mt-1 text-sm text-muted-foreground">Choose a Sunday-Saturday payroll week, then export one Excel workbook.</p>
           </div>
-          <Button type="button" variant="secondary" onClick={() => void handleExportWeeklyPayroll()} disabled={weeklyEntries.length === 0 || isExporting} className="w-full sm:w-auto">
+          <Button
+            type="button"
+            variant="secondary"
+            onClick={() => void handleExportWeeklyPayroll()}
+            disabled={weeklyEntries.length === 0 || isExporting}
+            className="w-full sm:w-auto"
+          >
             <Download className="mr-2 h-4 w-4" /> {isExporting ? 'Building Excel…' : `Export ${formatWeekRangeLabel(exportWeekDate)} Excel`}
           </Button>
         </div>
@@ -169,10 +193,18 @@ export function PayrollExportCard({ exportWeekDate, onExportWeekDateChange, week
         <div className="flex flex-col gap-3 rounded-lg border border-border bg-background p-3 sm:flex-row sm:items-center sm:justify-between">
           <div>
             <p className="text-sm font-medium text-foreground">Export week</p>
-            <p className="text-sm text-muted-foreground">{formatWeekRangeLabel(exportWeekDate)} · {weeklyEntries.length} entries · {formatDuration(weeklyPayrollMinutes)}</p>
+            <p className="text-sm text-muted-foreground">
+              {formatWeekRangeLabel(exportWeekDate)} · {weeklyEntries.length} entries · {formatDuration(weeklyPayrollMinutes)}
+            </p>
           </div>
           <div className="flex items-center gap-1 rounded-md border border-border bg-card p-1 text-card-foreground">
-            <Button type="button" variant="ghost" size="icon" aria-label="Previous export week" onClick={() => onExportWeekDateChange((currentDate: Date) => addWeeks(currentDate, -1))}>
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon"
+              aria-label="Previous export week"
+              onClick={() => onExportWeekDateChange((currentDate: Date) => addWeeks(currentDate, -1))}
+            >
               <ChevronLeft className="h-4 w-4" />
             </Button>
             <Popover>
@@ -195,7 +227,13 @@ export function PayrollExportCard({ exportWeekDate, onExportWeekDateChange, week
                 />
               </PopoverContent>
             </Popover>
-            <Button type="button" variant="ghost" size="icon" aria-label="Next export week" onClick={() => onExportWeekDateChange((currentDate: Date) => addWeeks(currentDate, 1))}>
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon"
+              aria-label="Next export week"
+              onClick={() => onExportWeekDateChange((currentDate: Date) => addWeeks(currentDate, 1))}
+            >
               <ChevronRight className="h-4 w-4" />
             </Button>
           </div>

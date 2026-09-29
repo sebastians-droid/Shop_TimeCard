@@ -26,11 +26,7 @@ export function haversineDistanceMiles(a: GeoPosition, b: GeoPosition): number {
   return 2 * EARTH_RADIUS_MI * Math.asin(Math.sqrt(h));
 }
 
-export function entryDistanceMiles(
-  lat: number | undefined,
-  lon: number | undefined,
-  shopLocation = SHOP_LOCATION,
-): number | null {
+export function entryDistanceMiles(lat: number | undefined, lon: number | undefined, shopLocation = SHOP_LOCATION): number | null {
   if (lat == null || lon == null) return null;
   if (shopLocation.lat === 0 && shopLocation.lon === 0) return null;
   return Math.round(haversineDistanceMiles({ lat, lon }, shopLocation) * 100) / 100;

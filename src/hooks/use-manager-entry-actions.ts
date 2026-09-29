@@ -17,14 +17,7 @@ import {
   mergeDateAndTime,
   type PtoHours,
 } from '@/lib/entry-helpers';
-import {
-  applyNoLunchMarker,
-  getDayPayMinutes,
-  getEntryPaidMinutes,
-  getPtoHours,
-  isPtoEntry,
-  notesHaveNoLunch,
-} from '@/lib/time-rules';
+import { applyNoLunchMarker, getDayPayMinutes, getEntryPaidMinutes, getPtoHours, isPtoEntry, notesHaveNoLunch } from '@/lib/time-rules';
 import type { AppShopEmployee } from '@/lib/shop-employees';
 import type { EditableEntry, NewEntryDraft, PtoDraft } from '@/lib/manager-timecard';
 import type { EquipmentAsset } from '@/models/equipment-asset';
@@ -176,11 +169,7 @@ export function useManagerEntryActions({ employees, assets, timeEntries }: Manag
         changedFields: {
           timeEntry: `${getEntryEmployeeName(entry, employees)} - ${label}`,
           asset: selectedAsset ? { id: selectedAsset.id, asset: getAssetDisplayName(selectedAsset) } : entry.asset,
-          assetDivision: selectedAsset
-            ? selectedAsset.divisionCode
-            : manualDivision
-              ? Number(manualDivision)
-              : entry.assetDivision,
+          assetDivision: selectedAsset ? selectedAsset.divisionCode : manualDivision ? Number(manualDivision) : entry.assetDivision,
           notes: applyNoLunchMarker(editValues.notes.trim() || undefined, notesHaveNoLunch(entry.notes)) || undefined,
           clockIn,
           clockOut,
@@ -189,9 +178,7 @@ export function useManagerEntryActions({ employees, assets, timeEntries }: Manag
           payTypeKey: isPtoEntry(entry) ? entry.payTypeKey : editValues.payTypeKey,
           hours: clockOut ? getEntryPaidMinutes(employeeDayEntries, updatedEntry) / 60 : undefined,
           pTOTimeKey:
-            isPtoEntry(entry) && (ptoHours === 4 || ptoHours === 8)
-              ? PTO_TIME_KEY_BY_HOURS[ptoHours as PtoHours]
-              : entry.pTOTimeKey,
+            isPtoEntry(entry) && (ptoHours === 4 || ptoHours === 8) ? PTO_TIME_KEY_BY_HOURS[ptoHours as PtoHours] : entry.pTOTimeKey,
           workDate: format(new Date(clockIn), 'yyyy-MM-dd'),
         },
       });
@@ -233,9 +220,7 @@ export function useManagerEntryActions({ employees, assets, timeEntries }: Manag
         ptoApproval: 'Approved' as ShopTimeEntryPTOApprovalKey,
         notes: `${draft.hours} hours ${typeLabel} PTO submitted for ${format(day, 'MMM d, yyyy')}.`,
       });
-      toast.success(
-        `${draft.hours} hours ${typeLabel} PTO added for ${employee.employeeName} on ${format(day, 'MMM d')}.`,
-      );
+      toast.success(`${draft.hours} hours ${typeLabel} PTO added for ${employee.employeeName} on ${format(day, 'MMM d')}.`);
       return true;
     } catch (error: unknown) {
       toast.error(toErrorMessage(error, 'Unable to add PTO.'));
