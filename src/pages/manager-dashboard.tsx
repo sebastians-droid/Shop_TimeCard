@@ -1248,7 +1248,6 @@ export default function ManagerDashboardPage() {
                                   <div>
                                     <div className="flex flex-wrap items-center gap-2"><p className="text-base font-semibold">{getEntryAssetName(entry, assets)}</p>{entry.pTOTypeKey ? <Badge variant="outline">{ShopTimeEntryPTOTypeKeyToLabel[entry.pTOTypeKey]}</Badge> : null}{!isPtoEntry(entry) ? <Badge variant="outline">{ShopTimeEntryPayTypeKeyToLabel[entry.payTypeKey ?? DEFAULT_PAY_TYPE]}</Badge> : null}</div>
                                     <p className="mt-1 text-sm text-muted-foreground">{isPtoEntry(entry) ? `${getPtoHours(entry)} hours PTO` : `Division ${getEntryDivision(entry, assets) || '—'} · Job ${getEntryJobNumber(entry) || '—'}`}</p>
-                                    {(() => { const ciDist = entryDistanceMiles(entry.clockInLat, entry.clockInLon); const coDist = entryDistanceMiles(entry.clockOutLat, entry.clockOutLon); if (ciDist == null && coDist == null) return null; return <div className="mt-1 flex flex-wrap gap-1.5">{ciDist != null ? <Badge variant={ciDist > 1 ? 'destructive' : 'secondary'} className="text-xs">In: {ciDist.toFixed(1)} mi</Badge> : null}{coDist != null ? <Badge variant={coDist > 1 ? 'destructive' : 'secondary'} className="text-xs">Out: {coDist.toFixed(1)} mi</Badge> : null}</div>; })()}
                                   </div>
                                 )}
                               </div>
@@ -1274,6 +1273,7 @@ export default function ManagerDashboardPage() {
                                   <Label>Duration</Label>
                                   <p className="font-semibold">{formatDuration(getEntryPaidMinutes(summary.entries, entry))}</p>
                                 </div>
+                                {(() => { const ciDist = entryDistanceMiles(entry.clockInLat, entry.clockInLon); const coDist = entryDistanceMiles(entry.clockOutLat, entry.clockOutLon); if (ciDist == null && coDist == null) return null; return <div className="space-y-2"><Label>Distance</Label><div className="flex flex-wrap gap-1">{ciDist != null ? <Badge variant={ciDist > 1 ? 'destructive' : 'secondary'} className="text-xs">In: {ciDist.toFixed(1)} mi</Badge> : null}{coDist != null ? <Badge variant={coDist > 1 ? 'destructive' : 'secondary'} className="text-xs">Out: {coDist.toFixed(1)} mi</Badge> : null}</div></div>; })()}
                               </div>
 
                               <div className="flex flex-wrap gap-2 lg:justify-end">
@@ -1512,6 +1512,7 @@ export default function ManagerDashboardPage() {
                                     <Label>Duration</Label>
                                     <p className="font-semibold text-sm">{formatDuration(getEntryPaidMinutes(dayEntries, entry))}</p>
                                   </div>
+                                  {(() => { const ciDist = entryDistanceMiles(entry.clockInLat, entry.clockInLon); const coDist = entryDistanceMiles(entry.clockOutLat, entry.clockOutLon); if (ciDist == null && coDist == null) return null; return <div className="space-y-2"><Label>Distance</Label><div className="flex flex-wrap gap-1">{ciDist != null ? <Badge variant={ciDist > 1 ? 'destructive' : 'secondary'} className="text-xs">In: {ciDist.toFixed(1)} mi</Badge> : null}{coDist != null ? <Badge variant={coDist > 1 ? 'destructive' : 'secondary'} className="text-xs">Out: {coDist.toFixed(1)} mi</Badge> : null}</div></div>; })()}
                                 </div>
                                 <div className="flex gap-2">
                                   <Button type="button" size="sm" onClick={() => void handleRangeSaveEdit(entry, dayEntries)} disabled={updateTimeEntry.isPending}><Check className="mr-1 h-3 w-3" /> Save</Button>
@@ -1531,10 +1532,10 @@ export default function ManagerDashboardPage() {
                                     {isPtoEntry(entry) ? ` · ${getPtoHours(entry)}h PTO` : ` · Div ${getEntryDivision(entry, assets) || '—'}`}
                                     {getEntryJobNumber(entry) ? ` · Job ${getEntryJobNumber(entry)}` : ''}
                                     {' · '}{formatDuration(getEntryPaidMinutes(dayEntries, entry))}
-                                    {(() => { const ciDist = entryDistanceMiles(entry.clockInLat, entry.clockInLon); return ciDist != null && ciDist > 1 ? ` · ⚠ ${ciDist.toFixed(1)} mi` : ''; })()}
                                   </p>
                                 </div>
                                 <div className="flex items-center gap-1.5">
+                                  {(() => { const ciDist = entryDistanceMiles(entry.clockInLat, entry.clockInLon); const coDist = entryDistanceMiles(entry.clockOutLat, entry.clockOutLon); return <>{ciDist != null ? <Badge variant={ciDist > 1 ? 'destructive' : 'secondary'} className="text-xs">In: {ciDist.toFixed(1)} mi</Badge> : null}{coDist != null ? <Badge variant={coDist > 1 ? 'destructive' : 'secondary'} className="text-xs">Out: {coDist.toFixed(1)} mi</Badge> : null}</>; })()}
                                   {entry.onCall ? <Badge variant="secondary"><Phone className="mr-1 h-3 w-3" />On Call</Badge> : null}
                                   <Badge variant={entry.clockOut ? 'outline' : 'default'}>{entry.clockOut ? 'Complete' : 'Active'}</Badge>
                                   <Button type="button" variant="outline" size="sm" onClick={() => handleRangeStartEdit(entry)}><Pencil className="mr-1 h-3 w-3" /> Edit</Button>
