@@ -256,7 +256,13 @@ function mapTimeEntry(row) {
         : undefined,
     assetDivision: toNumber(row.swank_assetdivision),
     clockIn: row.swank_clockin || undefined,
+    clockInIp: row.swank_clockinip || undefined,
+    clockInLat: toNumber(row.swank_clockinlat),
+    clockInLon: toNumber(row.swank_clockinlon),
     clockOut: row.swank_clockout || undefined,
+    clockOutIp: row.swank_clockoutip || undefined,
+    clockOutLat: toNumber(row.swank_clockoutlat),
+    clockOutLon: toNumber(row.swank_clockoutlon),
     division: toNumber(row.crcce_division),
     employee: employee.swank_shopemployeeid || row._swank_employee_value
       ? {
@@ -282,7 +288,13 @@ function timeEntryPayload(record, { isCreate }) {
     payload.swank_timeentry = record.timeEntry || 'Time entry';
   }
   if (record.clockIn !== undefined) payload.swank_clockin = record.clockIn || null;
+  if (record.clockInIp !== undefined) payload.swank_clockinip = record.clockInIp || null;
+  if (record.clockInLat !== undefined) payload.swank_clockinlat = record.clockInLat ?? null;
+  if (record.clockInLon !== undefined) payload.swank_clockinlon = record.clockInLon ?? null;
   if (record.clockOut !== undefined) payload.swank_clockout = record.clockOut || null;
+  if (record.clockOutIp !== undefined) payload.swank_clockoutip = record.clockOutIp || null;
+  if (record.clockOutLat !== undefined) payload.swank_clockoutlat = record.clockOutLat ?? null;
+  if (record.clockOutLon !== undefined) payload.swank_clockoutlon = record.clockOutLon ?? null;
   if (record.hours !== undefined) payload.swank_hours = record.hours;
   if (record.jobNumber !== undefined) payload.swank_jobnumber = record.jobNumber || null;
   if (record.notes !== undefined) {
@@ -374,7 +386,7 @@ async function listTimeEntries({ from, to } = {}) {
   if (from) filter += ` and swank_clockin ge ${from}`;
   if (to) filter += ` and swank_clockin le ${to}`;
   const rows = await listAll(
-    `/swank_shoptimeentries?$select=swank_shoptimeentryid,swank_timeentry,swank_clockin,swank_clockout,swank_hours,swank_jobnumber,swank_notes,swank_workdate,swank_assetdivision,crcce_division,swank_ptotime,swank_ptotype,swank_paytype,swank_oncall,swank_ptoapproval,_swank_employee_value,_swank_asset_value&$expand=swank_Employee($select=swank_shopemployeeid,swank_autonumber,swank_empnum),swank_Asset($select=swank_equipmentassetid,swank_assetidentifier,swank_divisioncode)&$filter=${filter}&$orderby=swank_clockin desc`,
+    `/swank_shoptimeentries?$select=swank_shoptimeentryid,swank_timeentry,swank_clockin,swank_clockout,swank_hours,swank_jobnumber,swank_notes,swank_workdate,swank_assetdivision,crcce_division,swank_ptotime,swank_ptotype,swank_paytype,swank_oncall,swank_ptoapproval,swank_clockinip,swank_clockinlat,swank_clockinlon,swank_clockoutip,swank_clockoutlat,swank_clockoutlon,_swank_employee_value,_swank_asset_value&$expand=swank_Employee($select=swank_shopemployeeid,swank_autonumber,swank_empnum),swank_Asset($select=swank_equipmentassetid,swank_assetidentifier,swank_divisioncode)&$filter=${filter}&$orderby=swank_clockin desc`,
   );
   return rows.map(mapTimeEntry);
 }

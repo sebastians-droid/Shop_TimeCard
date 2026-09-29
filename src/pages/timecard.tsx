@@ -29,6 +29,7 @@ import {
 } from '@/lib/time-rules';
 import { getAssetDisplayName, getTimeEntryAssetName, getEntryDivision, getEntryJobNumber, PTO_TIME_KEY_BY_HOURS, getPtoClockInIso } from '@/lib/entry-helpers';
 import { ShopTimeEntryPTOTypeKeyToLabel, DEFAULT_PAY_TYPE, type ShopTimeEntry, type ShopTimeEntryPTOTypeKey } from '@/models/shop-time-entry';
+import { getCurrentPosition } from '@/lib/geolocation';
 
 type PtoHours = 4 | 8;
 type ClockInConfirmation = {
@@ -184,11 +185,17 @@ export default function TimecardPage() {
     const dayAfterClose = closedActiveEntry
       ? employeeTodayEntries.map((entry: ShopTimeEntry) => (entry.id === closedActiveEntry.id ? closedActiveEntry : entry))
       : employeeTodayEntries;
+    const pos = await getCurrentPosition();
     try {
       if (closedActiveEntry) {
         await updateTimeEntry.mutateAsync({
           id: closedActiveEntry.id,
-          changedFields: { clockOut: clockIn, hours: getEntryPaidMinutes(dayAfterClose, closedActiveEntry) / 60 },
+          changedFields: {
+            clockOut: clockIn,
+            hours: getEntryPaidMinutes(dayAfterClose, closedActiveEntry) / 60,
+            clockOutLat: pos?.lat,
+            clockOutLon: pos?.lon,
+          },
         });
       }
       await createTimeEntry.mutateAsync({
@@ -200,6 +207,8 @@ export default function TimecardPage() {
         division: divisionNumber,
         jobNumber: manualJobNumber || undefined,
         clockIn,
+        clockInLat: pos?.lat,
+        clockInLon: pos?.lon,
         workDate: getWorkDate(clockIn),
         notes: applyNoLunchMarker(notes.trim() || undefined, todayPay.noLunch),
       });
@@ -265,8 +274,9 @@ export default function TimecardPage() {
     const clockOut = getNowIso();
     const updatedEntry = { ...entry, clockOut };
     const dayEntries = employeeTodayEntries.map((row: ShopTimeEntry) => (row.id === entry.id ? updatedEntry : row));
+    const pos = await getCurrentPosition();
     try {
-      await updateTimeEntry.mutateAsync({ id: entry.id, changedFields: { clockOut, hours: getEntryPaidMinutes(dayEntries, updatedEntry) / 60 } });
+      await updateTimeEntry.mutateAsync({ id: entry.id, changedFields: { clockOut, hours: getEntryPaidMinutes(dayEntries, updatedEntry) / 60, clockOutLat: pos?.lat, clockOutLon: pos?.lon } });
       toast.success('Clocked out successfully.');
     } catch (error: unknown) {
       toast.error(error instanceof Error ? error.message : 'Unable to clock out.');

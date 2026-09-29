@@ -51,6 +51,14 @@ async function readJson(request) {
   return {};
 }
 
+function clientIp(request) {
+  const forwarded = request.headers?.get?.('x-forwarded-for')
+    || request.headers?.['x-forwarded-for']
+    || '';
+  const first = String(forwarded).split(',')[0].trim();
+  return first || undefined;
+}
+
 function apiPath(requestUrl) {
   const raw = String(requestUrl || '');
   let pathname = '/';
@@ -146,6 +154,8 @@ async function handleRequest(request) {
     if (method === 'POST' && (pathname === '/api/time-entries' || pathname === '/api/timeEntries')) {
       requireUser(request);
       const record = await readJson(request);
+      const ip = clientIp(request);
+      if (ip && record.clockIn) record.clockInIp = ip;
       return json(201, await createTimeEntry(record));
     }
 
@@ -154,6 +164,8 @@ async function handleRequest(request) {
     if (entryMatch && method === 'PATCH') {
       requireUser(request);
       const record = await readJson(request);
+      const ip = clientIp(request);
+      if (ip && record.clockOut) record.clockOutIp = ip;
       return json(200, await updateTimeEntry(entryMatch[1], record));
     }
 

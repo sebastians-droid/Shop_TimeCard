@@ -52,6 +52,7 @@ import {
 import { ShopTimeEntryPayTypeKeyToLabel, ShopTimeEntryPTOTypeKeyToLabel, DEFAULT_PAY_TYPE, type ShopTimeEntry, type ShopTimeEntryPayTypeKey, type ShopTimeEntryPTOApprovalKey, type ShopTimeEntryPTOTypeKey } from '@/models/shop-time-entry';
 import { NoLunchCheckbox } from '@/components/no-lunch-checkbox';
 import { useUser } from '@/hooks/use-user';
+import { entryDistanceMiles } from '@/lib/geolocation';
 
 type PtoHours = 4 | 8;
 
@@ -1247,6 +1248,7 @@ export default function ManagerDashboardPage() {
                                   <div>
                                     <div className="flex flex-wrap items-center gap-2"><p className="text-base font-semibold">{getEntryAssetName(entry, assets)}</p>{entry.pTOTypeKey ? <Badge variant="outline">{ShopTimeEntryPTOTypeKeyToLabel[entry.pTOTypeKey]}</Badge> : null}{!isPtoEntry(entry) ? <Badge variant="outline">{ShopTimeEntryPayTypeKeyToLabel[entry.payTypeKey ?? DEFAULT_PAY_TYPE]}</Badge> : null}</div>
                                     <p className="mt-1 text-sm text-muted-foreground">{isPtoEntry(entry) ? `${getPtoHours(entry)} hours PTO` : `Division ${getEntryDivision(entry, assets) || '—'} · Job ${getEntryJobNumber(entry) || '—'}`}</p>
+                                    {(() => { const ciDist = entryDistanceMiles(entry.clockInLat, entry.clockInLon); const coDist = entryDistanceMiles(entry.clockOutLat, entry.clockOutLon); if (ciDist == null && coDist == null) return null; return <div className="mt-1 flex flex-wrap gap-1.5">{ciDist != null ? <Badge variant={ciDist > 1 ? 'destructive' : 'secondary'} className="text-xs">In: {ciDist.toFixed(1)} mi</Badge> : null}{coDist != null ? <Badge variant={coDist > 1 ? 'destructive' : 'secondary'} className="text-xs">Out: {coDist.toFixed(1)} mi</Badge> : null}</div>; })()}
                                   </div>
                                 )}
                               </div>
@@ -1529,6 +1531,7 @@ export default function ManagerDashboardPage() {
                                     {isPtoEntry(entry) ? ` · ${getPtoHours(entry)}h PTO` : ` · Div ${getEntryDivision(entry, assets) || '—'}`}
                                     {getEntryJobNumber(entry) ? ` · Job ${getEntryJobNumber(entry)}` : ''}
                                     {' · '}{formatDuration(getEntryPaidMinutes(dayEntries, entry))}
+                                    {(() => { const ciDist = entryDistanceMiles(entry.clockInLat, entry.clockInLon); return ciDist != null && ciDist > 1 ? ` · ⚠ ${ciDist.toFixed(1)} mi` : ''; })()}
                                   </p>
                                 </div>
                                 <div className="flex items-center gap-1.5">

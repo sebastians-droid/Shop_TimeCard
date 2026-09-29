@@ -36,7 +36,13 @@ export interface ShopTimeEntry {
   asset?: Pick<EquipmentAsset, 'id' | 'asset'>;
   assetDivision?: number;
   clockIn?: string;
+  clockInIp?: string;
+  clockInLat?: number;
+  clockInLon?: number;
   clockOut?: string;
+  clockOutIp?: string;
+  clockOutLat?: number;
+  clockOutLon?: number;
   division?: number;
   employee?: Pick<ShopEmployee, 'id' | 'autoNumber'>;
   hours?: number;

@@ -32,6 +32,7 @@ import {
   formatWeekRangeLabel,
 } from '@/lib/entry-helpers';
 import { ShopTimeEntryPayTypeKeyToLabel, ShopTimeEntryPTOTypeKeyToLabel, DEFAULT_PAY_TYPE, type ShopTimeEntry } from '@/models/shop-time-entry';
+import { entryDistanceMiles } from '@/lib/geolocation';
 
 type PayrollExportCardProps = {
   exportWeekDate: Date;
@@ -102,6 +103,8 @@ export function PayrollExportCard({ exportWeekDate, onExportWeekDateChange, week
               payType: isPtoEntry(entry) ? '' : ShopTimeEntryPayTypeKeyToLabel[entry.payTypeKey ?? DEFAULT_PAY_TYPE],
               status: entry.clockOut ? 'Complete' : 'Active',
               notes: getEmployeeNotes(entry.notes),
+              clockInDistance: entryDistanceMiles(entry.clockInLat, entry.clockInLon),
+              clockOutDistance: entryDistanceMiles(entry.clockOutLat, entry.clockOutLon),
             };
           }),
         };
