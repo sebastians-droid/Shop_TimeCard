@@ -34,7 +34,7 @@ async function apiFetch<T>(path: string, init?: RequestInit): Promise<T> {
   if (response.redirected && /\/\.auth\//i.test(response.url)) {
     throw new Error('Not signed in. Refresh the page and sign in with Microsoft 365.');
   }
-  let data: unknown = {};
+  let data: unknown;
   try {
     data = text ? JSON.parse(text) : {};
   } catch {

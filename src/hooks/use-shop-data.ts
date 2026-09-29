@@ -1,13 +1,14 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 
 import { apiFetch } from '@/lib/api';
+import { queryKeys } from '@/lib/query-keys';
 import type { EquipmentAsset } from '@/models/equipment-asset';
 import type { ShopEmployee } from '@/models/shop-employee';
 import type { ShopTimeEntry } from '@/models/shop-time-entry';
 
-export function useShopEmployeeList(_options?: unknown) {
+export function useShopEmployeeList() {
   return useQuery({
-    queryKey: ['shopEmployee-list'],
+    queryKey: queryKeys.shopEmployees(),
     queryFn: async () => {
       const data = await apiFetch<{ employees: ShopEmployee[] }>('/api/employees');
       return data.employees;
@@ -19,7 +20,7 @@ export type LookupEmployee = { id: string; name: string; empNum?: number };
 
 export function useLookupEmployees() {
   return useQuery({
-    queryKey: ['lookupEmployee-list'],
+    queryKey: queryKeys.lookupEmployees(),
     queryFn: async () => {
       const data = await apiFetch<{ employees: LookupEmployee[] }>('/api/lookup-employees');
       return data.employees;
@@ -29,7 +30,7 @@ export function useLookupEmployees() {
 
 export function useAllEquipmentAssets() {
   return useQuery({
-    queryKey: ['equipmentAsset-list', 'all-assets'],
+    queryKey: queryKeys.equipmentAssets(),
     queryFn: async () => {
       const data = await apiFetch<{ assets: EquipmentAsset[] }>('/api/assets');
       return data.assets;
@@ -37,9 +38,9 @@ export function useAllEquipmentAssets() {
   });
 }
 
-export function useShopTimeEntryList(_options?: unknown) {
+export function useShopTimeEntryList() {
   return useQuery({
-    queryKey: ['shopTimeEntry-list'],
+    queryKey: queryKeys.timeEntries(),
     queryFn: async () => {
       const data = await apiFetch<{ entries: ShopTimeEntry[] }>('/api/time-entries');
       return data.entries;
@@ -56,7 +57,7 @@ export function useCreateShopTimeEntry() {
         body: JSON.stringify(record),
       }),
     onSuccess: () => {
-      client.invalidateQueries({ queryKey: ['shopTimeEntry-list'] });
+      client.invalidateQueries({ queryKey: queryKeys.timeEntries() });
     },
   });
 }
@@ -64,19 +65,13 @@ export function useCreateShopTimeEntry() {
 export function useUpdateShopTimeEntry() {
   const client = useQueryClient();
   return useMutation({
-    mutationFn: ({
-      id,
-      changedFields,
-    }: {
-      id: string;
-      changedFields: Partial<Omit<ShopTimeEntry, 'id'>>;
-    }) =>
+    mutationFn: ({ id, changedFields }: { id: string; changedFields: Partial<Omit<ShopTimeEntry, 'id'>> }) =>
       apiFetch<ShopTimeEntry>(`/api/time-entries/${id}`, {
         method: 'PATCH',
         body: JSON.stringify(changedFields),
       }),
     onSuccess: () => {
-      client.invalidateQueries({ queryKey: ['shopTimeEntry-list'] });
+      client.invalidateQueries({ queryKey: queryKeys.timeEntries() });
     },
   });
 }
@@ -84,10 +79,9 @@ export function useUpdateShopTimeEntry() {
 export function useDeleteShopTimeEntry() {
   const client = useQueryClient();
   return useMutation({
-    mutationFn: (id: string) =>
-      apiFetch<void>(`/api/time-entries/${id}`, { method: 'DELETE' }),
+    mutationFn: (id: string) => apiFetch<void>(`/api/time-entries/${id}`, { method: 'DELETE' }),
     onSuccess: () => {
-      client.invalidateQueries({ queryKey: ['shopTimeEntry-list'] });
+      client.invalidateQueries({ queryKey: queryKeys.timeEntries() });
     },
   });
 }
@@ -101,7 +95,7 @@ export function useCreateAsset() {
         body: JSON.stringify(record),
       }),
     onSuccess: () => {
-      client.invalidateQueries({ queryKey: ['equipmentAsset-list'] });
+      client.invalidateQueries({ queryKey: queryKeys.equipmentAssets() });
     },
   });
 }
@@ -109,13 +103,16 @@ export function useCreateAsset() {
 export function useUpdateAsset() {
   const client = useQueryClient();
   return useMutation({
-    mutationFn: ({ id, ...fields }: { id: string } & Partial<EquipmentAsset> & { divisionPicklist?: number; equipmentCategory?: number }) =>
+    mutationFn: ({
+      id,
+      ...fields
+    }: { id: string } & Partial<EquipmentAsset> & { divisionPicklist?: number; equipmentCategory?: number }) =>
       apiFetch<EquipmentAsset>(`/api/assets/${id}`, {
         method: 'PATCH',
         body: JSON.stringify(fields),
       }),
     onSuccess: () => {
-      client.invalidateQueries({ queryKey: ['equipmentAsset-list'] });
+      client.invalidateQueries({ queryKey: queryKeys.equipmentAssets() });
     },
   });
 }
@@ -123,10 +120,9 @@ export function useUpdateAsset() {
 export function useDeactivateAsset() {
   const client = useQueryClient();
   return useMutation({
-    mutationFn: (id: string) =>
-      apiFetch<void>(`/api/assets/${id}`, { method: 'DELETE' }),
+    mutationFn: (id: string) => apiFetch<void>(`/api/assets/${id}`, { method: 'DELETE' }),
     onSuccess: () => {
-      client.invalidateQueries({ queryKey: ['equipmentAsset-list'] });
+      client.invalidateQueries({ queryKey: queryKeys.equipmentAssets() });
     },
   });
 }
@@ -140,21 +136,9 @@ export function useCreateShopEmployee() {
         body: JSON.stringify(record),
       }),
     onSuccess: () => {
-      client.invalidateQueries({ queryKey: ['shopEmployee-list'] });
-    },
-  });
-}
-
-export function useUpdateShopEmployee() {
-  const client = useQueryClient();
-  return useMutation({
-    mutationFn: ({ id, ...fields }: { id: string; autoNumber?: string; empNum?: number; employeeId?: string }) =>
-      apiFetch<ShopEmployee>(`/api/employees/${id}`, {
-        method: 'PATCH',
-        body: JSON.stringify(fields),
-      }),
-    onSuccess: () => {
-      client.invalidateQueries({ queryKey: ['shopEmployee-list'] });
+      client.invalidateQueries({ queryKey: queryKeys.shopEmployees() });
+      // A new shop employee consumes a lookup record, so the picker must refresh too.
+      client.invalidateQueries({ queryKey: queryKeys.lookupEmployees() });
     },
   });
 }
@@ -162,10 +146,10 @@ export function useUpdateShopEmployee() {
 export function useDeactivateShopEmployee() {
   const client = useQueryClient();
   return useMutation({
-    mutationFn: (id: string) =>
-      apiFetch<void>(`/api/employees/${id}`, { method: 'DELETE' }),
+    mutationFn: (id: string) => apiFetch<void>(`/api/employees/${id}`, { method: 'DELETE' }),
     onSuccess: () => {
-      client.invalidateQueries({ queryKey: ['shopEmployee-list'] });
+      client.invalidateQueries({ queryKey: queryKeys.shopEmployees() });
+      client.invalidateQueries({ queryKey: queryKeys.lookupEmployees() });
     },
   });
 }
@@ -181,7 +165,7 @@ export type MechanicScheduleRow = {
 
 export function useScheduleList(from?: string, to?: string) {
   return useQuery({
-    queryKey: ['schedule-list', from, to],
+    queryKey: queryKeys.scheduleRange(from, to),
     queryFn: async () => {
       const params = new URLSearchParams();
       if (from) params.set('from', from);
@@ -208,7 +192,7 @@ export function useUpsertSchedule() {
         body: JSON.stringify(record),
       }),
     onSuccess: () => {
-      client.invalidateQueries({ queryKey: ['schedule-list'] });
+      client.invalidateQueries({ queryKey: queryKeys.schedules() });
     },
   });
 }

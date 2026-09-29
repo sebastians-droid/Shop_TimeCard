@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react';
-import { Check, ChevronDown, LockKeyhole, Pencil, Plus, Search, Trash2, X } from 'lucide-react';
+import { Check, Pencil, Plus, Search, Trash2, X } from 'lucide-react';
 import { toast } from 'sonner';
 
 import {
@@ -13,6 +13,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { AccessCheckingCard, ManagerAccessDeniedCard } from '@/components/system/access-cards';
 import {
   useAllEquipmentAssets, useCreateAsset, useUpdateAsset, useDeactivateAsset,
   useShopEmployeeList, useCreateShopEmployee, useDeactivateShopEmployee,
@@ -461,31 +462,15 @@ export default function AdminPage() {
   const { data: user, isLoading: userLoading } = useUser();
 
   if (userLoading || !user) {
-    return (
-      <main className="mx-auto flex w-full max-w-3xl flex-1 flex-col gap-6 p-4 sm:p-6 lg:p-8">
-        <Card className="border-l-4 border-l-primary bg-card text-card-foreground shadow-sm">
-          <CardHeader><CardTitle className="flex items-center gap-2 text-2xl"><LockKeyhole className="h-6 w-6" /> Checking access</CardTitle></CardHeader>
-          <CardContent><p className="text-sm text-muted-foreground">Loading your Microsoft 365 identity.</p></CardContent>
-        </Card>
-      </main>
-    );
+    return <AccessCheckingCard message="Loading your Microsoft 365 identity." />;
   }
 
   if (!user.isManager) {
     return (
-      <main className="mx-auto flex w-full max-w-3xl flex-1 flex-col gap-6 p-4 sm:p-6 lg:p-8">
-        <Card className="border-l-4 border-l-destructive bg-card text-card-foreground shadow-sm">
-          <CardHeader><CardTitle className="flex items-center gap-2 text-2xl"><LockKeyhole className="h-6 w-6" /> Manager access required</CardTitle></CardHeader>
-          <CardContent className="space-y-4">
-            <p className="text-sm text-muted-foreground">Your Microsoft 365 account is not on the manager allowlist for editing assets and employees.</p>
-            <div className="rounded-lg bg-muted p-4 text-muted-foreground">
-              <p className="text-sm">Signed in as</p>
-              <p className="mt-1 font-semibold text-foreground">{user.name || 'Unknown user'}</p>
-              <p className="text-sm">{user.email}</p>
-            </div>
-          </CardContent>
-        </Card>
-      </main>
+      <ManagerAccessDeniedCard
+        user={user}
+        message="Your Microsoft 365 account is not on the manager allowlist for editing assets and employees."
+      />
     );
   }
 

@@ -14,21 +14,21 @@ export const getAssetDisplayName = (asset?: EquipmentAsset | Pick<EquipmentAsset
   return asset.asset || 'Unassigned asset';
 };
 
-export const getEntryAssetName = (entry: ShopTimeEntry, assets: EquipmentAsset[]) => {
-  if (isPtoEntry(entry)) return 'PTO';
-  const matchedAsset = entry.asset?.id ? assets.find((asset: EquipmentAsset) => asset.id === entry.asset?.id) : undefined;
-  if (entry.asset?.asset || matchedAsset) return entry.asset?.asset || getAssetDisplayName(matchedAsset);
-  return '';
-};
-
-export function getTimeEntryAssetName(entry: ShopTimeEntry, assets: EquipmentAsset[]) {
+/**
+ * Best available label for the work an entry covers. Assets can be unlinked or
+ * deactivated after the fact, so this walks a fallback chain rather than
+ * returning nothing: linked asset, then the name saved on the entry label, then
+ * the job number or division. It always returns a non-empty string.
+ */
+export function getEntryAssetName(entry: ShopTimeEntry, assets: EquipmentAsset[]): string {
   if (isPtoEntry(entry)) return 'PTO';
   const matchedAsset = entry.asset?.id ? assets.find((asset: EquipmentAsset) => asset.id === entry.asset?.id) : undefined;
   if (entry.asset?.asset || matchedAsset) return entry.asset?.asset || getAssetDisplayName(matchedAsset);
   const timeEntryParts = entry.timeEntry.split(' - ');
   const savedAssetName = timeEntryParts.length > 1 ? timeEntryParts.slice(1).join(' - ').trim() : '';
   if (savedAssetName && savedAssetName !== 'Time entry') return savedAssetName;
-  if (getEntryJobNumber(entry)) return `Job ${getEntryJobNumber(entry)}`;
+  const jobNumber = getEntryJobNumber(entry);
+  if (jobNumber) return `Job ${jobNumber}`;
   return entry.assetDivision ? `Division ${String(entry.assetDivision)}` : 'Unassigned asset';
 }
 
@@ -57,6 +57,15 @@ export const combineSelectedDateAndTime = (day: Date, timeValue: string) => {
   const [hours = '0', minutes = '0'] = timeValue.split(':');
   date.setHours(Number(hours), Number(minutes), 0, 0);
   return date.toISOString();
+};
+
+export const EMPLOYEE_CODE_NOT_FOUND = 'Employee code not found. Enter your 4 digit employee number.';
+
+/** Matches a kiosk-entered employee number against the shop roster. */
+export const findEmployeeByCode = (employees: AppShopEmployee[], code: string) => {
+  const parsed = Number(code.trim());
+  if (!Number.isFinite(parsed)) return undefined;
+  return employees.find((employee: AppShopEmployee) => employee.employeeCode === parsed);
 };
 
 export const getEntryEmployeeKey = (entry: ShopTimeEntry) => entry.employee?.id ?? entry.id;

@@ -35,7 +35,12 @@ export type PayrollWeekExport = {
   employees: PayrollEmployeeExport[];
 };
 
-function excelSheetName(name: string, used: Set<string>): string {
+export const RT_DAILY_THRESHOLD_HOURS = 8;
+
+export type RegularOvertimeSplit = { rt: number; ot: number };
+
+/** Excel rejects these characters in sheet names and caps them at 31 characters. */
+export function excelSheetName(name: string, used: Set<string>): string {
   const cleaned = name.replace(/[:\\/?*[\]]/g, ' ').replace(/\s+/g, ' ').trim() || 'Employee';
   const base = cleaned.slice(0, 31);
   let candidate = base;
@@ -49,8 +54,44 @@ function excelSheetName(name: string, used: Set<string>): string {
   return candidate;
 }
 
-function hoursNumber(value: number): number {
+export function hoursNumber(value: number): number {
   return Math.round((value / 60) * 100) / 100;
+}
+
+/**
+ * Splits each row into regular and overtime hours, resetting the daily
+ * threshold per work date. PTO is paid at straight time and does not push
+ * worked hours into overtime.
+ */
+export function splitRegularAndOvertime(rows: PayrollDetailRow[]): Map<PayrollDetailRow, RegularOvertimeSplit> {
+  const splitByRow = new Map<PayrollDetailRow, RegularOvertimeSplit>();
+  const rowsByDay = new Map<string, PayrollDetailRow[]>();
+
+  for (const row of rows) {
+    const dayRows = rowsByDay.get(row.workDate) ?? [];
+    dayRows.push(row);
+    rowsByDay.set(row.workDate, dayRows);
+  }
+
+  for (const dayRows of rowsByDay.values()) {
+    let laborHours = 0;
+    for (const row of dayRows) {
+      if (row.hours <= 0) {
+        splitByRow.set(row, { rt: 0, ot: 0 });
+        continue;
+      }
+      if (row.ptoTime) {
+        splitByRow.set(row, { rt: row.hours, ot: 0 });
+        continue;
+      }
+      const regularRemaining = Math.max(0, RT_DAILY_THRESHOLD_HOURS - laborHours);
+      const rt = Math.min(row.hours, regularRemaining);
+      splitByRow.set(row, { rt, ot: Math.max(0, row.hours - rt) });
+      laborHours += row.hours;
+    }
+  }
+
+  return splitByRow;
 }
 
 const headerFill: ExcelJS.FillPattern = {
@@ -128,8 +169,6 @@ export async function buildPayrollWorkbookBlob(data: PayrollWeekExport): Promise
     { width: 28 },
   ];
 
-  const RT_THRESHOLD = 8;
-
   const detailHeaders = [
     'Employee',
     'Employee number',
@@ -161,33 +200,7 @@ export async function buildPayrollWorkbookBlob(data: PayrollWeekExport): Promise
     const header = sheet.addRow(detailHeaders);
     styleHeader(header);
 
-    const rowsByDay = new Map<string, PayrollDetailRow[]>();
-    for (const detail of employee.rows) {
-      const dayRows = rowsByDay.get(detail.workDate) ?? [];
-      dayRows.push(detail);
-      rowsByDay.set(detail.workDate, dayRows);
-    }
-
-    const rtOtMap = new Map<PayrollDetailRow, { rt: number; ot: number }>();
-    for (const dayRows of rowsByDay.values()) {
-      let accumulated = 0;
-      for (const detail of dayRows) {
-        const hours = detail.hours;
-        if (hours <= 0) {
-          rtOtMap.set(detail, { rt: 0, ot: 0 });
-          continue;
-        }
-        if (detail.ptoTime) {
-          rtOtMap.set(detail, { rt: hours, ot: 0 });
-          continue;
-        }
-        const rtRemaining = Math.max(0, RT_THRESHOLD - accumulated);
-        const rt = Math.min(hours, rtRemaining);
-        const ot = Math.max(0, hours - rt);
-        rtOtMap.set(detail, { rt, ot });
-        accumulated += hours;
-      }
-    }
+    const rtOtMap = splitRegularAndOvertime(employee.rows);
 
     employee.rows.forEach((detail) => {
       const { rt, ot } = rtOtMap.get(detail) ?? { rt: 0, ot: 0 };

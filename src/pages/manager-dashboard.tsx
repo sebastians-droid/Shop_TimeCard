@@ -1,8 +1,6 @@
 import { useMemo, useState } from 'react';
-import { addHours, eachDayOfInterval, format, startOfDay } from 'date-fns';
-import { CalendarIcon, CalendarRange, Check, ChevronDown, LockKeyhole, Pencil, Phone, Plus, RefreshCw, Search, ShieldCheck, Trash2, Users, X } from 'lucide-react';
-import { useQueryClient } from '@tanstack/react-query';
-import { toast } from 'sonner';
+import { eachDayOfInterval, format, startOfDay } from 'date-fns';
+import { CalendarIcon, CalendarRange, Check, ChevronDown, Pencil, Phone, Plus, RefreshCw, Search, ShieldCheck, Trash2, Users, X } from 'lucide-react';
 import type { DateRange } from 'react-day-picker';
 
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger } from '@/components/ui/alert-dialog';
@@ -17,25 +15,32 @@ import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Textarea } from '@/components/ui/textarea';
 import { AssetPicker } from '@/components/asset-picker';
+import { AccessCheckingCard, ManagerAccessDeniedCard } from '@/components/system/access-cards';
+import { EntryDistanceBadges, EntryDistanceField } from '@/components/manager/entry-distance-badges';
 import { PtoApprovalPanel } from '@/components/manager/pto-approval-panel';
 import { PayrollExportCard } from '@/components/manager/payroll-export-card';
-import { useAllEquipmentAssets, useCreateShopTimeEntry, useDeleteShopTimeEntry, useScheduleList, useShopEmployeeList, useShopTimeEntryList, useUpdateShopTimeEntry } from '@/hooks/use-shop-data';
+import { useAllEquipmentAssets, useScheduleList, useShopEmployeeList, useShopTimeEntryList } from '@/hooks/use-shop-data';
+import { useManagerEntryActions } from '@/hooks/use-manager-entry-actions';
+import { useReloadTables } from '@/hooks/use-reload-tables';
 import type { EquipmentAsset } from '@/models/equipment-asset';
 import { mapShopEmployees, type AppShopEmployee } from '@/lib/shop-employees';
-import { apiFetch } from '@/lib/api';
 import {
-  applyNoLunchMarker,
+  emptyEntryDraft,
+  emptyPtoDraft,
+  type EditableEntry,
+  type EmployeeDailySummary,
+  type NewEntryDraft,
+  type PtoDraft,
+} from '@/lib/manager-timecard';
+import {
   formatDuration,
   getDayPayMinutes,
-  getEntryPaidMinutes,
   getPtoHours,
   getRawDurationMinutes,
   isPtoEntry,
-  notesHaveNoLunch,
   stripNoLunchMarker,
 } from '@/lib/time-rules';
 import {
-  getAssetDisplayName,
   getEntryAssetName,
   getEntryJobNumber,
   getEntryEmployeeKey,
@@ -44,76 +49,26 @@ import {
   getEntryDivision,
   getEntryWorkDateKey,
   getEmployeeNotes,
-  PTO_TIME_KEY_BY_HOURS,
   formatTimeForInput,
-  mergeDateAndTime,
-  combineSelectedDateAndTime,
-  getPtoClockInIso,
   getWeekRange,
   formatWeekRangeLabel,
 } from '@/lib/entry-helpers';
-import { ShopTimeEntryPayTypeKeyToLabel, ShopTimeEntryPTOTypeKeyToLabel, DEFAULT_PAY_TYPE, type ShopTimeEntry, type ShopTimeEntryPayTypeKey, type ShopTimeEntryPTOApprovalKey, type ShopTimeEntryPTOTypeKey } from '@/models/shop-time-entry';
+import { ShopTimeEntryPayTypeKeyToLabel, ShopTimeEntryPTOTypeKeyToLabel, DEFAULT_PAY_TYPE, type ShopTimeEntry, type ShopTimeEntryPayTypeKey, type ShopTimeEntryPTOTypeKey } from '@/models/shop-time-entry';
 import { NoLunchCheckbox } from '@/components/no-lunch-checkbox';
 import { MechanicSchedule } from '@/components/manager/mechanic-schedule';
 import { useUser } from '@/hooks/use-user';
-import { entryDistanceMiles } from '@/lib/geolocation';
-
-type PtoHours = 4 | 8;
-
-type EditableEntry = {
-  assetId: string;
-  assetRecord?: Pick<EquipmentAsset, 'id' | 'asset' | 'divisionCode'>;
-  division: string;
-  jobNumber: string;
-  notes: string;
-  payTypeKey: ShopTimeEntryPayTypeKey;
-  clockInTime: string;
-  clockOutTime: string;
-};
-
-type NewEntryDraft = EditableEntry & {
-  employeeId: string;
-};
-
-type PtoDraft = {
-  employeeId: string;
-  hours: PtoHours;
-  type: ShopTimeEntryPTOTypeKey | '';
-};
-
-type EmployeeDailySummary = {
-  employeeKey: string;
-  employeeName: string;
-  employeeNumber: string;
-  entries: ShopTimeEntry[];
-  activeCount: number;
-  totalMinutes: number;
-  noLunch: boolean;
-  lunchDeducted: boolean;
-  onCall: boolean;
-};
-
-const getTodayKey = () => format(new Date(), 'yyyy-MM-dd');
-
-const emptyEntryDraft = (employeeId = ''): NewEntryDraft => ({
-  employeeId,
-  assetId: '',
-  assetRecord: undefined,
-  division: '',
-  jobNumber: '',
-  notes: '',
-  payTypeKey: DEFAULT_PAY_TYPE,
-  clockInTime: '',
-  clockOutTime: '',
-});
-
-const emptyPtoDraft = (employeeId = ''): PtoDraft => ({
-  employeeId,
-  hours: 8,
-  type: '',
-});
 
 type ManagerView = 'timecards' | 'schedule';
+
+function StatTile({ label, value, caption }: { label: string; value: string | number; caption?: string }) {
+  return (
+    <div className="rounded-lg bg-muted p-4 text-muted-foreground">
+      <p className="text-sm">{label}</p>
+      <p className="mt-2 text-3xl font-semibold text-foreground">{value}</p>
+      {caption ? <p className="mt-1 text-sm">{caption}</p> : null}
+    </div>
+  );
+}
 
 export default function ManagerDashboardPage() {
   const [managerView, setManagerView] = useState<ManagerView>('timecards');
@@ -130,23 +85,29 @@ export default function ManagerDashboardPage() {
   const [showPtoForm, setShowPtoForm] = useState(false);
   const [ptoDraft, setPtoDraft] = useState<PtoDraft | null>(null);
   const [ptoEmployeeSearch, setPtoEmployeeSearch] = useState('');
-  const [lunchUpdatingKey, setLunchUpdatingKey] = useState('');
-  const [onCallUpdatingKey, setOnCallUpdatingKey] = useState('');
   const [rangeViewEmployeeId, setRangeViewEmployeeId] = useState('');
   const [rangeViewRange, setRangeViewRange] = useState<DateRange | undefined>(undefined);
   const [rangeOpenDay, setRangeOpenDay] = useState('');
   const [rangeAddingForDay, setRangeAddingForDay] = useState('');
   const [rangePtoForDay, setRangePtoForDay] = useState('');
-  const queryClient = useQueryClient();
   const { data: user, isLoading: userLoading } = useUser();
   const { data: shopEmployees = [], isLoading: employeesLoading } = useShopEmployeeList();
   const employees = useMemo(() => mapShopEmployees(shopEmployees), [shopEmployees]);
   const { data: assets = [], isLoading: assetsLoading, refetch: refetchAssets } = useAllEquipmentAssets();
   const { data: timeEntries = [], isLoading: entriesLoading, refetch: refetchEntries } = useShopTimeEntryList();
   const isAllowedManager = Boolean(user?.isManager);
-  const createTimeEntry = useCreateShopTimeEntry();
-  const deleteTimeEntry = useDeleteShopTimeEntry();
-  const updateTimeEntry = useUpdateShopTimeEntry();
+  const {
+    saveNewEntry,
+    saveEdit,
+    savePto,
+    deleteEntry,
+    setDayNoLunch,
+    lunchUpdatingKey,
+    isCreating,
+    isUpdating,
+    isDeleting,
+  } = useManagerEntryActions({ employees, assets, timeEntries });
+  const handleReloadTables = useReloadTables(refetchAssets, refetchEntries);
 
   const selectedDayEntries = useMemo(() => {
     const selectedDay = format(selectedDate, 'yyyy-MM-dd');
@@ -315,279 +276,48 @@ export default function ManagerDashboardPage() {
     }
   };
 
+  const openEmployee = (employeeId: string) => {
+    setOpenEmployeeKeys((currentKeys: string[]) =>
+      currentKeys.includes(employeeId) ? currentKeys : [...currentKeys, employeeId],
+    );
+  };
+
   const handleSavePto = async () => {
     if (!ptoDraft) return;
-    const employee = employees.find((row: AppShopEmployee) => row.id === ptoDraft.employeeId);
-    if (!employee) {
-      toast.error('Choose an employee for this PTO.');
-      return;
-    }
-    if (!ptoDraft.type) {
-      toast.error('Choose a PTO type.');
-      return;
-    }
-
-    const clockIn = getPtoClockInIso(selectedDate);
-    const clockOut = addHours(new Date(clockIn), ptoDraft.hours).toISOString();
-    const dayKey = format(selectedDate, 'yyyy-MM-dd');
-    const typeLabel = ShopTimeEntryPTOTypeKeyToLabel[ptoDraft.type];
-
-    try {
-      await createTimeEntry.mutateAsync({
-        timeEntry: `${employee.employeeName} - PTO`,
-        pTOTimeKey: PTO_TIME_KEY_BY_HOURS[ptoDraft.hours],
-        pTOTypeKey: ptoDraft.type,
-        employee: { id: employee.id, autoNumber: employee.autoNumber },
-        jobNumber: 'PTO',
-        clockIn,
-        clockOut,
-        hours: ptoDraft.hours,
-        workDate: dayKey,
-        ptoApproval: 'Approved' as ShopTimeEntryPTOApprovalKey,
-        notes: `${ptoDraft.hours} hours ${typeLabel} PTO submitted for ${format(selectedDate, 'MMM d, yyyy')}.`,
-      });
+    if (await savePto({ draft: ptoDraft, day: selectedDate })) {
       handleCancelPto();
-      setOpenEmployeeKeys((currentKeys: string[]) =>
-        currentKeys.includes(employee.id) ? currentKeys : [...currentKeys, employee.id],
-      );
-      toast.success(`${ptoDraft.hours} hours ${typeLabel} PTO added for ${employee.employeeName} on ${format(selectedDate, 'MMM d')}.`);
-    } catch (error: unknown) {
-      toast.error(error instanceof Error ? error.message : 'Unable to add PTO.');
+      openEmployee(ptoDraft.employeeId);
     }
   };
 
   const handleSaveNewEntry = async () => {
-    if (!newEntryDraft) {
-      return;
-    }
-
-    const employee = employees.find((row: AppShopEmployee) => row.id === newEntryDraft.employeeId);
-    if (!employee) {
-      toast.error('Choose an employee for this time entry.');
-      return;
-    }
-    if (!newEntryDraft.clockInTime) {
-      toast.error('Clock-in time is required.');
-      return;
-    }
-    if (!newEntryDraft.clockOutTime) {
-      toast.error('Clock-out time is required for manager-added entries.');
-      return;
-    }
-
-    const clockIn = combineSelectedDateAndTime(selectedDate, newEntryDraft.clockInTime);
-    const clockOut = combineSelectedDateAndTime(selectedDate, newEntryDraft.clockOutTime);
-    if (new Date(clockOut).getTime() <= new Date(clockIn).getTime()) {
-      toast.error('Clock-out must be after clock-in.');
-      return;
-    }
-
-    const selectedAsset = newEntryDraft.assetId
-      ? newEntryDraft.assetRecord ?? assets.find((asset: EquipmentAsset) => asset.id === newEntryDraft.assetId)
-      : undefined;
-    const manualDivision = newEntryDraft.division.trim();
-    const manualJobNumber = newEntryDraft.jobNumber.trim();
-    if (manualDivision && !Number.isFinite(Number(manualDivision))) {
-      toast.error('Division must be a number.');
-      return;
-    }
-    const label = selectedAsset
-      ? getAssetDisplayName(selectedAsset)
-      : manualJobNumber || (manualDivision ? `Division ${manualDivision}` : 'Time entry');
-    const dayKey = format(selectedDate, 'yyyy-MM-dd');
-    const existingDayEntries = timeEntries.filter(
-      (entry: ShopTimeEntry) => entry.employee?.id === employee.id && entry.clockIn?.startsWith(dayKey),
-    );
-    const dayAlreadyNoLunch = getDayPayMinutes(existingDayEntries).noLunch;
-    const provisionalId = `new-${Date.now()}`;
-    const provisionalEntry: ShopTimeEntry = {
-      id: provisionalId,
-      timeEntry: `${employee.employeeName} - ${label}`,
-      employee: { id: employee.id, autoNumber: employee.autoNumber },
-      asset: selectedAsset ? { id: selectedAsset.id, asset: getAssetDisplayName(selectedAsset) } : undefined,
-      assetDivision: selectedAsset ? selectedAsset.divisionCode : manualDivision ? Number(manualDivision) : undefined,
-      clockIn,
-      clockOut,
-      jobNumber: manualJobNumber || undefined,
-      notes: applyNoLunchMarker(undefined, dayAlreadyNoLunch),
-      workDate: dayKey,
-    };
-    const dayEntriesForPay = [...existingDayEntries, provisionalEntry];
-    const hours = getEntryPaidMinutes(dayEntriesForPay, provisionalEntry) / 60;
-
-    try {
-      await createTimeEntry.mutateAsync({
-        timeEntry: provisionalEntry.timeEntry,
-        employee: { id: employee.id, autoNumber: employee.autoNumber },
-        asset: selectedAsset ? { id: selectedAsset.id, asset: getAssetDisplayName(selectedAsset) } : undefined,
-        assetDivision: selectedAsset ? selectedAsset.divisionCode : manualDivision ? Number(manualDivision) : undefined,
-        division: selectedAsset ? selectedAsset.divisionCode : manualDivision ? Number(manualDivision) : undefined,
-        jobNumber: manualJobNumber || undefined,
-        payTypeKey: newEntryDraft.payTypeKey,
-        clockIn,
-        clockOut,
-        hours,
-        workDate: dayKey,
-        notes: applyNoLunchMarker(undefined, dayAlreadyNoLunch),
-      });
+    if (!newEntryDraft) return;
+    if (await saveNewEntry({ draft: newEntryDraft, day: selectedDate })) {
       handleCancelAddEntry();
-      setOpenEmployeeKeys((currentKeys: string[]) =>
-        currentKeys.includes(employee.id) ? currentKeys : [...currentKeys, employee.id],
-      );
-      toast.success(`Time entry added for ${employee.employeeName}.`);
-    } catch (error: unknown) {
-      toast.error(error instanceof Error ? error.message : 'Unable to add time entry.');
+      openEmployee(newEntryDraft.employeeId);
     }
   };
 
   const handleSaveEdit = async (entry: ShopTimeEntry) => {
-    if (!editValues) {
-      return;
-    }
-
-    const selectedAsset = editValues.assetId ? editValues.assetRecord ?? assets.find((asset: EquipmentAsset) => asset.id === editValues.assetId) : undefined;
-    const manualDivision = editValues.division.trim();
-    const manualJobNumber = editValues.jobNumber.trim();
-
-    if (!editValues.clockInTime || !entry.clockIn) {
-      toast.error('Clock-in time is required.');
-      return;
-    }
-
-    const clockIn = mergeDateAndTime(entry.clockIn, editValues.clockInTime);
-    const clockOut = editValues.clockOutTime ? mergeDateAndTime(entry.clockIn, editValues.clockOutTime) : undefined;
-    const label = selectedAsset ? getAssetDisplayName(selectedAsset) : manualJobNumber || (manualDivision ? `Division ${manualDivision}` : getEntryAssetName(entry, assets) || 'Time entry');
-    const editedNotes = applyNoLunchMarker(editValues.notes.trim() || undefined, notesHaveNoLunch(entry.notes));
-    const updatedEntry = { ...entry, clockIn, clockOut };
-    const dayEntries = selectedDayEntries
-      .filter((row: ShopTimeEntry) => getEntryEmployeeKey(row) === getEntryEmployeeKey(entry))
-      .map((row: ShopTimeEntry) => (row.id === entry.id ? updatedEntry : row));
-
-    try {
-      await updateTimeEntry.mutateAsync({
-        id: entry.id,
-        changedFields: {
-          timeEntry: `${getEntryEmployeeName(entry, employees)} - ${label}`,
-          asset: selectedAsset ? { id: selectedAsset.id, asset: getAssetDisplayName(selectedAsset) } : entry.asset,
-          assetDivision: selectedAsset ? selectedAsset.divisionCode : manualDivision ? Number(manualDivision) : entry.assetDivision,
-          notes: editedNotes || undefined,
-          clockIn,
-          clockOut,
-          division: !selectedAsset && manualDivision ? Number(manualDivision) : undefined,
-          jobNumber: manualJobNumber || undefined,
-          payTypeKey: isPtoEntry(entry) ? entry.payTypeKey : editValues.payTypeKey,
-          hours: clockOut ? getEntryPaidMinutes(dayEntries, updatedEntry) / 60 : undefined,
-          pTOTimeKey: isPtoEntry(entry) && (getPtoHours(entry) === 4 || getPtoHours(entry) === 8) ? PTO_TIME_KEY_BY_HOURS[getPtoHours(entry) as 4 | 8] : entry.pTOTimeKey,
-          workDate: format(new Date(clockIn), 'yyyy-MM-dd'),
-        },
-      });
+    if (!editValues) return;
+    if (await saveEdit({ entry, editValues, dayEntries: selectedDayEntries })) {
       handleCancelEdit();
-      toast.success('Timecard row updated.');
-    } catch (error: unknown) {
-      toast.error(error instanceof Error ? error.message : 'Unable to update timecard row.');
     }
   };
 
   const handleDeleteEntry = async (entry: ShopTimeEntry) => {
-    try {
-      await deleteTimeEntry.mutateAsync(entry.id);
-      if (editingEntryId === entry.id) {
-        handleCancelEdit();
-      }
-      toast.success('Timecard row deleted.');
-    } catch (error: unknown) {
-      toast.error(error instanceof Error ? error.message : 'Unable to delete timecard row.');
+    if ((await deleteEntry(entry)) && editingEntryId === entry.id) {
+      handleCancelEdit();
     }
   };
 
-  const handleReloadTables = async () => {
-    try {
-      await Promise.all([refetchAssets(), refetchEntries()]);
-      toast.success('Equipment assets and shop time entries reloaded.');
-    } catch (error: unknown) {
-      toast.error(error instanceof Error ? error.message : 'Unable to reload table data.');
-    }
-  };
-
-  const handleNoLunchChange = async (summary: EmployeeDailySummary, checked: boolean) => {
-    const laborEntries = summary.entries.filter((entry: ShopTimeEntry) => !isPtoEntry(entry));
-    if (laborEntries.length === 0) {
-      toast.info('Clock time for this employee first, then lunch can be overridden.');
-      return;
-    }
-
-    const entryIds = new Set(laborEntries.map((entry: ShopTimeEntry) => entry.id));
-    const previousEntries = queryClient.getQueryData<ShopTimeEntry[]>(['shopTimeEntry-list']);
-
-    // Flip the checkbox immediately from cached notes, then persist.
-    queryClient.setQueryData<ShopTimeEntry[]>(['shopTimeEntry-list'], (current) =>
-      (current ?? []).map((entry: ShopTimeEntry) =>
-        entryIds.has(entry.id)
-          ? { ...entry, notes: applyNoLunchMarker(entry.notes, checked) }
-          : entry,
-      ),
-    );
-
-    setLunchUpdatingKey(summary.employeeKey);
-    try {
-      for (const entry of laborEntries) {
-        const nextNotes = applyNoLunchMarker(entry.notes, checked);
-        await apiFetch<ShopTimeEntry>(`/api/time-entries/${entry.id}`, {
-          method: 'PATCH',
-          body: JSON.stringify({ notes: nextNotes }),
-        });
-      }
-      await queryClient.invalidateQueries({ queryKey: ['shopTimeEntry-list'] });
-      toast.success(checked ? `No lunch saved for ${summary.employeeName}.` : `Lunch deduction restored for ${summary.employeeName}.`);
-    } catch (error: unknown) {
-      if (previousEntries) {
-        queryClient.setQueryData(['shopTimeEntry-list'], previousEntries);
-      } else {
-        await queryClient.invalidateQueries({ queryKey: ['shopTimeEntry-list'] });
-      }
-      toast.error(error instanceof Error ? error.message : 'Unable to update lunch setting.');
-    } finally {
-      setLunchUpdatingKey('');
-    }
-  };
-
-  const handleOnCallChange = async (summary: EmployeeDailySummary, checked: boolean) => {
-    const laborEntries = summary.entries.filter((entry: ShopTimeEntry) => !isPtoEntry(entry));
-    if (laborEntries.length === 0) {
-      toast.info('Clock time for this employee first, then on-call can be toggled.');
-      return;
-    }
-
-    const entryIds = new Set(laborEntries.map((entry: ShopTimeEntry) => entry.id));
-    const previousEntries = queryClient.getQueryData<ShopTimeEntry[]>(['shopTimeEntry-list']);
-
-    queryClient.setQueryData<ShopTimeEntry[]>(['shopTimeEntry-list'], (current) =>
-      (current ?? []).map((entry: ShopTimeEntry) =>
-        entryIds.has(entry.id) ? { ...entry, onCall: checked } : entry,
-      ),
-    );
-
-    setOnCallUpdatingKey(summary.employeeKey);
-    try {
-      for (const entry of laborEntries) {
-        await apiFetch<ShopTimeEntry>(`/api/time-entries/${entry.id}`, {
-          method: 'PATCH',
-          body: JSON.stringify({ onCall: checked }),
-        });
-      }
-      await queryClient.invalidateQueries({ queryKey: ['shopTimeEntry-list'] });
-      toast.success(checked ? `On-call saved for ${summary.employeeName}.` : `On-call removed for ${summary.employeeName}.`);
-    } catch (error: unknown) {
-      if (previousEntries) {
-        queryClient.setQueryData(['shopTimeEntry-list'], previousEntries);
-      } else {
-        await queryClient.invalidateQueries({ queryKey: ['shopTimeEntry-list'] });
-      }
-      toast.error(error instanceof Error ? error.message : 'Unable to update on-call setting.');
-    } finally {
-      setOnCallUpdatingKey('');
-    }
-  };
+  const handleNoLunchChange = (summary: EmployeeDailySummary, checked: boolean) =>
+    setDayNoLunch({
+      entries: summary.entries,
+      checked,
+      updatingKey: summary.employeeKey,
+      employeeName: summary.employeeName,
+    });
 
   const handleRangeClearEdits = () => {
     setEditingEntryId('');
@@ -648,279 +378,49 @@ export default function ManagerDashboardPage() {
 
   const handleRangeSaveEdit = async (entry: ShopTimeEntry, dayEntries: ShopTimeEntry[]) => {
     if (!editValues) return;
-
-    const selectedAsset = editValues.assetId ? editValues.assetRecord ?? assets.find((asset: EquipmentAsset) => asset.id === editValues.assetId) : undefined;
-    const manualDivision = editValues.division.trim();
-    const manualJobNumber = editValues.jobNumber.trim();
-
-    if (!editValues.clockInTime || !entry.clockIn) {
-      toast.error('Clock-in time is required.');
-      return;
-    }
-
-    const clockIn = mergeDateAndTime(entry.clockIn, editValues.clockInTime);
-    const clockOut = editValues.clockOutTime ? mergeDateAndTime(entry.clockIn, editValues.clockOutTime) : undefined;
-    const label = selectedAsset ? getAssetDisplayName(selectedAsset) : manualJobNumber || (manualDivision ? `Division ${manualDivision}` : getEntryAssetName(entry, assets) || 'Time entry');
-    const editedNotes = applyNoLunchMarker(editValues.notes.trim() || undefined, notesHaveNoLunch(entry.notes));
-    const updatedEntry = { ...entry, clockIn, clockOut };
-    const employeeDayEntries = dayEntries
-      .filter((row: ShopTimeEntry) => getEntryEmployeeKey(row) === getEntryEmployeeKey(entry))
-      .map((row: ShopTimeEntry) => (row.id === entry.id ? updatedEntry : row));
-
-    try {
-      await updateTimeEntry.mutateAsync({
-        id: entry.id,
-        changedFields: {
-          timeEntry: `${getEntryEmployeeName(entry, employees)} - ${label}`,
-          asset: selectedAsset ? { id: selectedAsset.id, asset: getAssetDisplayName(selectedAsset) } : entry.asset,
-          assetDivision: selectedAsset ? selectedAsset.divisionCode : manualDivision ? Number(manualDivision) : entry.assetDivision,
-          notes: editedNotes || undefined,
-          clockIn,
-          clockOut,
-          division: !selectedAsset && manualDivision ? Number(manualDivision) : undefined,
-          jobNumber: manualJobNumber || undefined,
-          payTypeKey: isPtoEntry(entry) ? entry.payTypeKey : editValues.payTypeKey,
-          hours: clockOut ? getEntryPaidMinutes(employeeDayEntries, updatedEntry) / 60 : undefined,
-          pTOTimeKey: isPtoEntry(entry) && (getPtoHours(entry) === 4 || getPtoHours(entry) === 8) ? PTO_TIME_KEY_BY_HOURS[getPtoHours(entry) as 4 | 8] : entry.pTOTimeKey,
-          workDate: format(new Date(clockIn), 'yyyy-MM-dd'),
-        },
-      });
+    if (await saveEdit({ entry, editValues, dayEntries })) {
       handleCancelEdit();
-      toast.success('Timecard row updated.');
-    } catch (error: unknown) {
-      toast.error(error instanceof Error ? error.message : 'Unable to update timecard row.');
     }
   };
 
   const handleRangeSaveNewEntry = async (day: Date) => {
     if (!newEntryDraft) return;
-
-    const employee = employees.find((row: AppShopEmployee) => row.id === newEntryDraft.employeeId);
-    if (!employee) {
-      toast.error('Choose an employee for this time entry.');
-      return;
-    }
-    if (!newEntryDraft.clockInTime) {
-      toast.error('Clock-in time is required.');
-      return;
-    }
-    if (!newEntryDraft.clockOutTime) {
-      toast.error('Clock-out time is required for manager-added entries.');
-      return;
-    }
-
-    const clockIn = combineSelectedDateAndTime(day, newEntryDraft.clockInTime);
-    const clockOut = combineSelectedDateAndTime(day, newEntryDraft.clockOutTime);
-    if (new Date(clockOut).getTime() <= new Date(clockIn).getTime()) {
-      toast.error('Clock-out must be after clock-in.');
-      return;
-    }
-
-    const selectedAsset = newEntryDraft.assetId
-      ? newEntryDraft.assetRecord ?? assets.find((asset: EquipmentAsset) => asset.id === newEntryDraft.assetId)
-      : undefined;
-    const manualDivision = newEntryDraft.division.trim();
-    const manualJobNumber = newEntryDraft.jobNumber.trim();
-    if (manualDivision && !Number.isFinite(Number(manualDivision))) {
-      toast.error('Division must be a number.');
-      return;
-    }
-    const label = selectedAsset
-      ? getAssetDisplayName(selectedAsset)
-      : manualJobNumber || (manualDivision ? `Division ${manualDivision}` : 'Time entry');
-    const dayKey = format(day, 'yyyy-MM-dd');
-    const existingDayEntries = timeEntries.filter(
-      (entry: ShopTimeEntry) => entry.employee?.id === employee.id && entry.clockIn?.startsWith(dayKey),
-    );
-    const dayAlreadyNoLunch = getDayPayMinutes(existingDayEntries).noLunch;
-    const provisionalId = `new-${Date.now()}`;
-    const provisionalEntry: ShopTimeEntry = {
-      id: provisionalId,
-      timeEntry: `${employee.employeeName} - ${label}`,
-      employee: { id: employee.id, autoNumber: employee.autoNumber },
-      asset: selectedAsset ? { id: selectedAsset.id, asset: getAssetDisplayName(selectedAsset) } : undefined,
-      assetDivision: selectedAsset ? selectedAsset.divisionCode : manualDivision ? Number(manualDivision) : undefined,
-      clockIn,
-      clockOut,
-      jobNumber: manualJobNumber || undefined,
-      notes: applyNoLunchMarker(undefined, dayAlreadyNoLunch),
-      workDate: dayKey,
-    };
-    const dayEntriesForPay = [...existingDayEntries, provisionalEntry];
-    const hours = getEntryPaidMinutes(dayEntriesForPay, provisionalEntry) / 60;
-
-    try {
-      await createTimeEntry.mutateAsync({
-        timeEntry: provisionalEntry.timeEntry,
-        employee: { id: employee.id, autoNumber: employee.autoNumber },
-        asset: selectedAsset ? { id: selectedAsset.id, asset: getAssetDisplayName(selectedAsset) } : undefined,
-        assetDivision: selectedAsset ? selectedAsset.divisionCode : manualDivision ? Number(manualDivision) : undefined,
-        division: selectedAsset ? selectedAsset.divisionCode : manualDivision ? Number(manualDivision) : undefined,
-        jobNumber: manualJobNumber || undefined,
-        payTypeKey: newEntryDraft.payTypeKey,
-        clockIn,
-        clockOut,
-        hours,
-        workDate: dayKey,
-        notes: applyNoLunchMarker(undefined, dayAlreadyNoLunch),
-      });
+    if (await saveNewEntry({ draft: newEntryDraft, day })) {
       handleRangeCancelAddEntry();
-      toast.success(`Time entry added for ${employee.employeeName}.`);
-    } catch (error: unknown) {
-      toast.error(error instanceof Error ? error.message : 'Unable to add time entry.');
     }
   };
 
   const handleRangeSavePto = async (day: Date) => {
     if (!ptoDraft) return;
-    const employee = employees.find((row: AppShopEmployee) => row.id === ptoDraft.employeeId);
-    if (!employee) {
-      toast.error('Choose an employee for this PTO.');
-      return;
-    }
-    if (!ptoDraft.type) {
-      toast.error('Choose a PTO type.');
-      return;
-    }
-
-    const clockIn = getPtoClockInIso(day);
-    const clockOut = addHours(new Date(clockIn), ptoDraft.hours).toISOString();
-    const dayKey = format(day, 'yyyy-MM-dd');
-    const typeLabel = ShopTimeEntryPTOTypeKeyToLabel[ptoDraft.type];
-
-    try {
-      await createTimeEntry.mutateAsync({
-        timeEntry: `${employee.employeeName} - PTO`,
-        pTOTimeKey: PTO_TIME_KEY_BY_HOURS[ptoDraft.hours],
-        pTOTypeKey: ptoDraft.type,
-        employee: { id: employee.id, autoNumber: employee.autoNumber },
-        jobNumber: 'PTO',
-        clockIn,
-        clockOut,
-        hours: ptoDraft.hours,
-        workDate: dayKey,
-        ptoApproval: 'Approved' as ShopTimeEntryPTOApprovalKey,
-        notes: `${ptoDraft.hours} hours ${typeLabel} PTO submitted for ${format(day, 'MMM d, yyyy')}.`,
-      });
+    if (await savePto({ draft: ptoDraft, day })) {
       handleRangeCancelPto();
-      toast.success(`${ptoDraft.hours} hours ${typeLabel} PTO added for ${employee.employeeName} on ${format(day, 'MMM d')}.`);
-    } catch (error: unknown) {
-      toast.error(error instanceof Error ? error.message : 'Unable to add PTO.');
     }
   };
 
-  const handleRangeNoLunchChange = async (dayEntries: ShopTimeEntry[], dayKey: string, checked: boolean) => {
-    const laborEntries = dayEntries.filter((entry: ShopTimeEntry) => !isPtoEntry(entry));
-    if (laborEntries.length === 0) {
-      toast.info('Clock time for this employee first, then lunch can be overridden.');
-      return;
-    }
-
-    const entryIds = new Set(laborEntries.map((entry: ShopTimeEntry) => entry.id));
-    const previousEntries = queryClient.getQueryData<ShopTimeEntry[]>(['shopTimeEntry-list']);
-
-    queryClient.setQueryData<ShopTimeEntry[]>(['shopTimeEntry-list'], (current) =>
-      (current ?? []).map((entry: ShopTimeEntry) =>
-        entryIds.has(entry.id) ? { ...entry, notes: applyNoLunchMarker(entry.notes, checked) } : entry,
-      ),
-    );
-
-    const updatingKey = `${rangeViewEmployeeId}-${dayKey}`;
-    setLunchUpdatingKey(updatingKey);
-    try {
-      for (const entry of laborEntries) {
-        const nextNotes = applyNoLunchMarker(entry.notes, checked);
-        await apiFetch<ShopTimeEntry>(`/api/time-entries/${entry.id}`, {
-          method: 'PATCH',
-          body: JSON.stringify({ notes: nextNotes }),
-        });
-      }
-      await queryClient.invalidateQueries({ queryKey: ['shopTimeEntry-list'] });
-      toast.success(checked ? `No lunch saved for ${rangeViewEmployee?.employeeName ?? 'employee'}.` : `Lunch deduction restored for ${rangeViewEmployee?.employeeName ?? 'employee'}.`);
-    } catch (error: unknown) {
-      if (previousEntries) {
-        queryClient.setQueryData(['shopTimeEntry-list'], previousEntries);
-      } else {
-        await queryClient.invalidateQueries({ queryKey: ['shopTimeEntry-list'] });
-      }
-      toast.error(error instanceof Error ? error.message : 'Unable to update lunch setting.');
-    } finally {
-      setLunchUpdatingKey('');
-    }
-  };
-
-  const handleRangeOnCallChange = async (dayEntries: ShopTimeEntry[], dayKey: string, checked: boolean) => {
-    const laborEntries = dayEntries.filter((entry: ShopTimeEntry) => !isPtoEntry(entry));
-    if (laborEntries.length === 0) {
-      toast.info('Clock time for this employee first, then on-call can be toggled.');
-      return;
-    }
-
-    const entryIds = new Set(laborEntries.map((entry: ShopTimeEntry) => entry.id));
-    const previousEntries = queryClient.getQueryData<ShopTimeEntry[]>(['shopTimeEntry-list']);
-
-    queryClient.setQueryData<ShopTimeEntry[]>(['shopTimeEntry-list'], (current) =>
-      (current ?? []).map((entry: ShopTimeEntry) =>
-        entryIds.has(entry.id) ? { ...entry, onCall: checked } : entry,
-      ),
-    );
-
-    const updatingKey = `${rangeViewEmployeeId}-${dayKey}`;
-    setOnCallUpdatingKey(updatingKey);
-    try {
-      for (const entry of laborEntries) {
-        await apiFetch<ShopTimeEntry>(`/api/time-entries/${entry.id}`, {
-          method: 'PATCH',
-          body: JSON.stringify({ onCall: checked }),
-        });
-      }
-      await queryClient.invalidateQueries({ queryKey: ['shopTimeEntry-list'] });
-      toast.success(checked ? `On-call saved for ${rangeViewEmployee?.employeeName ?? 'employee'}.` : `On-call removed for ${rangeViewEmployee?.employeeName ?? 'employee'}.`);
-    } catch (error: unknown) {
-      if (previousEntries) {
-        queryClient.setQueryData(['shopTimeEntry-list'], previousEntries);
-      } else {
-        await queryClient.invalidateQueries({ queryKey: ['shopTimeEntry-list'] });
-      }
-      toast.error(error instanceof Error ? error.message : 'Unable to update on-call setting.');
-    } finally {
-      setOnCallUpdatingKey('');
-    }
-  };
+  const handleRangeNoLunchChange = (dayEntries: ShopTimeEntry[], dayKey: string, checked: boolean) =>
+    setDayNoLunch({
+      entries: dayEntries,
+      checked,
+      updatingKey: `${rangeViewEmployeeId}-${dayKey}`,
+      employeeName: rangeViewEmployee?.employeeName ?? 'employee',
+    });
 
   if (userLoading || !user) {
     return (
-      <main className="mx-auto flex w-full max-w-3xl flex-1 flex-col gap-6 p-4 sm:p-6 lg:p-8">
-        <Card className="border-l-4 border-l-primary bg-card text-card-foreground shadow-sm">
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2 text-2xl"><LockKeyhole className="h-6 w-6" /> Checking manager access</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <p className="text-sm text-muted-foreground">Loading your Microsoft 365 identity before opening the manager dashboard.</p>
-          </CardContent>
-        </Card>
-      </main>
+      <AccessCheckingCard
+        title="Checking manager access"
+        message="Loading your Microsoft 365 identity before opening the manager dashboard."
+      />
     );
   }
 
   if (!isAllowedManager) {
     return (
-      <main className="mx-auto flex w-full max-w-3xl flex-1 flex-col gap-6 p-4 sm:p-6 lg:p-8">
-        <Card className="border-l-4 border-l-destructive bg-card text-card-foreground shadow-sm">
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2 text-2xl"><LockKeyhole className="h-6 w-6" /> Manager access required</CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-4">
-            <p className="text-sm text-muted-foreground">Your Microsoft 365 account is not currently on the manager allowlist for this dashboard.</p>
-            <div className="rounded-lg bg-muted p-4 text-muted-foreground">
-              <p className="text-sm">Signed in as</p>
-              <p className="mt-1 font-semibold text-foreground">{user.name || 'Unknown user'}</p>
-              <p className="text-sm">{user.email}</p>
-            </div>
-            <p className="text-sm text-muted-foreground">Ask the app owner to add this email to the <span className="font-medium text-foreground">MANAGER_EMAILS</span> Function App setting.</p>
-          </CardContent>
-        </Card>
-      </main>
+      <ManagerAccessDeniedCard
+        user={user}
+        message="Your Microsoft 365 account is not currently on the manager allowlist for this dashboard."
+        showAllowlistHint
+      />
     );
   }
 
@@ -946,23 +446,14 @@ export default function ManagerDashboardPage() {
           </div>
         </CardHeader>
         <CardContent className="grid gap-4 sm:grid-cols-4">
-          <div className="rounded-lg bg-muted p-4 text-muted-foreground">
-            <p className="text-sm">Employees clocked in</p>
-            <p className="mt-2 text-3xl font-semibold text-foreground">{employeeSummaries.length}</p>
-          </div>
-          <div className="rounded-lg bg-muted p-4 text-muted-foreground">
-            <p className="text-sm">Currently active</p>
-            <p className="mt-2 text-3xl font-semibold text-foreground">{activeEmployeeCount}</p>
-          </div>
-          <div className="rounded-lg bg-muted p-4 text-muted-foreground">
-            <p className="text-sm">Total shop time</p>
-            <p className="mt-2 text-3xl font-semibold text-foreground">{totalHours}</p>
-          </div>
-          <div className="rounded-lg bg-muted p-4 text-muted-foreground">
-            <p className="text-sm">Export week</p>
-            <p className="mt-2 text-3xl font-semibold text-foreground">{formatDuration(weeklyPayrollMinutes)}</p>
-            <p className="mt-1 text-sm">{formatWeekRangeLabel(exportWeekDate)}</p>
-          </div>
+          <StatTile label="Employees clocked in" value={employeeSummaries.length} />
+          <StatTile label="Currently active" value={activeEmployeeCount} />
+          <StatTile label="Total shop time" value={totalHours} />
+          <StatTile
+            label="Export week"
+            value={formatDuration(weeklyPayrollMinutes)}
+            caption={formatWeekRangeLabel(exportWeekDate)}
+          />
         </CardContent>
       </Card>
 
@@ -1086,7 +577,7 @@ export default function ManagerDashboardPage() {
                 </div>
               </div>
               <div className="flex flex-wrap gap-2">
-                <Button type="button" onClick={() => void handleSavePto()} disabled={createTimeEntry.isPending}>Save PTO</Button>
+                <Button type="button" onClick={() => void handleSavePto()} disabled={isCreating}>Save PTO</Button>
                 <Button type="button" variant="outline" onClick={handleCancelPto}>Cancel</Button>
               </div>
             </div>
@@ -1187,7 +678,7 @@ export default function ManagerDashboardPage() {
                 </div>
               </div>
               <div className="flex flex-wrap gap-2">
-                <Button type="button" onClick={() => void handleSaveNewEntry()} disabled={createTimeEntry.isPending}>Save time entry</Button>
+                <Button type="button" onClick={() => void handleSaveNewEntry()} disabled={isCreating}>Save time entry</Button>
                 <Button type="button" variant="outline" onClick={handleCancelAddEntry}>Cancel</Button>
               </div>
             </div>
@@ -1289,14 +780,14 @@ export default function ManagerDashboardPage() {
                                   <Label>Duration</Label>
                                   <p className="font-semibold">{formatDuration(getRawDurationMinutes(entry))}</p>
                                 </div>
-                                {(() => { const ciDist = entryDistanceMiles(entry.clockInLat, entry.clockInLon); const coDist = entryDistanceMiles(entry.clockOutLat, entry.clockOutLon); if (ciDist == null && coDist == null) return null; return <div className="space-y-2"><Label>Distance</Label><div className="flex flex-wrap gap-1">{ciDist != null ? <Badge variant={ciDist > 1 ? 'destructive' : 'secondary'} className="text-xs">In: {ciDist.toFixed(1)} mi</Badge> : null}{coDist != null ? <Badge variant={coDist > 1 ? 'destructive' : 'secondary'} className="text-xs">Out: {coDist.toFixed(1)} mi</Badge> : null}</div></div>; })()}
+                                <EntryDistanceField entry={entry} />
                               </div>
 
                               <div className="flex flex-wrap gap-2 lg:justify-end">
                                 <Badge variant={entry.clockOut ? 'outline' : 'default'}>{entry.clockOut ? 'Complete' : 'Active'}</Badge>
                                 {isEditing ? (
                                   <>
-                                    <Button type="button" size="icon" aria-label="Save row" onClick={() => void handleSaveEdit(entry)} disabled={updateTimeEntry.isPending}><Check className="h-4 w-4" /></Button>
+                                    <Button type="button" size="icon" aria-label="Save row" onClick={() => void handleSaveEdit(entry)} disabled={isUpdating}><Check className="h-4 w-4" /></Button>
                                     <Button type="button" size="icon" variant="outline" aria-label="Cancel row edit" onClick={handleCancelEdit}><X className="h-4 w-4" /></Button>
                                   </>
                                 ) : (
@@ -1304,7 +795,7 @@ export default function ManagerDashboardPage() {
                                 )}
                                 <AlertDialog>
                                   <AlertDialogTrigger asChild>
-                                    <Button type="button" variant="destructive" size="sm" disabled={deleteTimeEntry.isPending}>
+                                    <Button type="button" variant="destructive" size="sm" disabled={isDeleting}>
                                       <Trash2 className="mr-2 h-4 w-4" /> Delete
                                     </Button>
                                   </AlertDialogTrigger>
@@ -1386,7 +877,7 @@ export default function ManagerDashboardPage() {
                             </div>
                           </div>
                           <div className="flex flex-wrap gap-2">
-                            <Button type="button" onClick={() => void handleSaveNewEntry()} disabled={createTimeEntry.isPending}>Save time entry</Button>
+                            <Button type="button" onClick={() => void handleSaveNewEntry()} disabled={isCreating}>Save time entry</Button>
                             <Button type="button" variant="outline" onClick={handleCancelAddEntry}>Cancel</Button>
                           </div>
                         </div>
@@ -1519,10 +1010,10 @@ export default function ManagerDashboardPage() {
                                     <Label>Duration</Label>
                                     <p className="font-semibold text-sm">{formatDuration(getRawDurationMinutes(entry))}</p>
                                   </div>
-                                  {(() => { const ciDist = entryDistanceMiles(entry.clockInLat, entry.clockInLon); const coDist = entryDistanceMiles(entry.clockOutLat, entry.clockOutLon); if (ciDist == null && coDist == null) return null; return <div className="space-y-2"><Label>Distance</Label><div className="flex flex-wrap gap-1">{ciDist != null ? <Badge variant={ciDist > 1 ? 'destructive' : 'secondary'} className="text-xs">In: {ciDist.toFixed(1)} mi</Badge> : null}{coDist != null ? <Badge variant={coDist > 1 ? 'destructive' : 'secondary'} className="text-xs">Out: {coDist.toFixed(1)} mi</Badge> : null}</div></div>; })()}
+                                  <EntryDistanceField entry={entry} />
                                 </div>
                                 <div className="flex gap-2">
-                                  <Button type="button" size="sm" onClick={() => void handleRangeSaveEdit(entry, dayEntries)} disabled={updateTimeEntry.isPending}><Check className="mr-1 h-3 w-3" /> Save</Button>
+                                  <Button type="button" size="sm" onClick={() => void handleRangeSaveEdit(entry, dayEntries)} disabled={isUpdating}><Check className="mr-1 h-3 w-3" /> Save</Button>
                                   <Button type="button" size="sm" variant="outline" onClick={handleCancelEdit}><X className="mr-1 h-3 w-3" /> Cancel</Button>
                                 </div>
                               </div>
@@ -1530,7 +1021,7 @@ export default function ManagerDashboardPage() {
                               <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
                                 <div>
                                   <div className="flex flex-wrap items-center gap-2">
-                                    <p className="font-medium text-sm">{getEntryAssetName(entry, assets) || 'Time entry'}</p>
+                                    <p className="font-medium text-sm">{getEntryAssetName(entry, assets)}</p>
                                     {isPtoEntry(entry) && entry.pTOTypeKey ? <Badge variant="outline">{ShopTimeEntryPTOTypeKeyToLabel[entry.pTOTypeKey]}</Badge> : null}
                                     {!isPtoEntry(entry) ? <Badge variant="outline">{ShopTimeEntryPayTypeKeyToLabel[entry.payTypeKey ?? DEFAULT_PAY_TYPE]}</Badge> : null}
                                   </div>
@@ -1542,13 +1033,13 @@ export default function ManagerDashboardPage() {
                                   </p>
                                 </div>
                                 <div className="flex items-center gap-1.5">
-                                  {(() => { const ciDist = entryDistanceMiles(entry.clockInLat, entry.clockInLon); const coDist = entryDistanceMiles(entry.clockOutLat, entry.clockOutLon); return <>{ciDist != null ? <Badge variant={ciDist > 1 ? 'destructive' : 'secondary'} className="text-xs">In: {ciDist.toFixed(1)} mi</Badge> : null}{coDist != null ? <Badge variant={coDist > 1 ? 'destructive' : 'secondary'} className="text-xs">Out: {coDist.toFixed(1)} mi</Badge> : null}</>; })()}
+                                  <EntryDistanceBadges entry={entry} />
                                   {entry.onCall ? <Badge variant="secondary"><Phone className="mr-1 h-3 w-3" />On Call</Badge> : null}
                                   <Badge variant={entry.clockOut ? 'outline' : 'default'}>{entry.clockOut ? 'Complete' : 'Active'}</Badge>
                                   <Button type="button" variant="outline" size="sm" onClick={() => handleRangeStartEdit(entry)}><Pencil className="mr-1 h-3 w-3" /> Edit</Button>
                                   <AlertDialog>
                                     <AlertDialogTrigger asChild>
-                                      <Button type="button" variant="destructive" size="sm" disabled={deleteTimeEntry.isPending}><Trash2 className="mr-1 h-3 w-3" /> Delete</Button>
+                                      <Button type="button" variant="destructive" size="sm" disabled={isDeleting}><Trash2 className="mr-1 h-3 w-3" /> Delete</Button>
                                     </AlertDialogTrigger>
                                     <AlertDialogContent>
                                       <AlertDialogHeader>
@@ -1620,7 +1111,7 @@ export default function ManagerDashboardPage() {
                             </div>
                           </div>
                           <div className="flex gap-2">
-                            <Button type="button" size="sm" onClick={() => void handleRangeSaveNewEntry(day)} disabled={createTimeEntry.isPending}>Save time entry</Button>
+                            <Button type="button" size="sm" onClick={() => void handleRangeSaveNewEntry(day)} disabled={isCreating}>Save time entry</Button>
                             <Button type="button" size="sm" variant="outline" onClick={handleRangeCancelAddEntry}>Cancel</Button>
                           </div>
                         </div>
@@ -1648,7 +1139,7 @@ export default function ManagerDashboardPage() {
                             </div>
                           </div>
                           <div className="flex gap-2">
-                            <Button type="button" size="sm" onClick={() => void handleRangeSavePto(day)} disabled={createTimeEntry.isPending}>Save PTO</Button>
+                            <Button type="button" size="sm" onClick={() => void handleRangeSavePto(day)} disabled={isCreating}>Save PTO</Button>
                             <Button type="button" size="sm" variant="outline" onClick={handleRangeCancelPto}>Cancel</Button>
                           </div>
                         </div>

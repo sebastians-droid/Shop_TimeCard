@@ -15,7 +15,13 @@ import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover
 import { useAllEquipmentAssets, useShopEmployeeList, useShopTimeEntryList } from '@/hooks/use-shop-data';
 import { mapShopEmployees, type AppShopEmployee } from '@/lib/shop-employees';
 import { formatDuration, getDayPayMinutes, getEntryPaidMinutes, getPtoHours, getRawDurationMinutes, isPtoEntry } from '@/lib/time-rules';
-import { getTimeEntryAssetName, getEntryDivision, getEntryJobNumber } from '@/lib/entry-helpers';
+import {
+  EMPLOYEE_CODE_NOT_FOUND,
+  findEmployeeByCode,
+  getEntryAssetName,
+  getEntryDivision,
+  getEntryJobNumber,
+} from '@/lib/entry-helpers';
 import { divisionLabel } from '@/lib/reference-data';
 import {
   ShopTimeEntryPayTypeKeyToLabel,
@@ -62,10 +68,10 @@ export default function MechanicLogPage() {
 
   const handleEmployeeCodeSubmit = (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
-    const matched = employees.find((e: AppShopEmployee) => e.employeeCode === Number(employeeCode.trim()));
+    const matched = findEmployeeByCode(employees, employeeCode);
     if (!matched) {
       setSelectedEmployeeId('');
-      toast.error('Employee code not found. Enter your 4 digit employee number.');
+      toast.error(EMPLOYEE_CODE_NOT_FOUND);
       return;
     }
     setSelectedEmployeeId(matched.id);
@@ -133,7 +139,7 @@ export default function MechanicLogPage() {
     const map = new Map<string, { name: string; total: number; rt: number; ot: number }>();
     for (const d of dayData) {
       for (const entry of d.entries) {
-        const name = getTimeEntryAssetName(entry, assets);
+        const name = getEntryAssetName(entry, assets);
         const hours = getEntryPaidMinutes(d.entries, entry) / 60;
         const existing = map.get(name) ?? { name, total: 0, rt: 0, ot: 0 };
         existing.total += hours;
@@ -145,7 +151,7 @@ export default function MechanicLogPage() {
       const dayTotal = d.totalHours;
       if (dayTotal <= 0) continue;
       for (const entry of d.entries) {
-        const name = getTimeEntryAssetName(entry, assets);
+        const name = getEntryAssetName(entry, assets);
         const hours = getEntryPaidMinutes(d.entries, entry) / 60;
         const fraction = hours / dayTotal;
         const existing = map.get(name);
@@ -346,7 +352,7 @@ export default function MechanicLogPage() {
                         <CardContent className="space-y-2 border-t border-border pt-4">
                           {d.entries.map((entry: ShopTimeEntry) => {
                             const paidMinutes = getRawDurationMinutes(entry);
-                            const assetName = getTimeEntryAssetName(entry, assets);
+                            const assetName = getEntryAssetName(entry, assets);
                             const jobNum = getEntryJobNumber(entry);
                             const effectiveDivision = getEntryDivision(entry, assets);
                             const div = effectiveDivision ? divisionLabel(Number(effectiveDivision)) : '';

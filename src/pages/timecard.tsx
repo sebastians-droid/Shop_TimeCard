@@ -28,11 +28,20 @@ import {
   notesHaveNoLunch,
   stripNoLunchMarker,
 } from '@/lib/time-rules';
-import { getAssetDisplayName, getTimeEntryAssetName, getEntryDivision, getEntryJobNumber, PTO_TIME_KEY_BY_HOURS, getPtoClockInIso } from '@/lib/entry-helpers';
-import { ShopTimeEntryPTOTypeKeyToLabel, DEFAULT_PAY_TYPE, type ShopTimeEntry, type ShopTimeEntryPTOTypeKey } from '@/models/shop-time-entry';
+import {
+  EMPLOYEE_CODE_NOT_FOUND,
+  findEmployeeByCode,
+  getAssetDisplayName,
+  getEntryAssetName,
+  getEntryDivision,
+  getEntryJobNumber,
+  PTO_TIME_KEY_BY_HOURS,
+  getPtoClockInIso,
+  type PtoHours,
+} from '@/lib/entry-helpers';
+import { useReloadTables } from '@/hooks/use-reload-tables';
+import { ShopTimeEntryPTOTypeKeyToLabel, type ShopTimeEntry, type ShopTimeEntryPTOTypeKey } from '@/models/shop-time-entry';
 import { getCurrentPosition } from '@/lib/geolocation';
-
-type PtoHours = 4 | 8;
 type ClockInConfirmation = {
   employeeName: string;
   asset: string;
@@ -119,15 +128,14 @@ export default function TimecardPage() {
 
   const handleEmployeeCodeSubmit = (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
-    const matchedEmployee = employees.find((employee: AppShopEmployee) => employee.employeeCode === Number(employeeCode.trim()));
+    const matchedEmployee = findEmployeeByCode(employees, employeeCode);
+    resetEntryForm();
     if (!matchedEmployee) {
       setSelectedEmployeeId('');
-      resetEntryForm();
-      toast.error('Employee code not found. Enter your 4 digit employee number.');
+      toast.error(EMPLOYEE_CODE_NOT_FOUND);
       return;
     }
     setSelectedEmployeeId(matchedEmployee.id);
-    resetEntryForm();
     toast.success(`Verified ${matchedEmployee.employeeName}.`);
   };
 
@@ -151,14 +159,7 @@ export default function TimecardPage() {
     refreshReferenceData();
   };
 
-  const handleReloadTables = async () => {
-    try {
-      await Promise.all([refetchAssets(), refetchEntries()]);
-      toast.success('Equipment assets and shop time entries reloaded.');
-    } catch (error: unknown) {
-      toast.error(error instanceof Error ? error.message : 'Unable to reload table data.');
-    }
-  };
+  const handleReloadTables = useReloadTables(refetchAssets, refetchEntries);
 
   const handleClockIn = async () => {
     if (!selectedEmployee) {
@@ -309,7 +310,7 @@ export default function TimecardPage() {
       toast.error('Division must be a number.');
       return;
     }
-    const assetLabel = newAsset ? getAssetDisplayName(newAsset) : getTimeEntryAssetName(entry, assets);
+    const assetLabel = newAsset ? getAssetDisplayName(newAsset) : getEntryAssetName(entry, assets);
     const entryLabel = [assetLabel, manualJobNumber ? `Job ${manualJobNumber}` : ''].filter((value: string) => value).join(' · ') || (manualDivision ? `Division ${manualDivision}` : 'Time entry');
     const employeeName = selectedEmployee?.employeeName ?? entry.employee?.autoNumber ?? 'Employee';
     try {
@@ -389,7 +390,7 @@ export default function TimecardPage() {
             <CardContent className="space-y-3">
           {assetsFailed || entriesFailed ? <Card className="border-l-4 border-l-destructive bg-card text-card-foreground shadow-sm"><CardContent className="flex flex-col gap-3 p-4 sm:flex-row sm:items-center sm:justify-between"><div><p className="font-semibold">Timecard data is unavailable</p><p className="mt-1 text-sm text-muted-foreground">Check Dataverse access to Equipment Asset and Shop Time Entry, then retry.</p></div><Button type="button" variant="outline" onClick={() => { void refetchAssets(); void refetchEntries(); }}>Retry</Button></CardContent></Card> : null}
               {entriesLoading ? <p className="text-sm text-muted-foreground">Loading your timecard...</p> : null}
-              {!showAddAsset ? <Button type="button" size="lg" className="h-14 w-full justify-center text-base font-semibold shadow-sm" onClick={() => setShowAddAsset(true)}><Plus className="mr-2 h-5 w-5" /> Add asset time</Button> : <div className="grid gap-4 rounded-lg border border-dashed border-border bg-muted p-4 text-muted-foreground"><div className="flex items-center justify-between gap-3"><p className="font-medium text-foreground">Add asset time</p><Button type="button" size="icon" variant="ghost" aria-label="Cancel add asset" onClick={() => setShowAddAsset(false)}><X className="h-4 w-4" /></Button></div><div className="space-y-2"><Label>Equipment asset</Label><AssetPicker assets={assets} value={selectedAssetId} onChange={(asset: Pick<EquipmentAsset, 'id' | 'asset' | 'divisionCode'> | undefined) => { setSelectedAssetRecord(asset); setSelectedAssetId(asset?.id ?? ''); setDivision(asset?.divisionCode === undefined ? '' : String(asset.divisionCode)); }} currentAsset={selectedAssetRecord} /><p className="text-sm text-muted-foreground">Choose any equipment asset, or leave it blank and enter a division or job number below.</p></div><div className="space-y-2"><div className="flex items-center justify-between gap-2"><Label>Notes</Label><VoiceNoteButton value={notes} onChange={setNotes} phrases={voicePhrases} disabled={createTimeEntry.isPending || updateTimeEntry.isPending} /></div><Textarea className="bg-background" value={notes} onChange={(event: React.ChangeEvent<HTMLTextAreaElement>) => setNotes(event.target.value)} placeholder="Optional job notes or handoff details" /></div>{employeeActiveEntry ? <div className="rounded-lg border border-border bg-background p-3 text-muted-foreground"><p className="font-medium text-foreground">Current active asset: {getTimeEntryAssetName(employeeActiveEntry, assets)}</p><p className="text-sm">Starting another asset will clock out this row first.</p></div> : null}<div className="grid gap-4 sm:grid-cols-2"><div className="space-y-2"><Label htmlFor="division">Division (optional)</Label><Input id="division" className="bg-background" value={division} onChange={(event: React.ChangeEvent<HTMLInputElement>) => setDivision(event.target.value)} placeholder="Mapped from asset or enter division" /></div><div className="space-y-2"><Label htmlFor="job-number">Job Number (optional)</Label><Input id="job-number" className="bg-background" value={jobNumber} onChange={(event: React.ChangeEvent<HTMLInputElement>) => setJobNumber(event.target.value)} placeholder="Enter job number" /></div></div><Button className="h-12" type="button" onClick={handleClockIn} disabled={assetsLoading || createTimeEntry.isPending || updateTimeEntry.isPending}>Clock in</Button></div>}
+              {!showAddAsset ? <Button type="button" size="lg" className="h-14 w-full justify-center text-base font-semibold shadow-sm" onClick={() => setShowAddAsset(true)}><Plus className="mr-2 h-5 w-5" /> Add asset time</Button> : <div className="grid gap-4 rounded-lg border border-dashed border-border bg-muted p-4 text-muted-foreground"><div className="flex items-center justify-between gap-3"><p className="font-medium text-foreground">Add asset time</p><Button type="button" size="icon" variant="ghost" aria-label="Cancel add asset" onClick={() => setShowAddAsset(false)}><X className="h-4 w-4" /></Button></div><div className="space-y-2"><Label>Equipment asset</Label><AssetPicker assets={assets} value={selectedAssetId} onChange={(asset: Pick<EquipmentAsset, 'id' | 'asset' | 'divisionCode'> | undefined) => { setSelectedAssetRecord(asset); setSelectedAssetId(asset?.id ?? ''); setDivision(asset?.divisionCode === undefined ? '' : String(asset.divisionCode)); }} currentAsset={selectedAssetRecord} /><p className="text-sm text-muted-foreground">Choose any equipment asset, or leave it blank and enter a division or job number below.</p></div><div className="space-y-2"><div className="flex items-center justify-between gap-2"><Label>Notes</Label><VoiceNoteButton value={notes} onChange={setNotes} phrases={voicePhrases} disabled={createTimeEntry.isPending || updateTimeEntry.isPending} /></div><Textarea className="bg-background" value={notes} onChange={(event: React.ChangeEvent<HTMLTextAreaElement>) => setNotes(event.target.value)} placeholder="Optional job notes or handoff details" /></div>{employeeActiveEntry ? <div className="rounded-lg border border-border bg-background p-3 text-muted-foreground"><p className="font-medium text-foreground">Current active asset: {getEntryAssetName(employeeActiveEntry, assets)}</p><p className="text-sm">Starting another asset will clock out this row first.</p></div> : null}<div className="grid gap-4 sm:grid-cols-2"><div className="space-y-2"><Label htmlFor="division">Division (optional)</Label><Input id="division" className="bg-background" value={division} onChange={(event: React.ChangeEvent<HTMLInputElement>) => setDivision(event.target.value)} placeholder="Mapped from asset or enter division" /></div><div className="space-y-2"><Label htmlFor="job-number">Job Number (optional)</Label><Input id="job-number" className="bg-background" value={jobNumber} onChange={(event: React.ChangeEvent<HTMLInputElement>) => setJobNumber(event.target.value)} placeholder="Enter job number" /></div></div><Button className="h-12" type="button" onClick={handleClockIn} disabled={assetsLoading || createTimeEntry.isPending || updateTimeEntry.isPending}>Clock in</Button></div>}
               {employeeTodayEntries.length === 0 && !entriesLoading && !showAddAsset ? <p className="rounded-lg bg-muted p-4 text-sm text-muted-foreground">No asset time has been recorded today. Select Add asset time above to clock in or submit PTO.</p> : null}
               {employeeTodayEntries.map((entry: ShopTimeEntry) => (
                 <div key={entry.id} className="rounded-lg border border-border bg-background p-4">
@@ -431,7 +432,7 @@ export default function TimecardPage() {
                           </div>
                         </div>
                       ) : (
-                        <div className="space-y-1"><div className="flex flex-wrap items-center gap-2">{isPtoEntry(entry) ? <Badge variant="secondary">PTO</Badge> : null}{entry.pTOTypeKey ? <Badge variant="outline">{ShopTimeEntryPTOTypeKeyToLabel[entry.pTOTypeKey]}</Badge> : null}<p className="text-sm text-muted-foreground">{isPtoEntry(entry) ? 'Paid time off' : 'Asset'}</p></div><p className="text-lg font-semibold">{getTimeEntryAssetName(entry, assets)}</p><p className="text-sm text-muted-foreground">{isPtoEntry(entry) ? `${getPtoHours(entry) || Math.round(entry.hours ?? 0)} hours submitted` : `Division ${getEntryDivision(entry, assets) || '—'} · Job ${getEntryJobNumber(entry) || '—'}`}</p></div>
+                        <div className="space-y-1"><div className="flex flex-wrap items-center gap-2">{isPtoEntry(entry) ? <Badge variant="secondary">PTO</Badge> : null}{entry.pTOTypeKey ? <Badge variant="outline">{ShopTimeEntryPTOTypeKeyToLabel[entry.pTOTypeKey]}</Badge> : null}<p className="text-sm text-muted-foreground">{isPtoEntry(entry) ? 'Paid time off' : 'Asset'}</p></div><p className="text-lg font-semibold">{getEntryAssetName(entry, assets)}</p><p className="text-sm text-muted-foreground">{isPtoEntry(entry) ? `${getPtoHours(entry) || Math.round(entry.hours ?? 0)} hours submitted` : `Division ${getEntryDivision(entry, assets) || '—'} · Job ${getEntryJobNumber(entry) || '—'}`}</p></div>
                       )}
                       {editingNotesEntryId === entry.id ? (
                         <div className="mt-3 space-y-2">

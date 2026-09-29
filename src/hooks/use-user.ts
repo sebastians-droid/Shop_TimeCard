@@ -1,6 +1,7 @@
 import { useQuery } from '@tanstack/react-query';
 
 import { apiFetch } from '@/lib/api';
+import { queryKeys } from '@/lib/query-keys';
 
 export type AppUser = {
   email: string;
@@ -11,7 +12,7 @@ export type AppUser = {
 
 export const useUser = () => {
   return useQuery({
-    queryKey: ['user'],
+    queryKey: queryKeys.user(),
     queryFn: () => apiFetch<AppUser>('/api/me'),
   });
 };
