@@ -5,6 +5,7 @@ api/node_modules
 coverage
 _import
 public
+scripts
 package-lock.json
 api/package-lock.json
 *.md
