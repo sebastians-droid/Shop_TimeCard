@@ -3,6 +3,7 @@ import { ShopTimeEntryPTOTypeKeyToLabel } from '@/models/shop-time-entry';
 
 export const QUARTER_HOUR_MINUTES = 15;
 export const LUNCH_MINUTES = 30;
+export const WORKDAY_START_HOUR = 7;
 export const NO_LUNCH_MARKER = '[NO_LUNCH]';
 
 export function roundToNearestQuarterHour(minutes: number): number {
@@ -54,10 +55,28 @@ export function dayHasNoLunch(entries: ShopTimeEntry[]): boolean {
   return entries.some((entry) => !isPtoEntry(entry) && notesHaveNoLunch(entry.notes));
 }
 
+export function clampToWorkdayStart(clockInIso: string): string {
+  const date = new Date(clockInIso);
+  if (date.getHours() < WORKDAY_START_HOUR) {
+    date.setHours(WORKDAY_START_HOUR, 0, 0, 0);
+    return date.toISOString();
+  }
+  return clockInIso;
+}
+
 export function getRawDurationMinutes(entry: ShopTimeEntry, now = new Date()): number {
   if (isPtoEntry(entry)) return getPtoHours(entry) * 60;
   if (!entry.clockIn) return 0;
   const start = new Date(entry.clockIn).getTime();
+  const end = (entry.clockOut ? new Date(entry.clockOut) : now).getTime();
+  return Math.max(0, Math.round((end - start) / 60000));
+}
+
+function getPayableDurationMinutes(entry: ShopTimeEntry, isFirstOfDay: boolean, now = new Date()): number {
+  if (isPtoEntry(entry)) return getPtoHours(entry) * 60;
+  if (!entry.clockIn) return 0;
+  const effectiveClockIn = isFirstOfDay ? clampToWorkdayStart(entry.clockIn) : entry.clockIn;
+  const start = new Date(effectiveClockIn).getTime();
   const end = (entry.clockOut ? new Date(entry.clockOut) : now).getTime();
   return Math.max(0, Math.round((end - start) / 60000));
 }
@@ -78,7 +97,7 @@ export function getDayPayMinutes(entries: ShopTimeEntry[], now = new Date()): Da
     .sort((entryA, entryB) => new Date(entryA.clockIn ?? 0).getTime() - new Date(entryB.clockIn ?? 0).getTime());
   const pto = entries.filter((entry) => isPtoEntry(entry));
   const noLunch = dayHasNoLunch(labor);
-  const rawById = new Map(labor.map((entry) => [entry.id, getRawDurationMinutes(entry, now)]));
+  const rawById = new Map(labor.map((entry, index) => [entry.id, getPayableDurationMinutes(entry, index === 0, now)]));
   const rawSum = [...rawById.values()].reduce((total, minutes) => total + minutes, 0);
   const lunchMinutes = !noLunch && rawSum > 0 ? LUNCH_MINUTES : 0;
   const target = roundToNearestQuarterHour(Math.max(0, rawSum - lunchMinutes));
