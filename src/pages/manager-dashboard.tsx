@@ -15,6 +15,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { Textarea } from '@/components/ui/textarea';
 import { AssetPicker } from '@/components/asset-picker';
 import { PtoApprovalPanel } from '@/components/manager/pto-approval-panel';
 import { PayrollExportCard } from '@/components/manager/payroll-export-card';
@@ -30,6 +31,7 @@ import {
   getPtoHours,
   getRawDurationMinutes,
   isPtoEntry,
+  notesHaveNoLunch,
   stripNoLunchMarker,
 } from '@/lib/time-rules';
 import {
@@ -62,6 +64,7 @@ type EditableEntry = {
   assetRecord?: Pick<EquipmentAsset, 'id' | 'asset' | 'divisionCode'>;
   division: string;
   jobNumber: string;
+  notes: string;
   payTypeKey: ShopTimeEntryPayTypeKey;
   clockInTime: string;
   clockOutTime: string;
@@ -97,6 +100,7 @@ const emptyEntryDraft = (employeeId = ''): NewEntryDraft => ({
   assetRecord: undefined,
   division: '',
   jobNumber: '',
+  notes: '',
   payTypeKey: DEFAULT_PAY_TYPE,
   clockInTime: '',
   clockOutTime: '',
@@ -245,6 +249,7 @@ export default function ManagerDashboardPage() {
       assetRecord: entry.asset,
       division: getEntryDivision(entry, assets),
       jobNumber: getEntryJobNumber(entry),
+      notes: stripNoLunchMarker(entry.notes),
       payTypeKey: entry.payTypeKey ?? DEFAULT_PAY_TYPE,
       clockInTime: formatTimeForInput(entry.clockIn),
       clockOutTime: formatTimeForInput(entry.clockOut),
@@ -444,7 +449,7 @@ export default function ManagerDashboardPage() {
     const clockIn = mergeDateAndTime(entry.clockIn, editValues.clockInTime);
     const clockOut = editValues.clockOutTime ? mergeDateAndTime(entry.clockIn, editValues.clockOutTime) : undefined;
     const label = selectedAsset ? getAssetDisplayName(selectedAsset) : manualJobNumber || (manualDivision ? `Division ${manualDivision}` : getEntryAssetName(entry, assets) || 'Time entry');
-    const notes = entry.notes ?? '';
+    const editedNotes = applyNoLunchMarker(editValues.notes.trim() || undefined, notesHaveNoLunch(entry.notes));
     const updatedEntry = { ...entry, clockIn, clockOut };
     const dayEntries = selectedDayEntries
       .filter((row: ShopTimeEntry) => getEntryEmployeeKey(row) === getEntryEmployeeKey(entry))
@@ -457,7 +462,7 @@ export default function ManagerDashboardPage() {
           timeEntry: `${getEntryEmployeeName(entry, employees)} - ${label}`,
           asset: selectedAsset ? { id: selectedAsset.id, asset: getAssetDisplayName(selectedAsset) } : entry.asset,
           assetDivision: selectedAsset ? selectedAsset.divisionCode : manualDivision ? Number(manualDivision) : entry.assetDivision,
-          notes: notes || undefined,
+          notes: editedNotes || undefined,
           clockIn,
           clockOut,
           division: !selectedAsset && manualDivision ? Number(manualDivision) : undefined,
@@ -596,6 +601,7 @@ export default function ManagerDashboardPage() {
       assetRecord: entry.asset,
       division: getEntryDivision(entry, assets),
       jobNumber: getEntryJobNumber(entry),
+      notes: stripNoLunchMarker(entry.notes),
       payTypeKey: entry.payTypeKey ?? DEFAULT_PAY_TYPE,
       clockInTime: formatTimeForInput(entry.clockIn),
       clockOutTime: formatTimeForInput(entry.clockOut),
@@ -647,7 +653,7 @@ export default function ManagerDashboardPage() {
     const clockIn = mergeDateAndTime(entry.clockIn, editValues.clockInTime);
     const clockOut = editValues.clockOutTime ? mergeDateAndTime(entry.clockIn, editValues.clockOutTime) : undefined;
     const label = selectedAsset ? getAssetDisplayName(selectedAsset) : manualJobNumber || (manualDivision ? `Division ${manualDivision}` : getEntryAssetName(entry, assets) || 'Time entry');
-    const notes = entry.notes ?? '';
+    const editedNotes = applyNoLunchMarker(editValues.notes.trim() || undefined, notesHaveNoLunch(entry.notes));
     const updatedEntry = { ...entry, clockIn, clockOut };
     const employeeDayEntries = dayEntries
       .filter((row: ShopTimeEntry) => getEntryEmployeeKey(row) === getEntryEmployeeKey(entry))
@@ -660,7 +666,7 @@ export default function ManagerDashboardPage() {
           timeEntry: `${getEntryEmployeeName(entry, employees)} - ${label}`,
           asset: selectedAsset ? { id: selectedAsset.id, asset: getAssetDisplayName(selectedAsset) } : entry.asset,
           assetDivision: selectedAsset ? selectedAsset.divisionCode : manualDivision ? Number(manualDivision) : entry.assetDivision,
-          notes: notes || undefined,
+          notes: editedNotes || undefined,
           clockIn,
           clockOut,
           division: !selectedAsset && manualDivision ? Number(manualDivision) : undefined,
@@ -1244,6 +1250,10 @@ export default function ManagerDashboardPage() {
                                         </Select>
                                       </div>
                                     ) : null}
+                                    <div className="space-y-2">
+                                      <Label htmlFor={`notes-${entry.id}`}>Notes</Label>
+                                      <Textarea id={`notes-${entry.id}`} className="bg-background" value={editValues.notes} onChange={(event: React.ChangeEvent<HTMLTextAreaElement>) => setEditValues({ ...editValues, notes: event.target.value })} placeholder="Optional notes" />
+                                    </div>
                                   </div>
                                 ) : (
                                   <div>
@@ -1499,6 +1509,10 @@ export default function ManagerDashboardPage() {
                                       </Select>
                                     </div>
                                   ) : null}
+                                  <div className="space-y-2">
+                                    <Label htmlFor={`range-notes-${entry.id}`}>Notes</Label>
+                                    <Textarea id={`range-notes-${entry.id}`} className="bg-background" value={editValues.notes} onChange={(event: React.ChangeEvent<HTMLTextAreaElement>) => setEditValues({ ...editValues, notes: event.target.value })} placeholder="Optional notes" />
+                                  </div>
                                 </div>
                                 <div className="grid gap-3 sm:grid-cols-3">
                                   <div className="space-y-2">
