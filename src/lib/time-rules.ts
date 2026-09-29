@@ -3,6 +3,7 @@ import { ShopTimeEntryPTOTypeKeyToLabel } from '@/models/shop-time-entry';
 
 export const QUARTER_HOUR_MINUTES = 15;
 export const LUNCH_MINUTES = 30;
+export const DEFAULT_SCHEDULED_START = '07:00';
 export const NO_LUNCH_MARKER = '[NO_LUNCH]';
 
 export function roundToNearestQuarterHour(minutes: number): number {
@@ -66,18 +67,19 @@ function getPayableDurationMinutes(entry: ShopTimeEntry, isFirstOfDay: boolean, 
   if (isPtoEntry(entry)) return getPtoHours(entry) * 60;
   if (!entry.clockIn) return 0;
   let effectiveClockIn = entry.clockIn;
-  if (isFirstOfDay && scheduledStart) {
+  const effectiveStart = scheduledStart ?? DEFAULT_SCHEDULED_START;
+  if (isFirstOfDay && effectiveStart) {
     const clockInDate = new Date(entry.clockIn);
     const scheduled = new Date(entry.clockIn);
-    const [h, m] = scheduledStart.split(':').map(Number);
+    const [h, m] = effectiveStart.split(':').map(Number);
     scheduled.setHours(h, m, 0, 0);
     if (clockInDate.getTime() < scheduled.getTime()) {
       effectiveClockIn = scheduled.toISOString();
     }
   }
-  const start = new Date(effectiveClockIn).getTime();
-  const end = (entry.clockOut ? new Date(entry.clockOut) : now).getTime();
-  return Math.max(0, Math.round((end - start) / 60000));
+  const startMs = new Date(effectiveClockIn).getTime();
+  const endMs = (entry.clockOut ? new Date(entry.clockOut) : now).getTime();
+  return Math.max(0, Math.round((endMs - startMs) / 60000));
 }
 
 export type DayPayMinutes = {

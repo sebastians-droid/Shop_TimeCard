@@ -15,6 +15,7 @@ export type PayrollDetailRow = {
   payType: string;
   status: string;
   notes: string;
+  scheduledStart: string;
   clockInDistance?: number | null;
   clockOutDistance?: number | null;
 };
@@ -146,6 +147,7 @@ export async function buildPayrollWorkbookBlob(data: PayrollWeekExport): Promise
     'Job number',
     'Pay type',
     'Status',
+    'Scheduled Start',
     'Clock In Dist (mi)',
     'Clock Out Dist (mi)',
   ];
@@ -206,6 +208,7 @@ export async function buildPayrollWorkbookBlob(data: PayrollWeekExport): Promise
         detail.jobNumber,
         detail.payType,
         detail.status,
+        detail.scheduledStart,
         detail.clockInDistance != null ? detail.clockInDistance : '',
         detail.clockOutDistance != null ? detail.clockOutDistance : '',
       ]);
@@ -216,7 +219,7 @@ export async function buildPayrollWorkbookBlob(data: PayrollWeekExport): Promise
     if (employee.rows.length > 0) {
       const weekRt = [...rtOtMap.values()].reduce((sum, v) => sum + v.rt, 0);
       const weekOt = [...rtOtMap.values()].reduce((sum, v) => sum + v.ot, 0);
-      const total = sheet.addRow(['', '', '', '', 'Employee week total', hoursNumber(employee.weekHours), weekRt > 0 ? Math.round(weekRt * 100) / 100 : '', weekOt > 0 ? Math.round(weekOt * 100) / 100 : '', '', '', '', '', '', '', '', '', '', '']);
+      const total = sheet.addRow(['', '', '', '', 'Employee week total', hoursNumber(employee.weekHours), weekRt > 0 ? Math.round(weekRt * 100) / 100 : '', weekOt > 0 ? Math.round(weekOt * 100) / 100 : '', '', '', '', '', '', '', '', '', '', '', '']);
       total.font = { bold: true };
       total.getCell(6).numFmt = '0.00';
       if (weekRt > 0) total.getCell(7).numFmt = '0.00';
@@ -239,6 +242,7 @@ export async function buildPayrollWorkbookBlob(data: PayrollWeekExport): Promise
       { width: 14 },
       { width: 16 },
       { width: 12 },
+      { width: 14 },
       { width: 18 },
       { width: 18 },
     ];

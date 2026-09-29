@@ -12,6 +12,7 @@ import type { EquipmentAsset } from '@/models/equipment-asset';
 import type { AppShopEmployee } from '@/lib/shop-employees';
 import { buildPayrollWorkbookBlob } from '@/lib/payroll-workbook';
 import {
+  DEFAULT_SCHEDULED_START,
   formatDuration,
   getDayPayMinutes,
   getEntryPaidMinutes,
@@ -117,6 +118,7 @@ export function PayrollExportCard({ exportWeekDate, onExportWeekDateChange, week
               payType: isPtoEntry(entry) ? '' : ShopTimeEntryPayTypeKeyToLabel[entry.payTypeKey ?? DEFAULT_PAY_TYPE],
               status: entry.clockOut ? 'Complete' : 'Active',
               notes: getEmployeeNotes(entry.notes),
+              scheduledStart: dayScheduled ?? DEFAULT_SCHEDULED_START,
               clockInDistance: entryDistanceMiles(entry.clockInLat, entry.clockInLon),
               clockOutDistance: entryDistanceMiles(entry.clockOutLat, entry.clockOutLon),
             };
