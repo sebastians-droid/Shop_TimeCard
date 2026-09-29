@@ -468,6 +468,46 @@ async function deleteTimeEntry(id) {
   await dataverseFetch('DELETE', `/swank_shoptimeentries(${id})`);
 }
 
+async function listSchedules({ from, to } = {}) {
+  let filter = 'statecode eq 0';
+  if (from) filter += ` and swank_scheduledate ge ${from}`;
+  if (to) filter += ` and swank_scheduledate le ${to}`;
+  const rows = await listAll(
+    `/swank_mechanicschedules?$select=swank_mechanicscheduleid,swank_schedulekey,swank_scheduledate,swank_scheduledstart,swank_oncall,_swank_employee_value&$filter=${filter}&$orderby=swank_scheduledate`,
+  );
+  return rows.map((row) => ({
+    id: row.swank_mechanicscheduleid,
+    scheduleKey: row.swank_schedulekey || '',
+    scheduleDate: row.swank_scheduledate || '',
+    scheduledStart: row.swank_scheduledstart || undefined,
+    onCall: row.swank_oncall === true,
+    employeeId: row._swank_employee_value || undefined,
+  }));
+}
+
+async function upsertSchedule(record) {
+  const payload = {};
+  if (record.scheduleKey !== undefined) payload.swank_schedulekey = record.scheduleKey;
+  if (record.scheduledStart !== undefined) payload.swank_scheduledstart = record.scheduledStart || null;
+  if (record.onCall !== undefined) payload.swank_oncall = Boolean(record.onCall);
+  if (record.scheduleDate !== undefined) payload.swank_scheduledate = record.scheduleDate;
+  if (record.employeeId) {
+    payload['swank_Employee@odata.bind'] = `/swank_shopemployees(${record.employeeId})`;
+  }
+
+  const keyPath = `swank_Employee=${record.employeeId},swank_scheduledate=${record.scheduleDate}`;
+  try {
+    const result = await dataverseFetch('PATCH', `/swank_mechanicschedules(${keyPath})`, payload);
+    return result;
+  } catch (error) {
+    if (String(error.message).includes('404') || String(error.message).includes('Does Not Exist')) {
+      const result = await dataverseFetch('POST', '/swank_mechanicschedules', payload);
+      return result;
+    }
+    throw error;
+  }
+}
+
 async function diagnose() {
   const cfg = loadConfig();
   let orgHost = cfg.orgUrl;
@@ -513,4 +553,6 @@ module.exports = {
   createTimeEntry,
   updateTimeEntry,
   deleteTimeEntry,
+  listSchedules,
+  upsertSchedule,
 };

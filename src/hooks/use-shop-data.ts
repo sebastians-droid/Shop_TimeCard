@@ -169,3 +169,46 @@ export function useDeactivateShopEmployee() {
     },
   });
 }
+
+export type MechanicScheduleRow = {
+  id: string;
+  scheduleKey: string;
+  scheduleDate: string;
+  scheduledStart?: string;
+  onCall: boolean;
+  employeeId?: string;
+};
+
+export function useScheduleList(from?: string, to?: string) {
+  return useQuery({
+    queryKey: ['schedule-list', from, to],
+    queryFn: async () => {
+      const params = new URLSearchParams();
+      if (from) params.set('from', from);
+      if (to) params.set('to', to);
+      const data = await apiFetch<{ schedules: MechanicScheduleRow[] }>(`/api/schedules?${params}`);
+      return data.schedules;
+    },
+    enabled: Boolean(from && to),
+  });
+}
+
+export function useUpsertSchedule() {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: (record: {
+      scheduleKey: string;
+      employeeId: string;
+      scheduleDate: string;
+      scheduledStart?: string;
+      onCall?: boolean;
+    }) =>
+      apiFetch<MechanicScheduleRow>('/api/schedules', {
+        method: 'PATCH',
+        body: JSON.stringify(record),
+      }),
+    onSuccess: () => {
+      client.invalidateQueries({ queryKey: ['schedule-list'] });
+    },
+  });
+}

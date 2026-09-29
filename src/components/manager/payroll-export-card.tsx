@@ -33,6 +33,7 @@ import {
 } from '@/lib/entry-helpers';
 import { ShopTimeEntryPayTypeKeyToLabel, ShopTimeEntryPTOTypeKeyToLabel, DEFAULT_PAY_TYPE, type ShopTimeEntry } from '@/models/shop-time-entry';
 import { entryDistanceMiles } from '@/lib/geolocation';
+import type { MechanicScheduleRow } from '@/hooks/use-shop-data';
 
 type PayrollExportCardProps = {
   exportWeekDate: Date;
@@ -41,12 +42,20 @@ type PayrollExportCardProps = {
   weeklyPayrollMinutes: number;
   employees: AppShopEmployee[];
   assets: EquipmentAsset[];
+  schedules?: MechanicScheduleRow[];
 };
 
-export function PayrollExportCard({ exportWeekDate, onExportWeekDateChange, weeklyEntries, weeklyPayrollMinutes, employees, assets }: PayrollExportCardProps) {
+export function PayrollExportCard({ exportWeekDate, onExportWeekDateChange, weeklyEntries, weeklyPayrollMinutes, employees, assets, schedules = [] }: PayrollExportCardProps) {
   const [isExporting, setIsExporting] = useState(false);
 
   const exportWeekRange = getWeekRange(exportWeekDate);
+
+  const scheduleMap = new Map<string, string | undefined>();
+  for (const s of schedules) {
+    if (s.employeeId && s.scheduleDate) {
+      scheduleMap.set(`${s.employeeId}-${s.scheduleDate.slice(0, 10)}`, s.scheduledStart);
+    }
+  }
 
   const handleExportWeeklyPayroll = async () => {
     if (weeklyEntries.length === 0) {
@@ -76,7 +85,11 @@ export function PayrollExportCard({ exportWeekDate, onExportWeekDateChange, week
           dayEntries.push(entry);
           entriesByDay.set(dayKey, dayEntries);
         });
-        const dayHours = dayKeys.map((dayKey) => getDayPayMinutes(entriesByDay.get(dayKey) ?? []).totalMinutes);
+        const empId = firstEntry?.employee?.id;
+        const dayHours = dayKeys.map((dayKey) => {
+          const scheduled = empId ? scheduleMap.get(`${empId}-${dayKey}`) : undefined;
+          return getDayPayMinutes(entriesByDay.get(dayKey) ?? [], undefined, scheduled).totalMinutes;
+        });
         const noLunchDays = dayKeys.flatMap((dayKey, index) => {
           const pay = getDayPayMinutes(entriesByDay.get(dayKey) ?? []);
           return pay.noLunch ? [format(addDays(exportWeekRange.start, index), 'EEE M/d')] : [];
@@ -89,11 +102,12 @@ export function PayrollExportCard({ exportWeekDate, onExportWeekDateChange, week
           weekHours: dayHours.reduce((total, minutes) => total + minutes, 0),
           rows: sortedEntries.map((entry: ShopTimeEntry) => {
             const dayEntries = entriesByDay.get(getEntryWorkDateKey(entry)) ?? [entry];
+            const dayScheduled = empId ? scheduleMap.get(`${empId}-${getEntryWorkDateKey(entry)}`) : undefined;
             return {
               workDate: getEntryWorkDateKey(entry),
               punchIn: entry.clockIn ? format(new Date(entry.clockIn), 'M/d/yyyy p') : '',
               punchOut: entry.clockOut ? format(new Date(entry.clockOut), 'M/d/yyyy p') : '',
-              hours: Math.round((getEntryPaidMinutes(dayEntries, entry) / 60) * 100) / 100,
+              hours: Math.round((getEntryPaidMinutes(dayEntries, entry, undefined, dayScheduled) / 60) * 100) / 100,
               lunch: isPtoEntry(entry) ? '' : lunchCsvLabel(dayEntries),
               ptoTime: isPtoEntry(entry) ? `${getPtoHours(entry)} hours` : '',
               ptoType: entry.pTOTypeKey ? ShopTimeEntryPTOTypeKeyToLabel[entry.pTOTypeKey] : '',

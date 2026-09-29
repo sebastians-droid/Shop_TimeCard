@@ -19,7 +19,7 @@ import { Textarea } from '@/components/ui/textarea';
 import { AssetPicker } from '@/components/asset-picker';
 import { PtoApprovalPanel } from '@/components/manager/pto-approval-panel';
 import { PayrollExportCard } from '@/components/manager/payroll-export-card';
-import { useAllEquipmentAssets, useCreateShopTimeEntry, useDeleteShopTimeEntry, useShopEmployeeList, useShopTimeEntryList, useUpdateShopTimeEntry } from '@/hooks/use-shop-data';
+import { useAllEquipmentAssets, useCreateShopTimeEntry, useDeleteShopTimeEntry, useScheduleList, useShopEmployeeList, useShopTimeEntryList, useUpdateShopTimeEntry } from '@/hooks/use-shop-data';
 import type { EquipmentAsset } from '@/models/equipment-asset';
 import { mapShopEmployees, type AppShopEmployee } from '@/lib/shop-employees';
 import { apiFetch } from '@/lib/api';
@@ -54,6 +54,7 @@ import {
 } from '@/lib/entry-helpers';
 import { ShopTimeEntryPayTypeKeyToLabel, ShopTimeEntryPTOTypeKeyToLabel, DEFAULT_PAY_TYPE, type ShopTimeEntry, type ShopTimeEntryPayTypeKey, type ShopTimeEntryPTOApprovalKey, type ShopTimeEntryPTOTypeKey } from '@/models/shop-time-entry';
 import { NoLunchCheckbox } from '@/components/no-lunch-checkbox';
+import { MechanicSchedule } from '@/components/manager/mechanic-schedule';
 import { useUser } from '@/hooks/use-user';
 import { entryDistanceMiles } from '@/lib/geolocation';
 
@@ -112,7 +113,10 @@ const emptyPtoDraft = (employeeId = ''): PtoDraft => ({
   type: '',
 });
 
+type ManagerView = 'timecards' | 'schedule';
+
 export default function ManagerDashboardPage() {
+  const [managerView, setManagerView] = useState<ManagerView>('timecards');
   const [search, setSearch] = useState<string>('');
   const [selectedDate, setSelectedDate] = useState<Date>(startOfDay(new Date()));
   const [exportWeekDate, setExportWeekDate] = useState<Date>(startOfDay(new Date()));
@@ -192,6 +196,10 @@ export default function ManagerDashboardPage() {
   }, [employees, search, selectedDayEntries]);
 
   const exportWeekRange = useMemo(() => getWeekRange(exportWeekDate), [exportWeekDate]);
+  const { data: exportSchedules = [] } = useScheduleList(
+    format(exportWeekRange.start, "yyyy-MM-dd'T'00:00:00'Z'"),
+    format(exportWeekRange.end, "yyyy-MM-dd'T'23:59:59'Z'"),
+  );
 
   const weeklyEntries = useMemo(() => {
     return timeEntries
@@ -928,7 +936,13 @@ export default function ManagerDashboardPage() {
               <CardTitle className="flex items-center gap-2 text-2xl"><ShieldCheck className="h-6 w-6" /> Manager dashboard</CardTitle>
               <p className="mt-2 text-sm text-muted-foreground">Access verified with Microsoft 365. Review daily activity and export a weekly Excel workbook.</p>
             </div>
-            <div className="flex flex-wrap items-center gap-2"><Button type="button" variant="outline" onClick={() => void handleReloadTables()} disabled={assetsLoading || entriesLoading}><RefreshCw className="mr-2 h-4 w-4" /> Reload tables</Button><Badge variant="secondary">{user?.name || user?.email || 'Shop manager'}</Badge></div>
+            <div className="flex flex-wrap items-center gap-2">
+              <div className="flex rounded-md border border-border bg-muted p-0.5">
+                <button type="button" onClick={() => setManagerView('timecards')} className={`rounded px-3 py-1.5 text-sm font-medium transition-colors ${managerView === 'timecards' ? 'bg-background text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground'}`}>Employee Timecards</button>
+                <button type="button" onClick={() => setManagerView('schedule')} className={`rounded px-3 py-1.5 text-sm font-medium transition-colors ${managerView === 'schedule' ? 'bg-background text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground'}`}>Mechanic Schedule</button>
+              </div>
+              <Button type="button" variant="outline" onClick={() => void handleReloadTables()} disabled={assetsLoading || entriesLoading}><RefreshCw className="mr-2 h-4 w-4" /> Reload tables</Button><Badge variant="secondary">{user?.name || user?.email || 'Shop manager'}</Badge>
+            </div>
           </div>
         </CardHeader>
         <CardContent className="grid gap-4 sm:grid-cols-4">
@@ -952,7 +966,11 @@ export default function ManagerDashboardPage() {
         </CardContent>
       </Card>
 
-      {!rangeViewEmployeeId ? <Card className="bg-card text-card-foreground shadow-sm">
+      {managerView === 'schedule' ? (
+        <MechanicSchedule employees={employees} timeEntries={timeEntries} />
+      ) : null}
+
+      {managerView === 'timecards' && !rangeViewEmployeeId ? <Card className="bg-card text-card-foreground shadow-sm">
         <CardHeader>
           <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
             <div>
@@ -1196,19 +1214,6 @@ export default function ManagerDashboardPage() {
                   </CollapsibleTrigger>
                   <div className="flex flex-wrap gap-2 border-t border-border px-4 py-3">
                     <NoLunchCheckbox checked={summary.noLunch} disabled={lunchUpdatingKey === summary.employeeKey} onCheckedChange={(checked: boolean) => void handleNoLunchChange(summary, checked)} />
-                    <button
-                      type="button"
-                      role="checkbox"
-                      aria-checked={summary.onCall}
-                      disabled={onCallUpdatingKey === summary.employeeKey}
-                      onClick={(event) => { event.preventDefault(); event.stopPropagation(); if (onCallUpdatingKey !== summary.employeeKey) void handleOnCallChange(summary, !summary.onCall); }}
-                      className={`flex items-center gap-2.5 rounded-lg border px-3 py-2 text-left text-sm transition-colors disabled:opacity-60 ${summary.onCall ? 'border-primary bg-primary/10' : 'border-border bg-card hover:bg-muted'}`}
-                    >
-                      <span className={`flex h-5 w-5 shrink-0 items-center justify-center rounded border ${summary.onCall ? 'border-primary bg-primary text-primary-foreground' : 'border-muted-foreground/40 bg-background'}`}>
-                        {summary.onCall ? <Phone className="h-3.5 w-3.5" /> : null}
-                      </span>
-                      <span className="font-medium text-foreground">On Call</span>
-                    </button>
                     <Button type="button" variant="outline" size="sm" onClick={(event) => { event.stopPropagation(); setRangeViewEmployeeId(summary.employeeKey); setRangeViewRange(undefined); setRangeOpenDay(''); }}>
                       <CalendarRange className="mr-2 h-4 w-4" /> Date range
                     </Button>
@@ -1405,7 +1410,7 @@ export default function ManagerDashboardPage() {
         </CardContent>
       </Card> : null}
 
-      {rangeViewEmployeeId ? (
+      {managerView === 'timecards' && rangeViewEmployeeId ? (
         <Card className="bg-card text-card-foreground shadow-sm">
           <CardHeader>
             <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
@@ -1465,19 +1470,6 @@ export default function ManagerDashboardPage() {
                   <CollapsibleContent>
                     <div className="flex flex-wrap gap-2 border-t border-border px-3 py-2">
                       <NoLunchCheckbox checked={dayNoLunch} disabled={lunchUpdatingKey === `${rangeViewEmployeeId}-${dayKey}`} onCheckedChange={(checked: boolean) => void handleRangeNoLunchChange(dayEntries, dayKey, checked)} />
-                      <button
-                        type="button"
-                        role="checkbox"
-                        aria-checked={dayOnCall}
-                        disabled={onCallUpdatingKey === `${rangeViewEmployeeId}-${dayKey}`}
-                        onClick={(event) => { event.preventDefault(); event.stopPropagation(); if (onCallUpdatingKey !== `${rangeViewEmployeeId}-${dayKey}`) void handleRangeOnCallChange(dayEntries, dayKey, !dayOnCall); }}
-                        className={`flex items-center gap-2.5 rounded-lg border px-3 py-2 text-left text-sm transition-colors disabled:opacity-60 ${dayOnCall ? 'border-primary bg-primary/10' : 'border-border bg-card hover:bg-muted'}`}
-                      >
-                        <span className={`flex h-5 w-5 shrink-0 items-center justify-center rounded border ${dayOnCall ? 'border-primary bg-primary text-primary-foreground' : 'border-muted-foreground/40 bg-background'}`}>
-                          {dayOnCall ? <Phone className="h-3.5 w-3.5" /> : null}
-                        </span>
-                        <span className="font-medium text-foreground">On Call</span>
-                      </button>
                     </div>
                     <div className="space-y-2 border-t border-border p-3">
                       {dayEntries.length === 0 ? <p className="text-sm text-muted-foreground">No entries for this day.</p> : null}
@@ -1684,7 +1676,7 @@ export default function ManagerDashboardPage() {
         </Card>
       ) : null}
 
-      <PayrollExportCard exportWeekDate={exportWeekDate} onExportWeekDateChange={setExportWeekDate} weeklyEntries={weeklyEntries} weeklyPayrollMinutes={weeklyPayrollMinutes} employees={employees} assets={assets} />
+      {managerView === 'timecards' ? <PayrollExportCard exportWeekDate={exportWeekDate} onExportWeekDateChange={setExportWeekDate} weeklyEntries={weeklyEntries} weeklyPayrollMinutes={weeklyPayrollMinutes} employees={employees} assets={assets} schedules={exportSchedules} /> : null}
 
     </main>
   );

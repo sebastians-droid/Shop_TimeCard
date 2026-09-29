@@ -13,6 +13,8 @@ const {
   createTimeEntry,
   updateTimeEntry,
   deleteTimeEntry,
+  listSchedules,
+  upsertSchedule,
 } = require('./dataverse');
 const { issueSpeechToken } = require('./speech');
 const { requireUser, requireManager } = require('./auth');
@@ -173,6 +175,20 @@ async function handleRequest(request) {
       requireManager(request);
       await deleteTimeEntry(entryMatch[1]);
       return json(204, {});
+    }
+
+    if (method === 'GET' && pathname === '/api/schedules') {
+      requireManager(request);
+      const url = new URL(request.url, 'https://timecard.local');
+      const from = url.searchParams.get('from') || undefined;
+      const to = url.searchParams.get('to') || undefined;
+      return json(200, { schedules: await listSchedules({ from, to }) });
+    }
+
+    if (method === 'PATCH' && pathname === '/api/schedules') {
+      requireManager(request);
+      const record = await readJson(request);
+      return json(200, await upsertSchedule(record));
     }
 
     if (method === 'POST' && pathname === '/api/employee-sync') {

@@ -71,3 +71,9 @@ app.http('timeEntries', {
   route: 'time-entries/{id?}',
   handler: azureHandler,
 });
+
+app.http('schedules', {
+  methods: ['GET', 'PATCH'],
+  authLevel: 'anonymous',
+  handler: azureHandler,
+});
