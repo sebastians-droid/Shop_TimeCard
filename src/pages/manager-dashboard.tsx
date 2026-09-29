@@ -28,6 +28,7 @@ import {
   getDayPayMinutes,
   getEntryPaidMinutes,
   getPtoHours,
+  getRawDurationMinutes,
   isPtoEntry,
   stripNoLunchMarker,
 } from '@/lib/time-rules';
@@ -1271,7 +1272,7 @@ export default function ManagerDashboardPage() {
                                 </div>
                                 <div className="space-y-2">
                                   <Label>Duration</Label>
-                                  <p className="font-semibold">{formatDuration(getEntryPaidMinutes(summary.entries, entry))}</p>
+                                  <p className="font-semibold">{formatDuration(getRawDurationMinutes(entry))}</p>
                                 </div>
                                 {(() => { const ciDist = entryDistanceMiles(entry.clockInLat, entry.clockInLon); const coDist = entryDistanceMiles(entry.clockOutLat, entry.clockOutLon); if (ciDist == null && coDist == null) return null; return <div className="space-y-2"><Label>Distance</Label><div className="flex flex-wrap gap-1">{ciDist != null ? <Badge variant={ciDist > 1 ? 'destructive' : 'secondary'} className="text-xs">In: {ciDist.toFixed(1)} mi</Badge> : null}{coDist != null ? <Badge variant={coDist > 1 ? 'destructive' : 'secondary'} className="text-xs">Out: {coDist.toFixed(1)} mi</Badge> : null}</div></div>; })()}
                               </div>
@@ -1510,7 +1511,7 @@ export default function ManagerDashboardPage() {
                                   </div>
                                   <div className="space-y-2">
                                     <Label>Duration</Label>
-                                    <p className="font-semibold text-sm">{formatDuration(getEntryPaidMinutes(dayEntries, entry))}</p>
+                                    <p className="font-semibold text-sm">{formatDuration(getRawDurationMinutes(entry))}</p>
                                   </div>
                                   {(() => { const ciDist = entryDistanceMiles(entry.clockInLat, entry.clockInLon); const coDist = entryDistanceMiles(entry.clockOutLat, entry.clockOutLon); if (ciDist == null && coDist == null) return null; return <div className="space-y-2"><Label>Distance</Label><div className="flex flex-wrap gap-1">{ciDist != null ? <Badge variant={ciDist > 1 ? 'destructive' : 'secondary'} className="text-xs">In: {ciDist.toFixed(1)} mi</Badge> : null}{coDist != null ? <Badge variant={coDist > 1 ? 'destructive' : 'secondary'} className="text-xs">Out: {coDist.toFixed(1)} mi</Badge> : null}</div></div>; })()}
                                 </div>
@@ -1531,7 +1532,7 @@ export default function ManagerDashboardPage() {
                                     {entry.clockIn ? format(new Date(entry.clockIn), 'p') : '—'} – {entry.clockOut ? format(new Date(entry.clockOut), 'p') : 'Active'}
                                     {isPtoEntry(entry) ? ` · ${getPtoHours(entry)}h PTO` : ` · Div ${getEntryDivision(entry, assets) || '—'}`}
                                     {getEntryJobNumber(entry) ? ` · Job ${getEntryJobNumber(entry)}` : ''}
-                                    {' · '}{formatDuration(getEntryPaidMinutes(dayEntries, entry))}
+                                    {' · '}{formatDuration(getRawDurationMinutes(entry))}
                                   </p>
                                 </div>
                                 <div className="flex items-center gap-1.5">

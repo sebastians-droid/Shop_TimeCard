@@ -23,6 +23,7 @@ import {
   getDayPayMinutes,
   getEntryPaidMinutes,
   getPtoHours,
+  getRawDurationMinutes,
   isPtoEntry,
   notesHaveNoLunch,
   stripNoLunchMarker,
@@ -445,7 +446,7 @@ export default function TimecardPage() {
                       ) : null}
                     </div>
                     <div className="flex flex-col gap-2 sm:items-end">
-                      <div className="space-y-2 text-left sm:text-right"><div><p className="text-sm text-muted-foreground">Clock in</p><p className="text-lg font-semibold">{entry.clockIn ? format(new Date(entry.clockIn), 'p') : '—'}</p></div><div><p className="text-sm text-muted-foreground">Clock out</p><p className="text-lg font-semibold">{entry.clockOut ? format(new Date(entry.clockOut), 'p') : '—'}</p></div><div><p className="text-xs text-muted-foreground">Duration</p><p className="text-sm font-medium text-foreground">{formatDuration(getEntryPaidMinutes(employeeTodayEntries, entry))}</p></div></div>
+                      <div className="space-y-2 text-left sm:text-right"><div><p className="text-sm text-muted-foreground">Clock in</p><p className="text-lg font-semibold">{entry.clockIn ? format(new Date(entry.clockIn), 'p') : '—'}</p></div><div><p className="text-sm text-muted-foreground">Clock out</p><p className="text-lg font-semibold">{entry.clockOut ? format(new Date(entry.clockOut), 'p') : '—'}</p></div><div><p className="text-xs text-muted-foreground">Duration</p><p className="text-sm font-medium text-foreground">{formatDuration(getRawDurationMinutes(entry))}</p></div></div>
                       {editingEntryId === entry.id ? (
                         <div className="flex flex-wrap items-center justify-end gap-2">
                           <Button type="button" size="icon" aria-label="Save timecard" onClick={() => void handleSaveEditAsset(entry)} disabled={updateTimeEntry.isPending}><Check className="h-4 w-4" /></Button>

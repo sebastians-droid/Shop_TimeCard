@@ -14,7 +14,7 @@ import { Label } from '@/components/ui/label';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { useAllEquipmentAssets, useShopEmployeeList, useShopTimeEntryList } from '@/hooks/use-shop-data';
 import { mapShopEmployees, type AppShopEmployee } from '@/lib/shop-employees';
-import { formatDuration, getDayPayMinutes, getEntryPaidMinutes, getPtoHours, isPtoEntry } from '@/lib/time-rules';
+import { formatDuration, getDayPayMinutes, getEntryPaidMinutes, getPtoHours, getRawDurationMinutes, isPtoEntry } from '@/lib/time-rules';
 import { getTimeEntryAssetName, getEntryDivision, getEntryJobNumber } from '@/lib/entry-helpers';
 import { divisionLabel } from '@/lib/reference-data';
 import {
@@ -345,7 +345,7 @@ export default function MechanicLogPage() {
                       <CollapsibleContent>
                         <CardContent className="space-y-2 border-t border-border pt-4">
                           {d.entries.map((entry: ShopTimeEntry) => {
-                            const paidMinutes = getEntryPaidMinutes(d.entries, entry);
+                            const paidMinutes = getRawDurationMinutes(entry);
                             const assetName = getTimeEntryAssetName(entry, assets);
                             const jobNum = getEntryJobNumber(entry);
                             const effectiveDivision = getEntryDivision(entry, assets);
