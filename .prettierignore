@@ -1,0 +1,10 @@
+dist
+node_modules
+.tools
+api/node_modules
+coverage
+_import
+public
+package-lock.json
+api/package-lock.json
+*.md

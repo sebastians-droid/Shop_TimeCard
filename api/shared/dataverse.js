@@ -137,7 +137,7 @@ async function getToken() {
     },
   );
   const text = await response.text();
-  let data = {};
+  let data;
   try {
     data = text ? JSON.parse(text) : {};
   } catch {
@@ -170,7 +170,7 @@ async function dataverseFetch(method, urlPath, body) {
     body: body ? JSON.stringify(body) : undefined,
   });
   const text = await response.text();
-  let data = {};
+  let data;
   try {
     data = text ? JSON.parse(text) : {};
   } catch {

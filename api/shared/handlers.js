@@ -63,7 +63,7 @@ function clientIp(request) {
 
 function apiPath(requestUrl) {
   const raw = String(requestUrl || '');
-  let pathname = '/';
+  let pathname;
   try {
     pathname = new URL(raw, 'https://timecard.local').pathname;
   } catch {
