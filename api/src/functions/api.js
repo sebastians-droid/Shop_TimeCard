@@ -77,3 +77,11 @@ app.http('schedules', {
   authLevel: 'anonymous',
   handler: azureHandler,
 });
+
+// Named distinctly from the `employeeSync` timer trigger; Azure requires unique function names.
+app.http('employeeSyncManual', {
+  methods: ['POST'],
+  authLevel: 'anonymous',
+  route: 'employee-sync',
+  handler: azureHandler,
+});
