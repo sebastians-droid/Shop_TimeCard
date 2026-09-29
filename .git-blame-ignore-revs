@@ -1,0 +1,7 @@
+# Commits listed here are skipped by `git blame` so bulk reformatting does not
+# hide who actually wrote a line. GitHub honours this file automatically.
+# Locally, enable it once with:
+#   git config blame.ignoreRevsFile .git-blame-ignore-revs
+
+# style: apply Prettier across the codebase
+a44d25eddcd79a25e2337fbccf81e35073d960a2
