@@ -35,6 +35,7 @@ import type { EquipmentAsset } from '@/models/equipment-asset';
 import type { ShopEmployee } from '@/models/shop-employee';
 import { useUser } from '@/hooks/use-user';
 import { DIVISIONS, EQUIPMENT_CATEGORIES, divisionLabel, picklistForCode, categoryLabel } from '@/lib/reference-data';
+import { formatEmployeeDisplayName, shopEmployeeDisplayName } from '@/lib/shop-employees';
 
 // ─── Asset editor ────────────────────────────────────────────────────────────
 
@@ -369,7 +370,7 @@ function EmployeeForm({
                     onClick={() => onChange({ empNum: String(emp.empNum ?? ''), matchedLookup: emp })}
                   >
                     <span className="font-medium">{emp.empNum}</span>
-                    <span className="text-muted-foreground">{emp.name}</span>
+                    <span className="text-muted-foreground">{formatEmployeeDisplayName(emp.name) || emp.name}</span>
                   </button>
                 ))}
               </div>
@@ -378,7 +379,7 @@ function EmployeeForm({
           <div>
             <Label>Employee Name</Label>
             <Input
-              value={draft.matchedLookup?.name ?? ''}
+              value={draft.matchedLookup ? formatEmployeeDisplayName(draft.matchedLookup.name) || draft.matchedLookup.name : ''}
               readOnly
               className={draft.matchedLookup ? 'font-semibold bg-muted' : 'bg-muted'}
               placeholder={draft.empNum ? 'No match found' : 'Auto-populated from employee number'}
@@ -409,14 +410,17 @@ function EmployeesSection() {
   const [draft, setDraft] = useState<EmployeeDraft>(emptyEmployeeDraft);
 
   const filtered = useMemo(() => {
-    if (!search.trim()) return employees;
-    const q = search.toLowerCase();
-    return employees.filter(
-      (e) =>
-        (e.autoNumber || '').toLowerCase().includes(q) ||
-        (e.employee?.name1 || '').toLowerCase().includes(q) ||
-        String(e.empNum || '').includes(q),
-    );
+    const q = search.trim().toLowerCase();
+    const rows = q
+      ? employees.filter((e) => {
+          const display = shopEmployeeDisplayName(e).toLowerCase();
+          const raw = (e.employee?.name1 || '').toLowerCase();
+          return (
+            display.includes(q) || raw.includes(q) || (e.autoNumber || '').toLowerCase().includes(q) || String(e.empNum || '').includes(q)
+          );
+        })
+      : employees;
+    return [...rows].sort((a, b) => shopEmployeeDisplayName(a).localeCompare(shopEmployeeDisplayName(b)));
   }, [employees, search]);
 
   function startAdd() {
@@ -436,7 +440,7 @@ function EmployeesSection() {
         empNum: draft.matchedLookup.empNum,
         employeeId: draft.matchedLookup.id,
       });
-      toast.success(`Employee ${draft.matchedLookup.name} added`);
+      toast.success(`Employee ${formatEmployeeDisplayName(draft.matchedLookup.name) || draft.matchedLookup.name} added`);
       cancel();
     } catch (e: unknown) {
       toast.error((e as Error).message);
@@ -505,7 +509,7 @@ function EmployeesSection() {
               )}
               {filtered.map((emp) => (
                 <tr key={emp.id} className="border-b last:border-0 hover:bg-muted/30">
-                  <td className="px-3 py-2 font-medium">{emp.employee?.name1 || emp.autoNumber || '—'}</td>
+                  <td className="px-3 py-2 font-medium">{shopEmployeeDisplayName(emp)}</td>
                   <td className="px-3 py-2">{emp.empNum ?? '—'}</td>
                   <td className="px-3 py-2">
                     <div className="flex gap-1 justify-end">
@@ -517,7 +521,7 @@ function EmployeesSection() {
                         </AlertDialogTrigger>
                         <AlertDialogContent>
                           <AlertDialogHeader>
-                            <AlertDialogTitle>Deactivate {emp.employee?.name1 || emp.autoNumber || 'this employee'}?</AlertDialogTitle>
+                            <AlertDialogTitle>Deactivate {shopEmployeeDisplayName(emp)}?</AlertDialogTitle>
                             <AlertDialogDescription>
                               This will deactivate the shop employee record. It can be reactivated later in Dataverse.
                             </AlertDialogDescription>

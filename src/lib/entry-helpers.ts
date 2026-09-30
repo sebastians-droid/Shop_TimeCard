@@ -2,8 +2,8 @@ import { format, startOfDay, startOfWeek, endOfWeek } from 'date-fns';
 
 import type { EquipmentAsset } from '@/models/equipment-asset';
 import type { ShopTimeEntry, ShopTimeEntryPTOTimeKey } from '@/models/shop-time-entry';
-import type { AppShopEmployee } from '@/lib/shop-employees';
-import { isPtoEntry, stripNoLunchMarker } from '@/lib/time-rules';
+import { formatEmployeeDisplayName, type AppShopEmployee } from '@/lib/shop-employees';
+import { DEFAULT_SCHEDULED_START, isPtoEntry, stripNoLunchMarker } from '@/lib/time-rules';
 
 export type PtoHours = 4 | 8;
 
@@ -72,7 +72,9 @@ export const getEntryEmployeeKey = (entry: ShopTimeEntry) => entry.employee?.id 
 
 export const getEntryEmployeeName = (entry: ShopTimeEntry, employees: AppShopEmployee[]) => {
   const employeeRecord = employees.find((employee: AppShopEmployee) => employee.id === entry.employee?.id);
-  return employeeRecord?.employeeName ?? entry.employee?.autoNumber ?? 'Unknown employee';
+  if (employeeRecord?.employeeName) return employeeRecord.employeeName;
+  if (entry.employee?.autoNumber) return formatEmployeeDisplayName(entry.employee.autoNumber) || entry.employee.autoNumber;
+  return 'Unknown employee';
 };
 
 export const getEntryEmployeeNumber = (entry: ShopTimeEntry, employees: AppShopEmployee[]) => {
@@ -113,4 +115,16 @@ export const getWeekRange = (date: Date) => {
 export const formatWeekRangeLabel = (date: Date) => {
   const { start, end } = getWeekRange(date);
   return `${format(start, 'M/d/yyyy')} - ${format(end, 'M/d/yyyy')}`;
+};
+
+export const formatScheduledStartTime = (time: string) => {
+  const [hours = '0', minutes = '0'] = time.split(':');
+  const date = new Date(1970, 0, 1, Number(hours), Number(minutes), 0, 0);
+  if (!Number.isFinite(date.getTime())) return time;
+  return format(date, 'p');
+};
+
+export const scheduledStartCaption = (employee: { isRoadMech?: boolean } | null | undefined, storedStart?: string) => {
+  if (employee?.isRoadMech) return 'Starts at clock-in';
+  return `Scheduled start ${formatScheduledStartTime(storedStart || DEFAULT_SCHEDULED_START)}`;
 };

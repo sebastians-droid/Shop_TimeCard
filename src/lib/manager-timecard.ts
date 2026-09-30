@@ -37,6 +37,7 @@ export type EmployeeDailySummary = {
   noLunch: boolean;
   lunchDeducted: boolean;
   onCall: boolean;
+  scheduledStartLabel: string;
 };
 
 export const emptyEntryDraft = (employeeId = ''): NewEntryDraft => ({

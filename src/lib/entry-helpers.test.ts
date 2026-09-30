@@ -7,7 +7,9 @@ import {
   PTO_TIME_KEY_BY_HOURS,
   combineSelectedDateAndTime,
   formatTimeForInput,
+  formatScheduledStartTime,
   formatWeekRangeLabel,
+  scheduledStartCaption,
   getAssetDisplayName,
   getEmployeeNotes,
   getEntryAssetName,
@@ -190,6 +192,23 @@ describe('date and time helpers', () => {
   });
 });
 
+describe('scheduled start labels', () => {
+  it('formats a 24-hour start for display', () => {
+    expect(formatScheduledStartTime('07:00')).toBe('7:00 AM');
+    expect(formatScheduledStartTime('13:30')).toBe('1:30 PM');
+  });
+
+  it('notes a road mechanic is paid from clock-in', () => {
+    expect(scheduledStartCaption({ isRoadMech: true }, '06:00')).toBe('Starts at clock-in');
+  });
+
+  it('uses the stored shop start, then the 7:00 default', () => {
+    expect(scheduledStartCaption({ isRoadMech: false }, '06:00')).toBe('Scheduled start 6:00 AM');
+    expect(scheduledStartCaption({ isRoadMech: false })).toBe('Scheduled start 7:00 AM');
+    expect(scheduledStartCaption(undefined)).toBe('Scheduled start 7:00 AM');
+  });
+});
+
 describe('employee helpers', () => {
   const employees = mapShopEmployees([
     { id: 'emp-1', autoNumber: 'SE-001', empNum: 1042, employee: { id: 'e1', name1: 'Dana Ruiz' } },
@@ -203,7 +222,7 @@ describe('employee helpers', () => {
 
   it('resolves employee names and numbers', () => {
     const linked = entry({ id: 'e', employee: { id: 'emp-1', autoNumber: 'SE-001' } });
-    expect(getEntryEmployeeName(linked, employees)).toBe('Dana Ruiz');
+    expect(getEntryEmployeeName(linked, employees)).toBe('Ruiz, Dana');
     expect(getEntryEmployeeNumber(linked, employees)).toBe('1042');
   });
 
@@ -231,7 +250,7 @@ describe('mapShopEmployees', () => {
       { id: 'a', autoNumber: 'SE-001', empNum: 1042, employee: { id: 'e1', name1: 'Dana Ruiz' } },
       { id: 'b', autoNumber: 'SE-002', empNum: 1007, employee: { id: 'e2', name1: 'Alex Chen' } },
     ]);
-    expect(mapped.map((employee) => employee.employeeName)).toEqual(['Alex Chen', 'Dana Ruiz']);
+    expect(mapped.map((employee) => employee.employeeName)).toEqual(['Chen, Alex', 'Ruiz, Dana']);
   });
 
   it('treats a missing road-mechanic flag as a shop mechanic', () => {
