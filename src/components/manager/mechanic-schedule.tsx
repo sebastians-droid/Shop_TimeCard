@@ -26,6 +26,91 @@ type MechanicScheduleProps = {
   timeEntries: ShopTimeEntry[];
 };
 
+type ScheduleField = 'scheduledStart' | 'onCall';
+
+type ScheduleFieldsProps = {
+  empId: string;
+  empNum: number | undefined;
+  dk: string;
+  startTime: string;
+  onCall: boolean;
+  showApplyAll: boolean;
+  onSave: (empId: string, empNum: number | undefined, dk: string, field: ScheduleField, value: string | boolean) => void;
+  onApplyAll: (empId: string, empNum: number | undefined, field: ScheduleField, value: string | boolean) => void;
+};
+
+// Declared at module scope on purpose: nesting this inside MechanicSchedule gives
+// it a new component identity on every parent render, which remounts the inputs
+// and discards whatever the manager just typed.
+function ScheduleFields({ empId, empNum, dk, startTime, onCall, showApplyAll, onSave, onApplyAll }: ScheduleFieldsProps) {
+  return (
+    <div className="grid gap-4 sm:grid-cols-2">
+      <div className="space-y-2">
+        <Label>Scheduled start</Label>
+        <div className="flex gap-2">
+          <Input
+            type="time"
+            className="bg-background"
+            defaultValue={startTime}
+            key={`${empId}-${dk}-${startTime}`}
+            onBlur={(e) => {
+              const val = e.target.value;
+              if (val && val !== startTime) onSave(empId, empNum, dk, 'scheduledStart', val);
+            }}
+          />
+          {showApplyAll ? (
+            <Button
+              type="button"
+              variant="outline"
+              className="shrink-0"
+              onClick={() => onApplyAll(empId, empNum, 'scheduledStart', startTime)}
+              title={`Apply ${startTime} to all days in range`}
+            >
+              <Copy className="mr-2 h-4 w-4" /> All days
+            </Button>
+          ) : null}
+        </div>
+      </div>
+      <div className="space-y-2">
+        <Label>On Call</Label>
+        <div className="flex gap-2">
+          <div className="flex flex-1 overflow-hidden rounded-md border border-border">
+            <button
+              type="button"
+              onClick={() => {
+                if (!onCall) onSave(empId, empNum, dk, 'onCall', true);
+              }}
+              className={`flex flex-1 items-center justify-center gap-1.5 py-2 text-sm font-medium transition-colors ${onCall ? 'bg-destructive text-white' : 'bg-background text-muted-foreground hover:bg-muted'}`}
+            >
+              <Phone className="h-3.5 w-3.5" /> Yes
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                if (onCall) onSave(empId, empNum, dk, 'onCall', false);
+              }}
+              className={`flex flex-1 items-center justify-center py-2 text-sm font-medium transition-colors ${!onCall ? 'bg-background text-foreground' : 'bg-background text-muted-foreground hover:bg-muted'}`}
+            >
+              No
+            </button>
+          </div>
+          {showApplyAll ? (
+            <Button
+              type="button"
+              variant="outline"
+              className="shrink-0"
+              onClick={() => onApplyAll(empId, empNum, 'onCall', onCall)}
+              title={`Apply "${onCall ? 'On Call' : 'Off'}" to all days in range`}
+            >
+              <Copy className="mr-2 h-4 w-4" /> All days
+            </Button>
+          ) : null}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export function MechanicSchedule({ employees, timeEntries }: MechanicScheduleProps) {
   const [selectedDate, setSelectedDate] = useState(() => startOfDay(new Date()));
   const [openKeys, setOpenKeys] = useState<string[]>([]);
@@ -41,7 +126,7 @@ export function MechanicSchedule({ employees, timeEntries }: MechanicSchedulePro
   // and the range for range view — both covered by a wide window.
   const queryFrom = rangeViewRange?.from ? format(rangeViewRange.from, "yyyy-MM-dd'T'00:00:00'Z'") : `${dayKey}T00:00:00Z`;
   const queryTo = rangeViewRange?.to ? format(rangeViewRange.to, "yyyy-MM-dd'T'23:59:59'Z'") : `${dayKey}T23:59:59Z`;
-  const { data: schedules = [], isLoading: schedulesLoading } = useScheduleList(queryFrom, queryTo);
+  const { data: schedules = [], isLoading: schedulesLoading, error: schedulesError } = useScheduleList(queryFrom, queryTo);
   const upsertSchedule = useUpsertSchedule();
 
   const scheduleMap = useMemo(() => {
@@ -114,89 +199,7 @@ export function MechanicSchedule({ employees, timeEntries }: MechanicSchedulePro
 
   const toggleOpen = (key: string) => setOpenKeys((cur) => (cur.includes(key) ? cur.filter((k) => k !== key) : [...cur, key]));
 
-  // ── Edit fields used inside expanded rows ──
-
-  function ScheduleFields({
-    empId,
-    empNum,
-    dk,
-    startTime,
-    onCall,
-  }: {
-    empId: string;
-    empNum: number | undefined;
-    dk: string;
-    startTime: string;
-    onCall: boolean;
-  }) {
-    const showApplyAll = rangeDays.length > 1;
-    return (
-      <div className="grid gap-4 sm:grid-cols-2">
-        <div className="space-y-2">
-          <Label>Scheduled start</Label>
-          <div className="flex gap-2">
-            <Input
-              type="time"
-              className="bg-background"
-              defaultValue={startTime}
-              key={`${empId}-${dk}-${startTime}`}
-              onBlur={(e) => {
-                const val = e.target.value;
-                if (val && val !== startTime) handleSave(empId, empNum, dk, 'scheduledStart', val);
-              }}
-            />
-            {showApplyAll ? (
-              <Button
-                type="button"
-                variant="outline"
-                className="shrink-0"
-                onClick={() => handleApplyAllDays(empId, empNum, 'scheduledStart', startTime)}
-                title={`Apply ${startTime} to all days in range`}
-              >
-                <Copy className="mr-2 h-4 w-4" /> All days
-              </Button>
-            ) : null}
-          </div>
-        </div>
-        <div className="space-y-2">
-          <Label>On Call</Label>
-          <div className="flex gap-2">
-            <div className="flex flex-1 overflow-hidden rounded-md border border-border">
-              <button
-                type="button"
-                onClick={() => {
-                  if (!onCall) handleSave(empId, empNum, dk, 'onCall', true);
-                }}
-                className={`flex flex-1 items-center justify-center gap-1.5 py-2 text-sm font-medium transition-colors ${onCall ? 'bg-destructive text-white' : 'bg-background text-muted-foreground hover:bg-muted'}`}
-              >
-                <Phone className="h-3.5 w-3.5" /> Yes
-              </button>
-              <button
-                type="button"
-                onClick={() => {
-                  if (onCall) handleSave(empId, empNum, dk, 'onCall', false);
-                }}
-                className={`flex flex-1 items-center justify-center py-2 text-sm font-medium transition-colors ${!onCall ? 'bg-background text-foreground' : 'bg-background text-muted-foreground hover:bg-muted'}`}
-              >
-                No
-              </button>
-            </div>
-            {showApplyAll ? (
-              <Button
-                type="button"
-                variant="outline"
-                className="shrink-0"
-                onClick={() => handleApplyAllDays(empId, empNum, 'onCall', onCall)}
-                title={`Apply "${onCall ? 'On Call' : 'Off'}" to all days in range`}
-              >
-                <Copy className="mr-2 h-4 w-4" /> All days
-              </Button>
-            ) : null}
-          </div>
-        </div>
-      </div>
-    );
-  }
+  const showApplyAll = rangeDays.length > 1;
 
   // ── Range view (one employee) ──
 
@@ -273,6 +276,13 @@ export function MechanicSchedule({ employees, timeEntries }: MechanicSchedulePro
         </CardHeader>
         <CardContent className="space-y-2">
           {schedulesLoading ? <p className="text-sm text-muted-foreground">Loading schedule...</p> : null}
+          {schedulesError ? (
+            <p role="alert" className="rounded-lg border border-destructive/50 bg-destructive/10 p-3 text-sm text-destructive">
+              Saved schedules could not be loaded, so every start time below is showing the {DEFAULT_START} default rather than what is
+              stored. Changes will not save until this is resolved.
+              {schedulesError instanceof Error ? ` (${schedulesError.message})` : null}
+            </p>
+          ) : null}
           {!rangeViewRange?.from ? (
             <p className="rounded-lg bg-muted p-4 text-sm text-muted-foreground">Use the date picker above to select a range of days.</p>
           ) : !rangeViewRange?.to ? (
@@ -318,6 +328,9 @@ export function MechanicSchedule({ employees, timeEntries }: MechanicSchedulePro
                         dk={dk}
                         startTime={startTime}
                         onCall={onCall}
+                        showApplyAll={showApplyAll}
+                        onSave={handleSave}
+                        onApplyAll={handleApplyAllDays}
                       />
                     </div>
                   </CollapsibleContent>
@@ -369,6 +382,13 @@ export function MechanicSchedule({ employees, timeEntries }: MechanicSchedulePro
       </CardHeader>
       <CardContent className="space-y-2">
         {schedulesLoading ? <p className="text-sm text-muted-foreground">Loading schedule...</p> : null}
+        {schedulesError ? (
+          <p role="alert" className="rounded-lg border border-destructive/50 bg-destructive/10 p-3 text-sm text-destructive">
+            Saved schedules could not be loaded, so every start time below is showing the {DEFAULT_START} default rather than what is
+            stored. Changes will not save until this is resolved.
+            {schedulesError instanceof Error ? ` (${schedulesError.message})` : null}
+          </p>
+        ) : null}
         {sortedEmployees.map((emp) => {
           const startTime = getStart(emp.id, dayKey);
           const onCall = getOnCall(emp.id, dayKey);
@@ -403,7 +423,16 @@ export function MechanicSchedule({ employees, timeEntries }: MechanicSchedulePro
                 </CollapsibleTrigger>
                 <CollapsibleContent>
                   <div className="border-t border-border px-4 py-3 space-y-3">
-                    <ScheduleFields empId={emp.id} empNum={emp.employeeCode} dk={dayKey} startTime={startTime} onCall={onCall} />
+                    <ScheduleFields
+                      empId={emp.id}
+                      empNum={emp.employeeCode}
+                      dk={dayKey}
+                      startTime={startTime}
+                      onCall={onCall}
+                      showApplyAll={showApplyAll}
+                      onSave={handleSave}
+                      onApplyAll={handleApplyAllDays}
+                    />
                     <Button
                       type="button"
                       variant="outline"

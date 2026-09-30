@@ -1,4 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { toast } from 'sonner';
 
 import { apiFetch } from '@/lib/api';
 import { queryKeys } from '@/lib/query-keys';
@@ -174,15 +175,63 @@ export function useScheduleList(from?: string, to?: string) {
   });
 }
 
+export type ScheduleUpsert = {
+  scheduleKey: string;
+  employeeId: string;
+  scheduleDate: string;
+  scheduledStart?: string;
+  onCall?: boolean;
+};
+
+const sameScheduleSlot = (row: MechanicScheduleRow, record: ScheduleUpsert) =>
+  row.employeeId === record.employeeId && row.scheduleDate.slice(0, 10) === record.scheduleDate.slice(0, 10);
+
 export function useUpsertSchedule() {
   const client = useQueryClient();
   return useMutation({
-    mutationFn: (record: { scheduleKey: string; employeeId: string; scheduleDate: string; scheduledStart?: string; onCall?: boolean }) =>
+    mutationFn: (record: ScheduleUpsert) =>
       apiFetch<MechanicScheduleRow>('/api/schedules', {
         method: 'PATCH',
         body: JSON.stringify(record),
       }),
-    onSuccess: () => {
+    // Write into every cached date range up front so the edited field holds its
+    // new value instead of snapping back while the request is in flight.
+    onMutate: async (record) => {
+      await client.cancelQueries({ queryKey: queryKeys.schedules() });
+      const previous = client.getQueriesData<MechanicScheduleRow[]>({ queryKey: queryKeys.schedules() });
+      client.setQueriesData<MechanicScheduleRow[]>({ queryKey: queryKeys.schedules() }, (rows) => {
+        if (!rows) return rows;
+        const index = rows.findIndex((row) => sameScheduleSlot(row, record));
+        if (index === -1) {
+          return [
+            ...rows,
+            {
+              id: `pending-${record.scheduleKey}`,
+              scheduleKey: record.scheduleKey,
+              scheduleDate: record.scheduleDate,
+              scheduledStart: record.scheduledStart,
+              onCall: record.onCall ?? false,
+              employeeId: record.employeeId,
+            },
+          ];
+        }
+        const next = rows.slice();
+        next[index] = {
+          ...rows[index],
+          scheduledStart: record.scheduledStart ?? rows[index].scheduledStart,
+          onCall: record.onCall ?? rows[index].onCall,
+        };
+        return next;
+      });
+      return { previous };
+    },
+    onError: (error, _record, context) => {
+      for (const [key, rows] of context?.previous ?? []) {
+        client.setQueryData(key, rows);
+      }
+      toast.error(error instanceof Error ? error.message : 'Unable to save the schedule.');
+    },
+    onSettled: () => {
       client.invalidateQueries({ queryKey: queryKeys.schedules() });
     },
   });
