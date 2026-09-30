@@ -2,7 +2,7 @@ import { useMemo, useState } from 'react';
 import { eachDayOfInterval, format, startOfDay } from 'date-fns';
 import { CalendarIcon, CalendarRange, ChevronDown, Copy, Phone, X } from 'lucide-react';
 import type { DateRange } from 'react-day-picker';
-import { toast } from 'sonner';
+import { toast } from '@/lib/toast';
 
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';

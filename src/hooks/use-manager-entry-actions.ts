@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import { addHours, format } from 'date-fns';
-import { toast } from 'sonner';
+import { toast } from '@/lib/toast';
 
 import { apiFetch } from '@/lib/api';
 import { queryKeys } from '@/lib/query-keys';

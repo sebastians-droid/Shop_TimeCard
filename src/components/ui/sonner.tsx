@@ -5,6 +5,10 @@ const Toaster = ({ ...props }: ToasterProps) => {
     <Sonner
       theme="light"
       position="top-center"
+      // Confirmations clear quickly. Errors override this with duration:Infinity
+      // in @/lib/toast, so closeButton is what lets the user dismiss them.
+      duration={1500}
+      closeButton
       className="toaster group"
       style={
         {

@@ -28,6 +28,7 @@ upsertSchedule.mutate(payload, {
 
 ## Supporting patterns
 
+- **Import `toast` from `@/lib/toast`, never from `sonner`.** That wrapper is what makes errors persist until dismissed while confirmations clear after 1.5s.
 - **Optimistic with rollback.** Update the cache in `onMutate`, restore the snapshot in `onError`. An accepted change holds immediately; a rejected one visibly reverts instead of appearing to stick.
 - **Summarise bulk writes once.** `Promise.allSettled`, then one toast — "applied to 14 days", or a partial count. Never one toast per item.
 - **Explicit commit affordances.** In editable fields, Enter commits and blurs; Escape restores the stored value. Losing focus is the user's signal the edit landed.
