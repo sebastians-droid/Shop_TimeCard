@@ -35,10 +35,6 @@ export type PayrollWeekExport = {
   employees: PayrollEmployeeExport[];
 };
 
-export const RT_DAILY_THRESHOLD_HOURS = 8;
-
-export type RegularOvertimeSplit = { rt: number; ot: number };
-
 /** Excel rejects these characters in sheet names and caps them at 31 characters. */
 export function excelSheetName(name: string, used: Set<string>): string {
   const cleaned =
@@ -60,42 +56,6 @@ export function excelSheetName(name: string, used: Set<string>): string {
 
 export function hoursNumber(value: number): number {
   return Math.round((value / 60) * 100) / 100;
-}
-
-/**
- * Splits each row into regular and overtime hours, resetting the daily
- * threshold per work date. PTO is paid at straight time and does not push
- * worked hours into overtime.
- */
-export function splitRegularAndOvertime(rows: PayrollDetailRow[]): Map<PayrollDetailRow, RegularOvertimeSplit> {
-  const splitByRow = new Map<PayrollDetailRow, RegularOvertimeSplit>();
-  const rowsByDay = new Map<string, PayrollDetailRow[]>();
-
-  for (const row of rows) {
-    const dayRows = rowsByDay.get(row.workDate) ?? [];
-    dayRows.push(row);
-    rowsByDay.set(row.workDate, dayRows);
-  }
-
-  for (const dayRows of rowsByDay.values()) {
-    let laborHours = 0;
-    for (const row of dayRows) {
-      if (row.hours <= 0) {
-        splitByRow.set(row, { rt: 0, ot: 0 });
-        continue;
-      }
-      if (row.ptoTime) {
-        splitByRow.set(row, { rt: row.hours, ot: 0 });
-        continue;
-      }
-      const regularRemaining = Math.max(0, RT_DAILY_THRESHOLD_HOURS - laborHours);
-      const rt = Math.min(row.hours, regularRemaining);
-      splitByRow.set(row, { rt, ot: Math.max(0, row.hours - rt) });
-      laborHours += row.hours;
-    }
-  }
-
-  return splitByRow;
 }
 
 const headerFill: ExcelJS.FillPattern = {
@@ -171,6 +131,7 @@ export async function buildPayrollWorkbookBlob(data: PayrollWeekExport): Promise
     'Employee',
     'Employee number',
     'Work date',
+    'Scheduled Start',
     'Punch in',
     'Punch out',
     'Hours',
@@ -184,7 +145,6 @@ export async function buildPayrollWorkbookBlob(data: PayrollWeekExport): Promise
     'Job number',
     'Pay type',
     'Status',
-    'Scheduled Start',
     'Clock In Dist (mi)',
     'Clock Out Dist (mi)',
   ];
@@ -198,19 +158,18 @@ export async function buildPayrollWorkbookBlob(data: PayrollWeekExport): Promise
     const header = sheet.addRow(detailHeaders);
     styleHeader(header);
 
-    const rtOtMap = splitRegularAndOvertime(employee.rows);
-
     employee.rows.forEach((detail) => {
-      const { rt, ot } = rtOtMap.get(detail) ?? { rt: 0, ot: 0 };
       const row = sheet.addRow([
         employee.name,
         employee.number,
         detail.workDate,
+        detail.scheduledStart,
         detail.punchIn,
         detail.punchOut,
         detail.hours,
-        rt > 0 ? rt : '',
-        ot > 0 ? ot : '',
+        // RT/OT stay empty so payroll can balance a 40-hour week.
+        '',
+        '',
         detail.lunch,
         detail.ptoTime,
         detail.ptoType,
@@ -219,26 +178,21 @@ export async function buildPayrollWorkbookBlob(data: PayrollWeekExport): Promise
         detail.jobNumber,
         detail.payType,
         detail.status,
-        detail.scheduledStart,
         detail.clockInDistance != null ? detail.clockInDistance : '',
         detail.clockOutDistance != null ? detail.clockOutDistance : '',
       ]);
-      row.getCell(6).numFmt = '0.00';
-      if (rt > 0) row.getCell(7).numFmt = '0.00';
-      if (ot > 0) row.getCell(8).numFmt = '0.00';
+      row.getCell(7).numFmt = '0.00';
     });
     if (employee.rows.length > 0) {
-      const weekRt = [...rtOtMap.values()].reduce((sum, v) => sum + v.rt, 0);
-      const weekOt = [...rtOtMap.values()].reduce((sum, v) => sum + v.ot, 0);
       const total = sheet.addRow([
+        '',
         '',
         '',
         '',
         '',
         'Employee week total',
         hoursNumber(employee.weekHours),
-        weekRt > 0 ? Math.round(weekRt * 100) / 100 : '',
-        weekOt > 0 ? Math.round(weekOt * 100) / 100 : '',
+        '',
         '',
         '',
         '',
@@ -252,14 +206,13 @@ export async function buildPayrollWorkbookBlob(data: PayrollWeekExport): Promise
         '',
       ]);
       total.font = { bold: true };
-      total.getCell(6).numFmt = '0.00';
-      if (weekRt > 0) total.getCell(7).numFmt = '0.00';
-      if (weekOt > 0) total.getCell(8).numFmt = '0.00';
+      total.getCell(7).numFmt = '0.00';
     }
     sheet.columns = [
       { width: 24 },
       { width: 16 },
       { width: 12 },
+      { width: 14 },
       { width: 20 },
       { width: 20 },
       { width: 10 },
@@ -273,7 +226,6 @@ export async function buildPayrollWorkbookBlob(data: PayrollWeekExport): Promise
       { width: 14 },
       { width: 16 },
       { width: 12 },
-      { width: 14 },
       { width: 18 },
       { width: 18 },
     ];

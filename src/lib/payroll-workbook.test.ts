@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
-import type { PayrollDetailRow } from '@/lib/payroll-workbook';
-import { excelSheetName, hoursNumber, splitRegularAndOvertime } from '@/lib/payroll-workbook';
+import type { PayrollDetailRow, PayrollEmployeeExport } from '@/lib/payroll-workbook';
+import { buildPayrollWorkbookBlob, excelSheetName, hoursNumber } from '@/lib/payroll-workbook';
 
 function row(overrides: Partial<PayrollDetailRow> & { workDate: string; hours: number }): PayrollDetailRow {
   return {
@@ -68,73 +68,49 @@ describe('excelSheetName', () => {
   });
 });
 
-describe('splitRegularAndOvertime', () => {
-  it('keeps a normal day entirely in regular time', () => {
-    const shift = row({ workDate: '2026-03-10', hours: 8 });
-    expect(splitRegularAndOvertime([shift]).get(shift)).toEqual({ rt: 8, ot: 0 });
-  });
-
-  it('pushes hours past eight into overtime', () => {
-    const shift = row({ workDate: '2026-03-10', hours: 10 });
-    expect(splitRegularAndOvertime([shift]).get(shift)).toEqual({ rt: 8, ot: 2 });
-  });
-
-  it('splits overtime across entries once the day crosses eight hours', () => {
-    const first = row({ workDate: '2026-03-10', hours: 6 });
-    const second = row({ workDate: '2026-03-10', hours: 4 });
-    const split = splitRegularAndOvertime([first, second]);
-
-    expect(split.get(first)).toEqual({ rt: 6, ot: 0 });
-    expect(split.get(second)).toEqual({ rt: 2, ot: 2 });
-  });
-
-  it('puts a whole entry in overtime once the threshold is already met', () => {
-    const first = row({ workDate: '2026-03-10', hours: 8 });
-    const second = row({ workDate: '2026-03-10', hours: 3 });
-    const split = splitRegularAndOvertime([first, second]);
-
-    expect(split.get(second)).toEqual({ rt: 0, ot: 3 });
-  });
-
-  it('resets the threshold for each work date', () => {
-    const monday = row({ workDate: '2026-03-09', hours: 8 });
-    const tuesday = row({ workDate: '2026-03-10', hours: 8 });
-    const split = splitRegularAndOvertime([monday, tuesday]);
-
-    expect(split.get(monday)).toEqual({ rt: 8, ot: 0 });
-    expect(split.get(tuesday)).toEqual({ rt: 8, ot: 0 });
-  });
-
-  it('groups rows by day even when they arrive interleaved', () => {
-    const mondayMorning = row({ workDate: '2026-03-09', hours: 6 });
-    const tuesdayMorning = row({ workDate: '2026-03-10', hours: 6 });
-    const mondayAfternoon = row({ workDate: '2026-03-09', hours: 4 });
-    const split = splitRegularAndOvertime([mondayMorning, tuesdayMorning, mondayAfternoon]);
-
-    expect(split.get(mondayAfternoon)).toEqual({ rt: 2, ot: 2 });
-    expect(split.get(tuesdayMorning)).toEqual({ rt: 6, ot: 0 });
-  });
-
-  it('pays PTO at straight time without consuming the overtime threshold', () => {
-    const pto = row({ workDate: '2026-03-10', hours: 8, ptoTime: '8' });
-    const worked = row({ workDate: '2026-03-10', hours: 8 });
-    const split = splitRegularAndOvertime([pto, worked]);
-
-    expect(split.get(pto)).toEqual({ rt: 8, ot: 0 });
-    // The PTO day does not force the worked shift into overtime.
-    expect(split.get(worked)).toEqual({ rt: 8, ot: 0 });
-  });
-
-  it('zeroes rows with no positive hours', () => {
-    const empty = row({ workDate: '2026-03-10', hours: 0 });
-    const negative = row({ workDate: '2026-03-10', hours: -2 });
-    const split = splitRegularAndOvertime([empty, negative]);
-
-    expect(split.get(empty)).toEqual({ rt: 0, ot: 0 });
-    expect(split.get(negative)).toEqual({ rt: 0, ot: 0 });
-  });
-
-  it('returns an empty map for no rows', () => {
-    expect(splitRegularAndOvertime([]).size).toBe(0);
+describe('buildPayrollWorkbookBlob', () => {
+  it('puts scheduled start before punch in and leaves RT/OT blank', async () => {
+    const employee: PayrollEmployeeExport = {
+      name: 'Test Mechanic',
+      number: '1234',
+      dayHours: [480, 0, 0, 0, 0, 0, 0],
+      noLunchDays: [],
+      weekHours: 480,
+      rows: [
+        row({
+          workDate: '2026-03-09',
+          punchIn: '3/9/2026 6:30 AM',
+          punchOut: '3/9/2026 3:00 PM',
+          hours: 10,
+          scheduledStart: '07:00',
+          asset: 'PT318',
+        }),
+      ],
+    };
+    const blob = await buildPayrollWorkbookBlob({
+      weekStart: new Date(2026, 2, 8),
+      weekEnd: new Date(2026, 2, 14),
+      employees: [employee],
+    });
+    const ExcelJS = (await import('exceljs')).default;
+    const workbook = new ExcelJS.Workbook();
+    await workbook.xlsx.load(await blob.arrayBuffer());
+    const sheet = workbook.worksheets.find((candidate) => candidate.name !== 'Summary');
+    expect(sheet).toBeDefined();
+    const headers = (sheet!.getRow(1).values as Array<string | undefined>).map((value) => value ?? '');
+    const scheduledCol = headers.indexOf('Scheduled Start');
+    const punchInCol = headers.indexOf('Punch in');
+    const rtCol = headers.indexOf('RT');
+    const otCol = headers.indexOf('OT');
+    expect(scheduledCol).toBeGreaterThan(0);
+    expect(scheduledCol).toBeLessThan(punchInCol);
+    const data = sheet!.getRow(2).values as Array<string | number | undefined>;
+    expect(data[scheduledCol]).toBe('07:00');
+    expect(data[punchInCol]).toBe('3/9/2026 6:30 AM');
+    expect(data[rtCol] ?? '').toBe('');
+    expect(data[otCol] ?? '').toBe('');
+    const total = sheet!.getRow(3).values as Array<string | number | undefined>;
+    expect(total[rtCol] ?? '').toBe('');
+    expect(total[otCol] ?? '').toBe('');
   });
 });
