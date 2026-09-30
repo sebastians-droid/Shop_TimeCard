@@ -13,7 +13,7 @@ const sections = [
     to: '/mechanic-log',
     icon: ClipboardList,
     title: 'Mechanic Log',
-    description: 'View your work history, daily hours, and overtime breakdown.',
+    description: 'View your work history and daily hours.',
     iconBg: 'bg-teal-700',
   },
   {

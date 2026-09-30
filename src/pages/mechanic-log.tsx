@@ -27,27 +27,6 @@ import { EMPLOYEE_CODE_NOT_FOUND, findEmployeeByCode, getEntryAssetName, getEntr
 import { divisionLabel } from '@/lib/reference-data';
 import { ShopTimeEntryPayTypeKeyToLabel, ShopTimeEntryPTOTypeKeyToLabel, type ShopTimeEntry } from '@/models/shop-time-entry';
 
-function computeRtOt(dayEntries: ShopTimeEntry[], scheduledStart?: string | null): { rt: number; ot: number } {
-  const RT_THRESHOLD_HOURS = 8;
-  let accumulated = 0;
-  let totalRt = 0;
-  let totalOt = 0;
-  for (const entry of dayEntries) {
-    const hours = getEntryPaidMinutes(dayEntries, entry, new Date(), scheduledStart) / 60;
-    if (isPtoEntry(entry)) {
-      totalRt += hours;
-      continue;
-    }
-    const rtRemaining = Math.max(0, RT_THRESHOLD_HOURS - accumulated);
-    const rt = Math.min(hours, rtRemaining);
-    const ot = Math.max(0, hours - rt);
-    totalRt += rt;
-    totalOt += ot;
-    accumulated += hours;
-  }
-  return { rt: Math.round(totalRt * 100) / 100, ot: Math.round(totalOt * 100) / 100 };
-}
-
 export default function MechanicLogPage() {
   const [employeeCode, setEmployeeCode] = useState('');
   const [selectedEmployeeId, setSelectedEmployeeId] = useState('');
@@ -116,63 +95,22 @@ export default function MechanicLogPage() {
     return days.map((day) => {
       const dateKey = format(day, 'yyyy-MM-dd');
       const entries = filteredEntries.filter((entry: ShopTimeEntry) => entry.clockIn?.startsWith(dateKey));
-      const dayPay = getDayPayMinutes(entries, new Date(), payStart);
-      const { rt, ot } = computeRtOt(entries, payStart);
-      const totalHours = dayPay.totalMinutes / 60;
-      return { day, dateKey, entries, totalHours, rt, ot, dayPay };
+      const totalHours = getDayPayMinutes(entries, new Date(), payStart).totalMinutes / 60;
+      return { day, dateKey, entries, totalHours };
     });
   }, [days, filteredEntries, payStart]);
 
-  const rangeTotals = useMemo(() => {
-    let total = 0;
-    let rt = 0;
-    let ot = 0;
-    for (const d of dayData) {
-      total += d.totalHours;
-      rt += d.rt;
-      ot += d.ot;
-    }
-    return {
-      total: Math.round(total * 100) / 100,
-      rt: Math.round(rt * 100) / 100,
-      ot: Math.round(ot * 100) / 100,
-    };
-  }, [dayData]);
+  const rangeTotalHours = useMemo(() => Math.round(dayData.reduce((sum, d) => sum + d.totalHours, 0) * 100) / 100, [dayData]);
 
   const assetSummary = useMemo(() => {
-    const map = new Map<string, { name: string; total: number; rt: number; ot: number }>();
+    const map = new Map<string, number>();
     for (const d of dayData) {
       for (const entry of d.entries) {
         const name = getEntryAssetName(entry, assets);
-        const hours = getEntryPaidMinutes(d.entries, entry, new Date(), payStart) / 60;
-        const existing = map.get(name) ?? { name, total: 0, rt: 0, ot: 0 };
-        existing.total += hours;
-        map.set(name, existing);
+        map.set(name, (map.get(name) ?? 0) + getEntryPaidMinutes(d.entries, entry, new Date(), payStart) / 60);
       }
     }
-    for (const d of dayData) {
-      const { rt: dayRt, ot: dayOt } = d;
-      const dayTotal = d.totalHours;
-      if (dayTotal <= 0) continue;
-      for (const entry of d.entries) {
-        const name = getEntryAssetName(entry, assets);
-        const hours = getEntryPaidMinutes(d.entries, entry, new Date(), payStart) / 60;
-        const fraction = hours / dayTotal;
-        const existing = map.get(name);
-        if (existing) {
-          existing.rt += dayRt * fraction;
-          existing.ot += dayOt * fraction;
-        }
-      }
-    }
-    return [...map.values()]
-      .map((v) => ({
-        ...v,
-        total: Math.round(v.total * 100) / 100,
-        rt: Math.round(v.rt * 100) / 100,
-        ot: Math.round(v.ot * 100) / 100,
-      }))
-      .sort((a, b) => b.total - a.total);
+    return [...map.entries()].map(([name, total]) => ({ name, total: Math.round(total * 100) / 100 })).sort((a, b) => b.total - a.total);
   }, [dayData, assets, payStart]);
 
   return (
@@ -292,19 +230,9 @@ export default function MechanicLogPage() {
           {/* Weekly summary */}
           <Card className="border-l-4 border-l-primary bg-card text-card-foreground shadow-sm">
             <CardContent className="p-4">
-              <div className="grid grid-cols-3 gap-2 text-center">
-                <div className="rounded-md bg-muted px-3 py-3">
-                  <p className="text-xs text-muted-foreground">Total Hours</p>
-                  <p className="text-2xl font-bold text-foreground">{rangeTotals.total.toFixed(1)}</p>
-                </div>
-                <div className="rounded-md bg-muted px-3 py-3">
-                  <p className="text-xs text-muted-foreground">RT Hours</p>
-                  <p className="text-2xl font-bold text-foreground">{rangeTotals.rt.toFixed(1)}</p>
-                </div>
-                <div className="rounded-md bg-muted px-3 py-3">
-                  <p className="text-xs text-muted-foreground">OT Hours</p>
-                  <p className="text-2xl font-bold text-primary">{rangeTotals.ot.toFixed(1)}</p>
-                </div>
+              <div className="rounded-md bg-muted px-3 py-3 text-center">
+                <p className="text-xs text-muted-foreground">Total Hours</p>
+                <p className="text-2xl font-bold text-foreground">{rangeTotalHours.toFixed(1)}</p>
               </div>
             </CardContent>
           </Card>
@@ -334,11 +262,7 @@ export default function MechanicLogPage() {
                               </p>
                             </div>
                             <div className="flex items-center gap-4">
-                              <div className="flex gap-3 text-sm">
-                                <span className="font-semibold">{d.totalHours.toFixed(1)}h</span>
-                                <span className="text-muted-foreground">RT {d.rt.toFixed(1)}</span>
-                                {d.ot > 0 && <span className="font-medium text-primary">OT {d.ot.toFixed(1)}</span>}
-                              </div>
+                              <span className="text-sm font-semibold">{d.totalHours.toFixed(1)}h</span>
                               <ChevronDown className="h-4 w-4 shrink-0 text-muted-foreground transition-transform [[data-state=open]>*>&]:rotate-180" />
                             </div>
                           </div>
@@ -405,18 +329,14 @@ export default function MechanicLogPage() {
                     <thead>
                       <tr className="border-b border-border text-left text-muted-foreground">
                         <th className="pb-2 pr-4 font-medium">Asset</th>
-                        <th className="pb-2 px-4 text-right font-medium">Total</th>
-                        <th className="pb-2 px-4 text-right font-medium">RT</th>
-                        <th className="pb-2 pl-4 text-right font-medium">OT</th>
+                        <th className="pb-2 pl-4 text-right font-medium">Hours</th>
                       </tr>
                     </thead>
                     <tbody>
                       {assetSummary.map((row) => (
                         <tr key={row.name} className="border-b border-border last:border-0">
                           <td className="py-2 pr-4 font-medium text-foreground">{row.name}</td>
-                          <td className="py-2 px-4 text-right tabular-nums">{row.total.toFixed(1)}</td>
-                          <td className="py-2 px-4 text-right tabular-nums">{row.rt.toFixed(1)}</td>
-                          <td className="py-2 pl-4 text-right tabular-nums text-primary">{row.ot.toFixed(1)}</td>
+                          <td className="py-2 pl-4 text-right tabular-nums">{row.total.toFixed(1)}</td>
                         </tr>
                       ))}
                     </tbody>
