@@ -1,0 +1,41 @@
+---
+description: Every data-mutating action must confirm success and surface failure explicitly
+alwaysApply: true
+---
+
+# Never let a write fail silently
+
+A save that quietly does nothing is worse than one that errors. The Mechanic
+Schedule shipped this way: a 403 on every read and write, no error handling,
+so edits appeared to revert and the cause stayed hidden for weeks.
+
+Every action that writes data must do all four:
+
+1. **Confirm success** — a toast naming what changed ("Start time saved for Oct 1 — 06:30"), not a generic "Saved".
+2. **Surface failure** — an error toast carrying the server message, never an empty `catch`.
+3. **Fire from the server result**, not the click. Use the mutation's `onSuccess`, so a rejected write can't show a success message.
+4. **Show read failures too.** If a list fails to load and falls back to defaults, say so — silent defaults look like real data.
+
+```tsx
+// ❌ BAD — success is assumed, failure is invisible
+upsertSchedule.mutate(payload);
+
+// ✅ GOOD — confirmed on the server's answer; the hook's onError reports failures
+upsertSchedule.mutate(payload, {
+  onSuccess: () => toast.success(`Start time saved for ${when} — ${value}.`),
+});
+```
+
+## Supporting patterns
+
+- **Optimistic with rollback.** Update the cache in `onMutate`, restore the snapshot in `onError`. An accepted change holds immediately; a rejected one visibly reverts instead of appearing to stick.
+- **Summarise bulk writes once.** `Promise.allSettled`, then one toast — "applied to 14 days", or a partial count. Never one toast per item.
+- **Explicit commit affordances.** In editable fields, Enter commits and blurs; Escape restores the stored value. Losing focus is the user's signal the edit landed.
+- **Keep query keys in `src/lib/query-keys.ts`** so a write invalidates every cached view of what it changed.
+
+## When a save fails, check permissions first
+
+Dataverse returns 403 with a precise privilege name (`prvReadswank_MechanicSchedule`).
+A new table needs its privileges added to the **Shop Timecard API** security role —
+Create, Read, Write, Delete, Append at Organization level. Creating the table does
+not grant them.
