@@ -1,0 +1,4 @@
+# core.autocrlf=true rewrites files to CRLF on checkout, which fails `npm run
+# format:check` because Prettier is configured with endOfLine: "lf". Pinning the
+# working-tree ending here keeps the verify gate stable on Windows clones.
+* text=auto eol=lf
