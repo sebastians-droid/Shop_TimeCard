@@ -7,6 +7,20 @@ import type { PunchPin, PunchSegment } from '@/lib/punch-map';
 
 const NEARBY_MILES = 1;
 
+/**
+ * Raster tiles that do not require an API key.
+ * OSM volunteer tiles block apps; CARTO's public CDN now watermarks "API KEY REQUIRED".
+ * Esri World Street Map is a standard XYZ layer (note {z}/{y}/{x} order).
+ */
+const MAP_TILES = {
+  url: 'https://server.arcgisonline.com/ArcGIS/rest/services/World_Street_Map/MapServer/tile/{z}/{y}/{x}',
+  options: {
+    attribution:
+      'Tiles &copy; <a href="https://www.esri.com/">Esri</a> — Esri, HERE, Garmin, USGS, Intermap, INCREMENT P, NRCan, Esri Japan, METI, OSM contributors, and the GIS User Community',
+    maxZoom: 19,
+  },
+};
+
 type PunchMapCanvasProps = {
   pins: PunchPin[];
   segments: PunchSegment[];
@@ -49,10 +63,7 @@ export function PunchMapCanvas({ pins, segments, selectedPinId, onSelectPin }: P
       const map = L.map(containerRef.current, { scrollWheelZoom: true });
       map.setView([SHOP_LOCATION.lat, SHOP_LOCATION.lon], 12);
 
-      const tiles = L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-        attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>',
-        maxZoom: 19,
-      });
+      const tiles = L.tileLayer(MAP_TILES.url, MAP_TILES.options);
       tiles.on('tileerror', () => {
         if (tileErrorToasted) return;
         tileErrorToasted = true;
