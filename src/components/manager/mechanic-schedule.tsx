@@ -2,6 +2,7 @@ import { useMemo, useState } from 'react';
 import { eachDayOfInterval, format, startOfDay } from 'date-fns';
 import { CalendarIcon, CalendarRange, ChevronDown, Copy, Phone, X } from 'lucide-react';
 import type { DateRange } from 'react-day-picker';
+import { toast } from 'sonner';
 
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -36,7 +37,7 @@ type ScheduleFieldsProps = {
   onCall: boolean;
   showApplyAll: boolean;
   onSave: (empId: string, empNum: number | undefined, dk: string, field: ScheduleField, value: string | boolean) => void;
-  onApplyAll: (empId: string, empNum: number | undefined, field: ScheduleField, value: string | boolean) => void;
+  onApplyAll: (empId: string, empNum: number | undefined, field: ScheduleField, value: string | boolean) => void | Promise<void>;
 };
 
 // Declared at module scope on purpose: nesting this inside MechanicSchedule gives
@@ -53,6 +54,19 @@ function ScheduleFields({ empId, empNum, dk, startTime, onCall, showApplyAll, on
             className="bg-background"
             defaultValue={startTime}
             key={`${empId}-${dk}-${startTime}`}
+            aria-label={`Scheduled start, ${format(new Date(`${dk}T00:00:00`), 'MMM d')}`}
+            onKeyDown={(e) => {
+              // Enter commits by releasing focus, which runs the same onBlur save.
+              // Escape abandons the edit and restores the stored value.
+              if (e.key === 'Enter') {
+                e.preventDefault();
+                e.currentTarget.blur();
+              } else if (e.key === 'Escape') {
+                e.preventDefault();
+                e.currentTarget.value = startTime;
+                e.currentTarget.blur();
+              }
+            }}
             onBlur={(e) => {
               const val = e.target.value;
               if (val && val !== startTime) onSave(empId, empNum, dk, 'scheduledStart', val);
@@ -174,27 +188,51 @@ export function MechanicSchedule({ employees, timeEntries }: MechanicSchedulePro
     value: string | boolean,
   ) => {
     const existing = scheduleMap.get(`${empId}-${dk}`);
-    upsertSchedule.mutate({
-      scheduleKey: `${empNum ?? empId.slice(0, 8)}-${dk}`,
-      employeeId: empId,
-      scheduleDate: `${dk}T00:00:00Z`,
-      scheduledStart: field === 'scheduledStart' ? (value as string) : (existing?.scheduledStart ?? DEFAULT_START),
-      onCall: field === 'onCall' ? (value as boolean) : existing?.onCall,
-    });
-  };
-
-  const handleApplyAllDays = (empId: string, empNum: number | undefined, field: 'scheduledStart' | 'onCall', value: string | boolean) => {
-    const days = rangeDays.length > 0 ? rangeDays.map((d) => format(d, 'yyyy-MM-dd')) : [dayKey];
-    for (const dk of days) {
-      const existing = scheduleMap.get(`${empId}-${dk}`);
-      upsertSchedule.mutate({
+    upsertSchedule.mutate(
+      {
         scheduleKey: `${empNum ?? empId.slice(0, 8)}-${dk}`,
         employeeId: empId,
         scheduleDate: `${dk}T00:00:00Z`,
         scheduledStart: field === 'scheduledStart' ? (value as string) : (existing?.scheduledStart ?? DEFAULT_START),
         onCall: field === 'onCall' ? (value as boolean) : existing?.onCall,
-      });
-    }
+      },
+      {
+        // Confirm only once the server accepted it, so a rejected save shows the
+        // hook's error toast rather than a success message it would contradict.
+        onSuccess: () => {
+          const when = format(new Date(`${dk}T00:00:00`), 'MMM d');
+          toast.success(
+            field === 'scheduledStart' ? `Start time saved for ${when} — ${value}.` : `On call ${value ? 'set' : 'cleared'} for ${when}.`,
+          );
+        },
+      },
+    );
+  };
+
+  const handleApplyAllDays = async (
+    empId: string,
+    empNum: number | undefined,
+    field: 'scheduledStart' | 'onCall',
+    value: string | boolean,
+  ) => {
+    const days = rangeDays.length > 0 ? rangeDays.map((d) => format(d, 'yyyy-MM-dd')) : [dayKey];
+    const results = await Promise.allSettled(
+      days.map((dk) => {
+        const existing = scheduleMap.get(`${empId}-${dk}`);
+        return upsertSchedule.mutateAsync({
+          scheduleKey: `${empNum ?? empId.slice(0, 8)}-${dk}`,
+          employeeId: empId,
+          scheduleDate: `${dk}T00:00:00Z`,
+          scheduledStart: field === 'scheduledStart' ? (value as string) : (existing?.scheduledStart ?? DEFAULT_START),
+          onCall: field === 'onCall' ? (value as boolean) : existing?.onCall,
+        });
+      }),
+    );
+    // One summary instead of a toast per day; the hook already reports each failure.
+    const saved = results.filter((r) => r.status === 'fulfilled').length;
+    const label = field === 'scheduledStart' ? `Start time ${value}` : `On call ${value ? 'on' : 'off'}`;
+    if (saved === days.length) toast.success(`${label} applied to ${saved} ${saved === 1 ? 'day' : 'days'}.`);
+    else toast.warning(`${label} applied to ${saved} of ${days.length} days.`);
   };
 
   const toggleOpen = (key: string) => setOpenKeys((cur) => (cur.includes(key) ? cur.filter((k) => k !== key) : [...cur, key]));
