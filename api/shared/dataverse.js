@@ -473,14 +473,16 @@ async function upsertSchedule(record) {
     payload['swank_Employee@odata.bind'] = `/swank_shopemployees(${record.employeeId})`;
   }
 
-  const keyPath = `swank_Employee=${record.employeeId},swank_scheduledate=${record.scheduleDate}`;
+  // Upsert through the swank_schedulealtkey alternate key (swank_employee +
+  // swank_scheduledate). The lookup half of the key must be addressed by its
+  // value property, `_swank_employee_value`; using the navigation property name
+  // is rejected with 400 "The key in the request URI is not valid".
+  const keyPath = `_swank_employee_value=${record.employeeId},swank_scheduledate=${record.scheduleDate}`;
   try {
-    const result = await dataverseFetch('PATCH', `/swank_mechanicschedules(${keyPath})`, payload);
-    return result;
+    return await dataverseFetch('PATCH', `/swank_mechanicschedules(${keyPath})`, payload);
   } catch (error) {
     if (String(error.message).includes('404') || String(error.message).includes('Does Not Exist')) {
-      const result = await dataverseFetch('POST', '/swank_mechanicschedules', payload);
-      return result;
+      return await dataverseFetch('POST', '/swank_mechanicschedules', payload);
     }
     throw error;
   }
