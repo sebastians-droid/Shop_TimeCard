@@ -17,7 +17,15 @@ import {
   mergeDateAndTime,
   type PtoHours,
 } from '@/lib/entry-helpers';
-import { applyNoLunchMarker, getDayPayMinutes, getEntryPaidMinutes, getPtoHours, isPtoEntry, notesHaveNoLunch } from '@/lib/time-rules';
+import {
+  applyNoLunchMarker,
+  getDayPayMinutes,
+  getEntryPaidMinutes,
+  getPtoHours,
+  isPtoEntry,
+  notesHaveNoLunch,
+  scheduledStartFor,
+} from '@/lib/time-rules';
 import type { AppShopEmployee } from '@/lib/shop-employees';
 import type { EditableEntry, NewEntryDraft, PtoDraft } from '@/lib/manager-timecard';
 import type { EquipmentAsset } from '@/models/equipment-asset';
@@ -110,7 +118,8 @@ export function useManagerEntryActions({ employees, assets, timeEntries }: Manag
       notes,
       workDate: dayKey,
     };
-    const hours = getEntryPaidMinutes([...existingDayEntries, provisionalEntry], provisionalEntry) / 60;
+    const hours =
+      getEntryPaidMinutes([...existingDayEntries, provisionalEntry], provisionalEntry, new Date(), scheduledStartFor(employee)) / 60;
 
     try {
       await createTimeEntry.mutateAsync({
@@ -162,6 +171,7 @@ export function useManagerEntryActions({ employees, assets, timeEntries }: Manag
       .filter((row: ShopTimeEntry) => getEntryEmployeeKey(row) === getEntryEmployeeKey(entry))
       .map((row: ShopTimeEntry) => (row.id === entry.id ? updatedEntry : row));
     const ptoHours = getPtoHours(entry);
+    const payStart = scheduledStartFor(employees.find((candidate) => candidate.id === entry.employee?.id));
 
     try {
       await updateTimeEntry.mutateAsync({
@@ -176,7 +186,7 @@ export function useManagerEntryActions({ employees, assets, timeEntries }: Manag
           division: !selectedAsset && manualDivision ? Number(manualDivision) : undefined,
           jobNumber: manualJobNumber || undefined,
           payTypeKey: isPtoEntry(entry) ? entry.payTypeKey : editValues.payTypeKey,
-          hours: clockOut ? getEntryPaidMinutes(employeeDayEntries, updatedEntry) / 60 : undefined,
+          hours: clockOut ? getEntryPaidMinutes(employeeDayEntries, updatedEntry, new Date(), payStart) / 60 : undefined,
           pTOTimeKey:
             isPtoEntry(entry) && (ptoHours === 4 || ptoHours === 8) ? PTO_TIME_KEY_BY_HOURS[ptoHours as PtoHours] : entry.pTOTimeKey,
           workDate: format(new Date(clockIn), 'yyyy-MM-dd'),

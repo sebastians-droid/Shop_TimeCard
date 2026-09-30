@@ -6,6 +6,17 @@ export const LUNCH_MINUTES = 30;
 export const DEFAULT_SCHEDULED_START = '07:00';
 export const NO_LUNCH_MARKER = '[NO_LUNCH]';
 
+/**
+ * Pass as `scheduledStart` for road mechanics, whose paid day begins whenever
+ * they clock in. Distinct from `undefined`, which means "no start on record"
+ * and still falls back to DEFAULT_SCHEDULED_START.
+ */
+export const NO_SCHEDULED_START = null;
+
+/** A road mechanic's clock-in is never pulled forward; everyone else's is. */
+export const scheduledStartFor = (employee: { isRoadMech?: boolean } | null | undefined, storedStart?: string) =>
+  employee?.isRoadMech ? NO_SCHEDULED_START : storedStart;
+
 export function roundToNearestQuarterHour(minutes: number): number {
   if (!Number.isFinite(minutes) || minutes <= 0) return 0;
   return Math.round(minutes / QUARTER_HOUR_MINUTES) * QUARTER_HOUR_MINUTES;
@@ -66,13 +77,15 @@ export function getRawDurationMinutes(entry: ShopTimeEntry, now = new Date()): n
 function getPayableDurationMinutes(
   entry: ShopTimeEntry,
   isFirstOfDay: boolean,
-  scheduledStart: string | undefined,
+  scheduledStart: string | null | undefined,
   now = new Date(),
 ): number {
   if (isPtoEntry(entry)) return getPtoHours(entry) * 60;
   if (!entry.clockIn) return 0;
   let effectiveClockIn = entry.clockIn;
-  const effectiveStart = scheduledStart ?? DEFAULT_SCHEDULED_START;
+  // `null` is NO_SCHEDULED_START and suppresses the clamp entirely; `undefined`
+  // only means none is stored, which still falls back to the default.
+  const effectiveStart = scheduledStart === null ? '' : (scheduledStart ?? DEFAULT_SCHEDULED_START);
   if (isFirstOfDay && effectiveStart) {
     const clockInDate = new Date(entry.clockIn);
     const scheduled = new Date(entry.clockIn);
@@ -97,7 +110,7 @@ export type DayPayMinutes = {
   minutesByEntryId: Map<string, number>;
 };
 
-export function getDayPayMinutes(entries: ShopTimeEntry[], now = new Date(), scheduledStart?: string): DayPayMinutes {
+export function getDayPayMinutes(entries: ShopTimeEntry[], now = new Date(), scheduledStart?: string | null): DayPayMinutes {
   const labor = [...entries]
     .filter((entry) => !isPtoEntry(entry))
     .sort((entryA, entryB) => new Date(entryA.clockIn ?? 0).getTime() - new Date(entryB.clockIn ?? 0).getTime());
@@ -135,7 +148,12 @@ export function getDayPayMinutes(entries: ShopTimeEntry[], now = new Date(), sch
   };
 }
 
-export function getEntryPaidMinutes(dayEntries: ShopTimeEntry[], entry: ShopTimeEntry, now = new Date(), scheduledStart?: string): number {
+export function getEntryPaidMinutes(
+  dayEntries: ShopTimeEntry[],
+  entry: ShopTimeEntry,
+  now = new Date(),
+  scheduledStart?: string | null,
+): number {
   return getDayPayMinutes(dayEntries, now, scheduledStart).minutesByEntryId.get(entry.id) ?? 0;
 }
 

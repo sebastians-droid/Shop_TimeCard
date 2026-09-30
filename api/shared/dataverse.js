@@ -204,6 +204,9 @@ function mapShopEmployee(row) {
     id: row.swank_shopemployeeid,
     autoNumber: row.swank_autonumber || '',
     empNum: toNumber(row.swank_empnum ?? related.swank_empnum),
+    // Nullable in Dataverse: rows predating the column read as null, which means
+    // shop mechanic. Only an explicit true is a road mechanic.
+    isRoadMech: row.swank_isroadmech === true,
     employee: name
       ? {
           id: related.swank_employeeid || row._swank_employee_value,
@@ -319,13 +322,13 @@ function timeEntryPayload(record, { isCreate }) {
 async function listEmployees() {
   try {
     const rows = await listAll(
-      '/swank_shopemployees?$select=swank_shopemployeeid,swank_autonumber,swank_empnum,_swank_employee_value&$expand=swank_Employee($select=swank_employeeid,swank_name,swank_empnum)&$filter=statecode eq 0&$orderby=swank_autonumber',
+      '/swank_shopemployees?$select=swank_shopemployeeid,swank_autonumber,swank_empnum,swank_isroadmech,_swank_employee_value&$expand=swank_Employee($select=swank_employeeid,swank_name,swank_empnum)&$filter=statecode eq 0&$orderby=swank_autonumber',
     );
     return rows.map(mapShopEmployee).filter((row) => typeof row.empNum === 'number');
   } catch (error) {
     try {
       const rows = await listAll(
-        '/swank_shopemployees?$select=swank_shopemployeeid,swank_autonumber,swank_empnum,_swank_employee_value&$filter=statecode eq 0',
+        '/swank_shopemployees?$select=swank_shopemployeeid,swank_autonumber,swank_empnum,swank_isroadmech,_swank_employee_value&$filter=statecode eq 0',
       );
       return rows.map(mapShopEmployee).filter((row) => typeof row.empNum === 'number');
     } catch {
@@ -381,6 +384,7 @@ async function createShopEmployee(record) {
   const payload = {};
   if (record.autoNumber) payload.swank_autonumber = record.autoNumber;
   if (record.empNum !== undefined) payload.swank_empnum = record.empNum;
+  if (record.isRoadMech !== undefined) payload.swank_isroadmech = Boolean(record.isRoadMech);
   if (record.employeeId) {
     payload['swank_Employee@odata.bind'] = `/swank_employees(${record.employeeId})`;
   }
@@ -392,6 +396,7 @@ async function updateShopEmployee(id, record) {
   const payload = {};
   if (record.autoNumber !== undefined) payload.swank_autonumber = record.autoNumber || null;
   if (record.empNum !== undefined) payload.swank_empnum = record.empNum;
+  if (record.isRoadMech !== undefined) payload.swank_isroadmech = Boolean(record.isRoadMech);
   if (record.employeeId !== undefined) {
     payload['swank_Employee@odata.bind'] = record.employeeId ? `/swank_employees(${record.employeeId})` : null;
   }

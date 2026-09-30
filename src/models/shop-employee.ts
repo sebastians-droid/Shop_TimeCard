@@ -8,4 +8,6 @@ export interface ShopEmployee {
   autoNumber: string;
   employee?: Pick<Employee, 'id' | 'name1'>;
   empNum?: number;
+  /** Road mechanics have no scheduled start; their paid day begins at clock-in. */
+  isRoadMech?: boolean;
 }

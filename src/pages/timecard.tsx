@@ -31,6 +31,7 @@ import {
   getPtoHours,
   getRawDurationMinutes,
   isPtoEntry,
+  scheduledStartFor,
   notesHaveNoLunch,
   stripNoLunchMarker,
 } from '@/lib/time-rules';
@@ -119,7 +120,10 @@ export default function TimecardPage() {
     return employeeEntries.filter((entry: ShopTimeEntry) => entry.clockIn?.startsWith(today));
   }, [employeeEntries, selectedEmployee, selectedEmployeeId]);
   const employeeActiveEntry = employeeTodayEntries.find((entry: ShopTimeEntry) => !entry.clockOut && !isPtoEntry(entry));
-  const todayPay = useMemo(() => getDayPayMinutes(employeeTodayEntries), [employeeTodayEntries]);
+  // Road mechanics start whenever they punch in, so their early time is paid
+  // rather than being pulled forward to the default start.
+  const payStart = scheduledStartFor(selectedEmployee);
+  const todayPay = useMemo(() => getDayPayMinutes(employeeTodayEntries, new Date(), payStart), [employeeTodayEntries, payStart]);
   const voicePhrases = useMemo(
     () =>
       [
@@ -215,7 +219,7 @@ export default function TimecardPage() {
           id: closedActiveEntry.id,
           changedFields: {
             clockOut: clockIn,
-            hours: getEntryPaidMinutes(dayAfterClose, closedActiveEntry) / 60,
+            hours: getEntryPaidMinutes(dayAfterClose, closedActiveEntry, new Date(), payStart) / 60,
             clockOutLat: pos?.lat,
             clockOutLon: pos?.lon,
           },
@@ -303,7 +307,7 @@ export default function TimecardPage() {
         id: entry.id,
         changedFields: {
           clockOut,
-          hours: getEntryPaidMinutes(dayEntries, updatedEntry) / 60,
+          hours: getEntryPaidMinutes(dayEntries, updatedEntry, new Date(), payStart) / 60,
           clockOutLat: pos?.lat,
           clockOutLon: pos?.lon,
         },

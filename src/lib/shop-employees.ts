@@ -3,6 +3,7 @@ import type { ShopEmployee } from '@/models/shop-employee';
 export type AppShopEmployee = ShopEmployee & {
   employeeName: string;
   employeeCode: number;
+  isRoadMech: boolean;
 };
 
 export const mapShopEmployees = (employees: ShopEmployee[]): AppShopEmployee[] =>
@@ -16,5 +17,6 @@ export const mapShopEmployees = (employees: ShopEmployee[]): AppShopEmployee[] =
       ...employee,
       employeeName: employee.employee?.name1 || employee.autoNumber || `Employee ${employee.empNum}`,
       employeeCode: employee.empNum as number,
+      isRoadMech: employee.isRoadMech === true,
     }))
     .sort((employeeA: AppShopEmployee, employeeB: AppShopEmployee) => employeeA.employeeName.localeCompare(employeeB.employeeName));

@@ -141,6 +141,36 @@ export function useCreateShopEmployee() {
   });
 }
 
+export type RoadMechanicUpdate = { id: string; isRoadMech: boolean };
+
+export function useSetRoadMechanic() {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, isRoadMech }: RoadMechanicUpdate) =>
+      apiFetch<ShopEmployee>(`/api/employees/${id}`, {
+        method: 'PATCH',
+        body: JSON.stringify({ isRoadMech }),
+      }),
+    // Move the card to the other column immediately so the drop looks like it
+    // landed; onError puts it back if the server refuses.
+    onMutate: async ({ id, isRoadMech }) => {
+      await client.cancelQueries({ queryKey: queryKeys.shopEmployees() });
+      const previous = client.getQueryData<ShopEmployee[]>(queryKeys.shopEmployees());
+      client.setQueryData<ShopEmployee[]>(queryKeys.shopEmployees(), (rows) =>
+        rows?.map((row) => (row.id === id ? { ...row, isRoadMech } : row)),
+      );
+      return { previous };
+    },
+    onError: (error, _record, context) => {
+      if (context?.previous) client.setQueryData(queryKeys.shopEmployees(), context.previous);
+      toast.error(error instanceof Error ? error.message : 'Unable to change the mechanic type.');
+    },
+    onSettled: () => {
+      client.invalidateQueries({ queryKey: queryKeys.shopEmployees() });
+    },
+  });
+}
+
 export function useDeactivateShopEmployee() {
   const client = useQueryClient();
   return useMutation({

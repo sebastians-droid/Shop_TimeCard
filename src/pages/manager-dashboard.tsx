@@ -56,7 +56,15 @@ import {
   type NewEntryDraft,
   type PtoDraft,
 } from '@/lib/manager-timecard';
-import { formatDuration, getDayPayMinutes, getPtoHours, getRawDurationMinutes, isPtoEntry, stripNoLunchMarker } from '@/lib/time-rules';
+import {
+  formatDuration,
+  getDayPayMinutes,
+  getPtoHours,
+  getRawDurationMinutes,
+  isPtoEntry,
+  scheduledStartFor,
+  stripNoLunchMarker,
+} from '@/lib/time-rules';
 import {
   getEntryAssetName,
   getEntryJobNumber,
@@ -155,7 +163,9 @@ export default function ManagerDashboardPage() {
 
     return Array.from(summaries.values())
       .map((summary: EmployeeDailySummary) => {
-        const pay = getDayPayMinutes(summary.entries);
+        const employeeId = summary.entries[0]?.employee?.id;
+        const employee = employees.find((candidate: AppShopEmployee) => candidate.id === employeeId);
+        const pay = getDayPayMinutes(summary.entries, new Date(), scheduledStartFor(employee));
         return {
           ...summary,
           totalMinutes: pay.totalMinutes,
@@ -194,11 +204,11 @@ export default function ManagerDashboardPage() {
       current.push(entry);
       groups.set(key, current);
     });
-    return [...groups.values()].reduce(
-      (total: number, dayEntries: ShopTimeEntry[]) => total + getDayPayMinutes(dayEntries).totalMinutes,
-      0,
-    );
-  }, [weeklyEntries]);
+    return [...groups.values()].reduce((total: number, dayEntries: ShopTimeEntry[]) => {
+      const employee = employees.find((candidate: AppShopEmployee) => candidate.id === dayEntries[0]?.employee?.id);
+      return total + getDayPayMinutes(dayEntries, new Date(), scheduledStartFor(employee)).totalMinutes;
+    }, 0);
+  }, [employees, weeklyEntries]);
 
   const rangeViewEmployee = useMemo(() => {
     if (!rangeViewEmployeeId) return null;
@@ -213,7 +223,7 @@ export default function ManagerDashboardPage() {
       const dayEntries = timeEntries
         .filter((entry: ShopTimeEntry) => entry.employee?.id === rangeViewEmployeeId && entry.clockIn?.startsWith(dayKey))
         .sort((a: ShopTimeEntry, b: ShopTimeEntry) => new Date(a.clockIn ?? '').getTime() - new Date(b.clockIn ?? '').getTime());
-      const pay = getDayPayMinutes(dayEntries);
+      const pay = getDayPayMinutes(dayEntries, new Date(), scheduledStartFor(rangeViewEmployee));
       return {
         day,
         dayKey,
@@ -224,7 +234,7 @@ export default function ManagerDashboardPage() {
         onCall: dayEntries.some((entry: ShopTimeEntry) => entry.onCall),
       };
     });
-  }, [rangeViewEmployeeId, rangeViewRange, timeEntries]);
+  }, [rangeViewEmployee, rangeViewEmployeeId, rangeViewRange, timeEntries]);
 
   const handleToggleEmployee = (employeeKey: string) => {
     setOpenEmployeeKeys((currentKeys: string[]) =>

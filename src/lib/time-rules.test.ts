@@ -14,8 +14,10 @@ import {
   notesHaveNoLunch,
   roundClockInUpToQuarterHour,
   roundToNearestQuarterHour,
+  scheduledStartFor,
   stripNoLunchMarker,
   NO_LUNCH_MARKER,
+  NO_SCHEDULED_START,
 } from '@/lib/time-rules';
 
 /**
@@ -239,10 +241,36 @@ describe('getDayPayMinutes', () => {
     expect(pay.minutesByEntryId.get('pto')).toBe(240);
   });
 
+  it('pays a road mechanic from the actual clock-in instead of a default start', () => {
+    const day = [entry({ id: 'a', clockIn: at(DAY, '05:30'), clockOut: at(DAY, '15:00') })];
+
+    // Without a start on record the 05:30 punch is pulled forward to 07:00.
+    expect(getDayPayMinutes(day).paidLaborMinutes).toBe(450);
+    // NO_SCHEDULED_START suppresses the clamp, paying all 9.5h less lunch.
+    expect(getDayPayMinutes(day, new Date(), NO_SCHEDULED_START).paidLaborMinutes).toBe(540);
+  });
+
   it('exposes a single entry share through getEntryPaidMinutes', () => {
     const first = entry({ id: 'first', clockIn: at(DAY, '07:00'), clockOut: at(DAY, '11:00') });
     const day = [first, entry({ id: 'second', clockIn: at(DAY, '11:00'), clockOut: at(DAY, '15:00') })];
     expect(getEntryPaidMinutes(day, first)).toBe(240);
+  });
+});
+
+describe('scheduledStartFor', () => {
+  it('suppresses the clamp for road mechanics even when a start is stored', () => {
+    expect(scheduledStartFor({ isRoadMech: true }, '06:00')).toBe(NO_SCHEDULED_START);
+  });
+
+  it('passes the stored start through for shop mechanics', () => {
+    expect(scheduledStartFor({ isRoadMech: false }, '06:00')).toBe('06:00');
+  });
+
+  it('leaves an unknown employee on the default-start path', () => {
+    // undefined, not null: the caller has no start on record rather than an
+    // employee who is paid from clock-in.
+    expect(scheduledStartFor(undefined)).toBeUndefined();
+    expect(scheduledStartFor(null)).toBeUndefined();
   });
 });
 

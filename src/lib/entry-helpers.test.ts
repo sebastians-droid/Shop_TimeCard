@@ -234,6 +234,17 @@ describe('mapShopEmployees', () => {
     expect(mapped.map((employee) => employee.employeeName)).toEqual(['Alex Chen', 'Dana Ruiz']);
   });
 
+  it('treats a missing road-mechanic flag as a shop mechanic', () => {
+    // Dataverse leaves swank_isroadmech null on rows predating the column.
+    const [withoutFlag, withFlag] = mapShopEmployees([
+      { id: 'a', autoNumber: 'SE-001', empNum: 1042, employee: { id: 'e1', name1: 'Alex Chen' } },
+      { id: 'b', autoNumber: 'SE-002', empNum: 1043, employee: { id: 'e2', name1: 'Dana Ruiz' }, isRoadMech: true },
+    ]);
+
+    expect(withoutFlag.isRoadMech).toBe(false);
+    expect(withFlag.isRoadMech).toBe(true);
+  });
+
   it('drops employees without a usable employee number', () => {
     const mapped = mapShopEmployees([
       { id: 'a', autoNumber: 'SE-001', empNum: 1042, employee: { id: 'e1', name1: 'Dana Ruiz' } },

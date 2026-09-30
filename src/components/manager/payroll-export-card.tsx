@@ -19,6 +19,7 @@ import {
   getPtoHours,
   isPtoEntry,
   lunchCsvLabel,
+  scheduledStartFor,
 } from '@/lib/time-rules';
 import {
   getEntryAssetName,
@@ -103,8 +104,11 @@ export function PayrollExportCard({
           entriesByDay.set(dayKey, dayEntries);
         });
         const empId = firstEntry?.employee?.id;
+        // Road mechanics are paid from their actual clock-in, so their stored
+        // start (and the 07:00 fallback) must not pull an early punch forward.
+        const employee = empId ? employees.find((candidate) => candidate.id === empId) : undefined;
         const dayHours = dayKeys.map((dayKey) => {
-          const scheduled = empId ? scheduleMap.get(`${empId}-${dayKey}`) : undefined;
+          const scheduled = scheduledStartFor(employee, empId ? scheduleMap.get(`${empId}-${dayKey}`) : undefined);
           return getDayPayMinutes(entriesByDay.get(dayKey) ?? [], undefined, scheduled).totalMinutes;
         });
         const noLunchDays = dayKeys.flatMap((dayKey, index) => {
@@ -119,7 +123,7 @@ export function PayrollExportCard({
           weekHours: dayHours.reduce((total, minutes) => total + minutes, 0),
           rows: sortedEntries.map((entry: ShopTimeEntry) => {
             const dayEntries = entriesByDay.get(getEntryWorkDateKey(entry)) ?? [entry];
-            const dayScheduled = empId ? scheduleMap.get(`${empId}-${getEntryWorkDateKey(entry)}`) : undefined;
+            const dayScheduled = scheduledStartFor(employee, empId ? scheduleMap.get(`${empId}-${getEntryWorkDateKey(entry)}`) : undefined);
             return {
               workDate: getEntryWorkDateKey(entry),
               punchIn: entry.clockIn ? format(new Date(entry.clockIn), 'M/d/yyyy p') : '',
@@ -134,7 +138,7 @@ export function PayrollExportCard({
               payType: isPtoEntry(entry) ? '' : ShopTimeEntryPayTypeKeyToLabel[entry.payTypeKey ?? DEFAULT_PAY_TYPE],
               status: entry.clockOut ? 'Complete' : 'Active',
               notes: getEmployeeNotes(entry.notes),
-              scheduledStart: dayScheduled ?? DEFAULT_SCHEDULED_START,
+              scheduledStart: employee?.isRoadMech ? 'Road mechanic' : (dayScheduled ?? DEFAULT_SCHEDULED_START),
               clockInDistance: entryDistanceMiles(entry.clockInLat, entry.clockInLon),
               clockOutDistance: entryDistanceMiles(entry.clockOutLat, entry.clockOutLon),
             };

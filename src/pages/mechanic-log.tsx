@@ -14,18 +14,26 @@ import { Label } from '@/components/ui/label';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { useAllEquipmentAssets, useShopEmployeeList, useShopTimeEntryList } from '@/hooks/use-shop-data';
 import { mapShopEmployees, type AppShopEmployee } from '@/lib/shop-employees';
-import { formatDuration, getDayPayMinutes, getEntryPaidMinutes, getPtoHours, getRawDurationMinutes, isPtoEntry } from '@/lib/time-rules';
+import {
+  formatDuration,
+  getDayPayMinutes,
+  getEntryPaidMinutes,
+  getPtoHours,
+  getRawDurationMinutes,
+  isPtoEntry,
+  scheduledStartFor,
+} from '@/lib/time-rules';
 import { EMPLOYEE_CODE_NOT_FOUND, findEmployeeByCode, getEntryAssetName, getEntryDivision, getEntryJobNumber } from '@/lib/entry-helpers';
 import { divisionLabel } from '@/lib/reference-data';
 import { ShopTimeEntryPayTypeKeyToLabel, ShopTimeEntryPTOTypeKeyToLabel, type ShopTimeEntry } from '@/models/shop-time-entry';
 
-function computeRtOt(dayEntries: ShopTimeEntry[]): { rt: number; ot: number } {
+function computeRtOt(dayEntries: ShopTimeEntry[], scheduledStart?: string | null): { rt: number; ot: number } {
   const RT_THRESHOLD_HOURS = 8;
   let accumulated = 0;
   let totalRt = 0;
   let totalOt = 0;
   for (const entry of dayEntries) {
-    const hours = getEntryPaidMinutes(dayEntries, entry) / 60;
+    const hours = getEntryPaidMinutes(dayEntries, entry, new Date(), scheduledStart) / 60;
     if (isPtoEntry(entry)) {
       totalRt += hours;
       continue;
@@ -61,6 +69,8 @@ export default function MechanicLogPage() {
   const { data: timeEntries = [] } = useShopTimeEntryList();
 
   const selectedEmployee = employees.find((e: AppShopEmployee) => e.id === selectedEmployeeId);
+  // Road mechanics are paid from their actual clock-in rather than a default start.
+  const payStart = scheduledStartFor(selectedEmployee);
 
   const handleEmployeeCodeSubmit = (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -106,12 +116,12 @@ export default function MechanicLogPage() {
     return days.map((day) => {
       const dateKey = format(day, 'yyyy-MM-dd');
       const entries = filteredEntries.filter((entry: ShopTimeEntry) => entry.clockIn?.startsWith(dateKey));
-      const dayPay = getDayPayMinutes(entries);
-      const { rt, ot } = computeRtOt(entries);
+      const dayPay = getDayPayMinutes(entries, new Date(), payStart);
+      const { rt, ot } = computeRtOt(entries, payStart);
       const totalHours = dayPay.totalMinutes / 60;
       return { day, dateKey, entries, totalHours, rt, ot, dayPay };
     });
-  }, [days, filteredEntries]);
+  }, [days, filteredEntries, payStart]);
 
   const rangeTotals = useMemo(() => {
     let total = 0;
@@ -134,7 +144,7 @@ export default function MechanicLogPage() {
     for (const d of dayData) {
       for (const entry of d.entries) {
         const name = getEntryAssetName(entry, assets);
-        const hours = getEntryPaidMinutes(d.entries, entry) / 60;
+        const hours = getEntryPaidMinutes(d.entries, entry, new Date(), payStart) / 60;
         const existing = map.get(name) ?? { name, total: 0, rt: 0, ot: 0 };
         existing.total += hours;
         map.set(name, existing);
@@ -146,7 +156,7 @@ export default function MechanicLogPage() {
       if (dayTotal <= 0) continue;
       for (const entry of d.entries) {
         const name = getEntryAssetName(entry, assets);
-        const hours = getEntryPaidMinutes(d.entries, entry) / 60;
+        const hours = getEntryPaidMinutes(d.entries, entry, new Date(), payStart) / 60;
         const fraction = hours / dayTotal;
         const existing = map.get(name);
         if (existing) {
@@ -163,7 +173,7 @@ export default function MechanicLogPage() {
         ot: Math.round(v.ot * 100) / 100,
       }))
       .sort((a, b) => b.total - a.total);
-  }, [dayData, assets]);
+  }, [dayData, assets, payStart]);
 
   return (
     <main className="mx-auto flex w-full max-w-5xl flex-1 flex-col gap-6 p-4 sm:p-6 lg:p-8">

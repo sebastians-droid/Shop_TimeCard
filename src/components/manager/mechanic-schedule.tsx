@@ -1,6 +1,6 @@
-import { useMemo, useState } from 'react';
+import { useMemo, useState, type DragEvent } from 'react';
 import { eachDayOfInterval, format, startOfDay } from 'date-fns';
-import { CalendarIcon, CalendarRange, ChevronDown, Copy, Phone, X } from 'lucide-react';
+import { CalendarIcon, CalendarRange, ChevronDown, Copy, GripVertical, Phone, Truck, Wrench, X } from 'lucide-react';
 import type { DateRange } from 'react-day-picker';
 import { toast } from '@/lib/toast';
 
@@ -13,7 +13,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { useScheduleList, useUpsertSchedule, type MechanicScheduleRow } from '@/hooks/use-shop-data';
+import { useScheduleList, useSetRoadMechanic, useUpsertSchedule, type MechanicScheduleRow } from '@/hooks/use-shop-data';
 import type { AppShopEmployee } from '@/lib/shop-employees';
 import type { ShopTimeEntry } from '@/models/shop-time-entry';
 import { getPtoHours, isPtoEntry } from '@/lib/time-rules';
@@ -21,6 +21,23 @@ import { getEntryWorkDateKey } from '@/lib/entry-helpers';
 import { ShopTimeEntryPTOTypeKeyToLabel } from '@/models/shop-time-entry';
 
 const DEFAULT_START = '07:00';
+
+type MechanicColumn = 'shop' | 'road';
+
+const COLUMNS: Record<MechanicColumn, { title: string; icon: typeof Wrench; blurb: string; empty: string }> = {
+  shop: {
+    title: 'Shop Mechanics',
+    icon: Wrench,
+    blurb: 'Work a scheduled start time.',
+    empty: 'No shop mechanics. Drag someone here to give them a scheduled start.',
+  },
+  road: {
+    title: 'Road Mechanics',
+    icon: Truck,
+    blurb: 'No scheduled start — the day begins at clock-in.',
+    empty: 'No road mechanics. Drag someone here to pay them from their clock-in.',
+  },
+};
 
 type MechanicScheduleProps = {
   employees: AppShopEmployee[];
@@ -36,6 +53,8 @@ type ScheduleFieldsProps = {
   startTime: string;
   onCall: boolean;
   showApplyAll: boolean;
+  /** Road mechanics have no scheduled start, so the field is withheld entirely. */
+  showScheduledStart: boolean;
   onSave: (empId: string, empNum: number | undefined, dk: string, field: ScheduleField, value: string | boolean) => void;
   onApplyAll: (empId: string, empNum: number | undefined, field: ScheduleField, value: string | boolean) => void | Promise<void>;
 };
@@ -43,48 +62,60 @@ type ScheduleFieldsProps = {
 // Declared at module scope on purpose: nesting this inside MechanicSchedule gives
 // it a new component identity on every parent render, which remounts the inputs
 // and discards whatever the manager just typed.
-function ScheduleFields({ empId, empNum, dk, startTime, onCall, showApplyAll, onSave, onApplyAll }: ScheduleFieldsProps) {
+function ScheduleFields({
+  empId,
+  empNum,
+  dk,
+  startTime,
+  onCall,
+  showApplyAll,
+  showScheduledStart,
+  onSave,
+  onApplyAll,
+}: ScheduleFieldsProps) {
   return (
-    <div className="grid gap-4 sm:grid-cols-2">
-      <div className="space-y-2">
-        <Label>Scheduled start</Label>
-        <div className="flex gap-2">
-          <Input
-            type="time"
-            className="bg-background"
-            defaultValue={startTime}
-            key={`${empId}-${dk}-${startTime}`}
-            aria-label={`Scheduled start, ${format(new Date(`${dk}T00:00:00`), 'MMM d')}`}
-            onKeyDown={(e) => {
-              // Enter commits by releasing focus, which runs the same onBlur save.
-              // Escape abandons the edit and restores the stored value.
-              if (e.key === 'Enter') {
-                e.preventDefault();
-                e.currentTarget.blur();
-              } else if (e.key === 'Escape') {
-                e.preventDefault();
-                e.currentTarget.value = startTime;
-                e.currentTarget.blur();
-              }
-            }}
-            onBlur={(e) => {
-              const val = e.target.value;
-              if (val && val !== startTime) onSave(empId, empNum, dk, 'scheduledStart', val);
-            }}
-          />
-          {showApplyAll ? (
-            <Button
-              type="button"
-              variant="outline"
-              className="shrink-0"
-              onClick={() => onApplyAll(empId, empNum, 'scheduledStart', startTime)}
-              title={`Apply ${startTime} to all days in range`}
-            >
-              <Copy className="mr-2 h-4 w-4" /> All days
-            </Button>
-          ) : null}
+    <div className={`grid gap-4 ${showScheduledStart ? 'sm:grid-cols-2' : ''}`}>
+      {showScheduledStart ? (
+        <div className="space-y-2">
+          <Label>Scheduled start</Label>
+          <div className="flex gap-2">
+            <Input
+              type="time"
+              className="bg-background"
+              defaultValue={startTime}
+              key={`${empId}-${dk}-${startTime}`}
+              aria-label={`Scheduled start, ${format(new Date(`${dk}T00:00:00`), 'MMM d')}`}
+              onKeyDown={(e) => {
+                // Enter commits by releasing focus, which runs the same onBlur save.
+                // Escape abandons the edit and restores the stored value.
+                if (e.key === 'Enter') {
+                  e.preventDefault();
+                  e.currentTarget.blur();
+                } else if (e.key === 'Escape') {
+                  e.preventDefault();
+                  e.currentTarget.value = startTime;
+                  e.currentTarget.blur();
+                }
+              }}
+              onBlur={(e) => {
+                const val = e.target.value;
+                if (val && val !== startTime) onSave(empId, empNum, dk, 'scheduledStart', val);
+              }}
+            />
+            {showApplyAll ? (
+              <Button
+                type="button"
+                variant="outline"
+                className="shrink-0"
+                onClick={() => onApplyAll(empId, empNum, 'scheduledStart', startTime)}
+                title={`Apply ${startTime} to all days in range`}
+              >
+                <Copy className="mr-2 h-4 w-4" /> All days
+              </Button>
+            ) : null}
+          </div>
         </div>
-      </div>
+      ) : null}
       <div className="space-y-2">
         <Label>On Call</Label>
         <div className="flex gap-2">
@@ -134,6 +165,10 @@ export function MechanicSchedule({ employees, timeEntries }: MechanicSchedulePro
   const [rangeViewRange, setRangeViewRange] = useState<DateRange | undefined>(undefined);
   const [rangeOpenDay, setRangeOpenDay] = useState('');
 
+  // Drag state
+  const [draggingId, setDraggingId] = useState('');
+  const [dragOverColumn, setDragOverColumn] = useState<MechanicColumn | ''>('');
+
   const dayKey = format(selectedDate, 'yyyy-MM-dd');
 
   // Query the full month surrounding the selected date for single-day view,
@@ -142,6 +177,7 @@ export function MechanicSchedule({ employees, timeEntries }: MechanicSchedulePro
   const queryTo = rangeViewRange?.to ? format(rangeViewRange.to, "yyyy-MM-dd'T'23:59:59'Z'") : `${dayKey}T23:59:59Z`;
   const { data: schedules = [], isLoading: schedulesLoading, error: schedulesError } = useScheduleList(queryFrom, queryTo);
   const upsertSchedule = useUpsertSchedule();
+  const setRoadMechanic = useSetRoadMechanic();
 
   const scheduleMap = useMemo(() => {
     const map = new Map<string, MechanicScheduleRow>();
@@ -168,6 +204,14 @@ export function MechanicSchedule({ employees, timeEntries }: MechanicSchedulePro
   }, [timeEntries]);
 
   const sortedEmployees = useMemo(() => [...employees].sort((a, b) => a.employeeName.localeCompare(b.employeeName)), [employees]);
+
+  const byColumn = useMemo(
+    () => ({
+      shop: sortedEmployees.filter((emp) => !emp.isRoadMech),
+      road: sortedEmployees.filter((emp) => emp.isRoadMech),
+    }),
+    [sortedEmployees],
+  );
 
   const rangeEmployee = rangeEmployeeId ? (employees.find((e) => e.id === rangeEmployeeId) ?? null) : null;
 
@@ -235,6 +279,31 @@ export function MechanicSchedule({ employees, timeEntries }: MechanicSchedulePro
     else toast.warning(`${label} applied to ${saved} of ${days.length} days.`);
   };
 
+  const handleMoveColumn = (emp: AppShopEmployee, target: MechanicColumn) => {
+    const isRoadMech = target === 'road';
+    if (emp.isRoadMech === isRoadMech) return;
+    setRoadMechanic.mutate(
+      { id: emp.id, isRoadMech },
+      {
+        onSuccess: () =>
+          toast.success(
+            isRoadMech
+              ? `${emp.employeeName} is now a road mechanic — paid from clock-in.`
+              : `${emp.employeeName} is now a shop mechanic — scheduled start ${getStart(emp.id, dayKey)}.`,
+          ),
+      },
+    );
+  };
+
+  const handleDrop = (event: DragEvent, target: MechanicColumn) => {
+    event.preventDefault();
+    setDragOverColumn('');
+    setDraggingId('');
+    const droppedId = event.dataTransfer.getData('text/plain');
+    const emp = employees.find((candidate) => candidate.id === droppedId);
+    if (emp) handleMoveColumn(emp, target);
+  };
+
   const toggleOpen = (key: string) => setOpenKeys((cur) => (cur.includes(key) ? cur.filter((k) => k !== key) : [...cur, key]));
 
   const showApplyAll = rangeDays.length > 1;
@@ -251,7 +320,10 @@ export function MechanicSchedule({ employees, timeEntries }: MechanicSchedulePro
                 <CalendarRange className="h-5 w-5" /> {rangeEmployee?.employeeName ?? 'Employee'} — Schedule
               </CardTitle>
               <p className="mt-1 text-sm text-muted-foreground">
-                Employee {rangeEmployee?.employeeCode} &middot; Set start times and on-call for a date range.
+                Employee {rangeEmployee?.employeeCode} &middot;{' '}
+                {rangeEmployee?.isRoadMech
+                  ? 'Road mechanic — set on-call for a date range.'
+                  : 'Set start times and on-call for a date range.'}
               </p>
             </div>
             <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
@@ -269,6 +341,7 @@ export function MechanicSchedule({ employees, timeEntries }: MechanicSchedulePro
                   {sortedEmployees.map((emp) => (
                     <SelectItem key={emp.id} value={emp.id}>
                       {emp.employeeName}
+                      {emp.isRoadMech ? ' (Road)' : ''}
                     </SelectItem>
                   ))}
                 </SelectContent>
@@ -341,7 +414,9 @@ export function MechanicSchedule({ employees, timeEntries }: MechanicSchedulePro
                     <button type="button" className="flex w-full items-center justify-between p-3 text-left">
                       <div>
                         <p className="font-semibold text-sm">{format(day, 'EEEE, MMM d')}</p>
-                        <p className="text-xs text-muted-foreground">Start {startTime}</p>
+                        <p className="text-xs text-muted-foreground">
+                          {rangeEmployee?.isRoadMech ? 'Starts at clock-in' : `Start ${startTime}`}
+                        </p>
                       </div>
                       <div className="flex items-center gap-2">
                         {onCall ? (
@@ -367,6 +442,7 @@ export function MechanicSchedule({ employees, timeEntries }: MechanicSchedulePro
                         startTime={startTime}
                         onCall={onCall}
                         showApplyAll={showApplyAll}
+                        showScheduledStart={!rangeEmployee?.isRoadMech}
                         onSave={handleSave}
                         onApplyAll={handleApplyAllDays}
                       />
@@ -392,7 +468,7 @@ export function MechanicSchedule({ employees, timeEntries }: MechanicSchedulePro
               <CalendarIcon className="h-5 w-5" /> Mechanic Schedule
             </CardTitle>
             <p className="mt-1 text-sm text-muted-foreground">
-              {format(selectedDate, 'EEEE, MMM d')} &middot; Set start times and on-call.
+              {format(selectedDate, 'EEEE, MMM d')} &middot; Drag a mechanic between columns to change their type.
             </p>
           </div>
           <Popover>
@@ -427,68 +503,131 @@ export function MechanicSchedule({ employees, timeEntries }: MechanicSchedulePro
             {schedulesError instanceof Error ? ` (${schedulesError.message})` : null}
           </p>
         ) : null}
-        {sortedEmployees.map((emp) => {
-          const startTime = getStart(emp.id, dayKey);
-          const onCall = getOnCall(emp.id, dayKey);
-          const ptoEntries = ptoMap.get(`${emp.id}-${dayKey}`);
-          const isOpen = openKeys.includes(emp.id);
+        <div className="grid grid-cols-2 gap-4">
+          {(['shop', 'road'] as MechanicColumn[]).map((column) => {
+            const { title, icon: ColumnIcon, blurb, empty } = COLUMNS[column];
+            const isRoad = column === 'road';
+            const list = byColumn[column];
 
-          return (
-            <Collapsible key={emp.id} open={isOpen} onOpenChange={() => toggleOpen(emp.id)} asChild>
-              <section className="rounded-lg border border-border bg-background">
-                <CollapsibleTrigger asChild>
-                  <button type="button" className="flex w-full items-center justify-between gap-3 p-4 text-left">
-                    <div>
-                      <p className="font-semibold">{emp.employeeName}</p>
-                      <p className="text-sm text-muted-foreground">
-                        Employee {emp.employeeCode} &middot; Start {startTime}
-                      </p>
-                    </div>
-                    <div className="flex items-center gap-2">
-                      {onCall ? (
-                        <Badge variant="destructive">
-                          <Phone className="mr-1 h-3 w-3" /> On Call
-                        </Badge>
-                      ) : null}
-                      {ptoEntries?.map((pto) => (
-                        <Badge key={pto.id} variant="secondary" className="text-xs">
-                          {getPtoHours(pto)}h {pto.pTOTypeKey ? `${ShopTimeEntryPTOTypeKeyToLabel[pto.pTOTypeKey]} PTO` : 'PTO'}
-                        </Badge>
-                      ))}
-                      <ChevronDown className={`h-4 w-4 transition-transform ${isOpen ? 'rotate-180' : ''}`} />
-                    </div>
-                  </button>
-                </CollapsibleTrigger>
-                <CollapsibleContent>
-                  <div className="border-t border-border px-4 py-3 space-y-3">
-                    <ScheduleFields
-                      empId={emp.id}
-                      empNum={emp.employeeCode}
-                      dk={dayKey}
-                      startTime={startTime}
-                      onCall={onCall}
-                      showApplyAll={showApplyAll}
-                      onSave={handleSave}
-                      onApplyAll={handleApplyAllDays}
-                    />
-                    <Button
-                      type="button"
-                      variant="outline"
-                      size="sm"
-                      onClick={() => {
-                        setRangeEmployeeId(emp.id);
-                        setRangeViewRange(undefined);
-                        setRangeOpenDay('');
-                      }}
-                    >
-                      <CalendarRange className="mr-2 h-4 w-4" /> Date range
-                    </Button>
-                  </div>
-                </CollapsibleContent>
-              </section>
-            </Collapsible>
-          );
-        })}
+            return (
+              <div
+                key={column}
+                onDragOver={(event) => {
+                  // Without preventDefault the browser refuses the drop outright.
+                  event.preventDefault();
+                  setDragOverColumn(column);
+                }}
+                onDragLeave={() => setDragOverColumn((current) => (current === column ? '' : current))}
+                onDrop={(event) => handleDrop(event, column)}
+                className={`min-w-0 space-y-2 rounded-lg border-2 border-dashed p-3 transition-colors ${
+                  dragOverColumn === column ? 'border-primary bg-primary/5' : 'border-transparent bg-muted/40'
+                }`}
+              >
+                <div className="flex items-baseline justify-between gap-2 px-1">
+                  <h3 className="flex items-center gap-2 font-semibold">
+                    <ColumnIcon className="h-4 w-4" /> {title}
+                    <span className="text-sm font-normal text-muted-foreground">({list.length})</span>
+                  </h3>
+                </div>
+                <p className="px-1 text-xs text-muted-foreground">{blurb}</p>
+
+                {list.length === 0 ? <p className="rounded-lg bg-background p-4 text-sm text-muted-foreground">{empty}</p> : null}
+
+                {list.map((emp) => {
+                  const startTime = getStart(emp.id, dayKey);
+                  const onCall = getOnCall(emp.id, dayKey);
+                  const ptoEntries = ptoMap.get(`${emp.id}-${dayKey}`);
+                  const isOpen = openKeys.includes(emp.id);
+
+                  return (
+                    <Collapsible key={emp.id} open={isOpen} onOpenChange={() => toggleOpen(emp.id)} asChild>
+                      <section
+                        draggable
+                        onDragStart={(event) => {
+                          event.dataTransfer.setData('text/plain', emp.id);
+                          event.dataTransfer.effectAllowed = 'move';
+                          setDraggingId(emp.id);
+                        }}
+                        onDragEnd={() => {
+                          setDraggingId('');
+                          setDragOverColumn('');
+                        }}
+                        className={`rounded-lg border border-border bg-background ${draggingId === emp.id ? 'opacity-40' : ''}`}
+                      >
+                        <CollapsibleTrigger asChild>
+                          <button type="button" className="flex w-full items-center justify-between gap-3 p-4 text-left">
+                            <div className="flex min-w-0 items-center gap-2">
+                              <GripVertical className="h-4 w-4 shrink-0 cursor-grab text-muted-foreground" aria-hidden="true" />
+                              <div className="min-w-0">
+                                <p className="truncate font-semibold">{emp.employeeName}</p>
+                                <p className="text-sm text-muted-foreground">
+                                  Employee {emp.employeeCode} &middot; {isRoad ? 'Starts at clock-in' : `Start ${startTime}`}
+                                </p>
+                              </div>
+                            </div>
+                            <div className="flex shrink-0 items-center gap-2">
+                              {onCall ? (
+                                <Badge variant="destructive">
+                                  <Phone className="mr-1 h-3 w-3" /> On Call
+                                </Badge>
+                              ) : null}
+                              {ptoEntries?.map((pto) => (
+                                <Badge key={pto.id} variant="secondary" className="text-xs">
+                                  {getPtoHours(pto)}h {pto.pTOTypeKey ? `${ShopTimeEntryPTOTypeKeyToLabel[pto.pTOTypeKey]} PTO` : 'PTO'}
+                                </Badge>
+                              ))}
+                              <ChevronDown className={`h-4 w-4 transition-transform ${isOpen ? 'rotate-180' : ''}`} />
+                            </div>
+                          </button>
+                        </CollapsibleTrigger>
+                        <CollapsibleContent>
+                          <div className="space-y-3 border-t border-border px-4 py-3">
+                            <ScheduleFields
+                              empId={emp.id}
+                              empNum={emp.employeeCode}
+                              dk={dayKey}
+                              startTime={startTime}
+                              onCall={onCall}
+                              showApplyAll={showApplyAll}
+                              showScheduledStart={!isRoad}
+                              onSave={handleSave}
+                              onApplyAll={handleApplyAllDays}
+                            />
+                            <div className="flex flex-wrap gap-2">
+                              {/* Dragging is the quick path; this button is what makes the
+                                  move reachable by keyboard and reliable on a tablet. */}
+                              <Button
+                                type="button"
+                                variant="outline"
+                                size="sm"
+                                onClick={() => handleMoveColumn(emp, isRoad ? 'shop' : 'road')}
+                              >
+                                {isRoad ? <Wrench className="mr-2 h-4 w-4" /> : <Truck className="mr-2 h-4 w-4" />}
+                                Move to {isRoad ? 'Shop' : 'Road'}
+                              </Button>
+                              <Button
+                                type="button"
+                                variant="outline"
+                                size="sm"
+                                onClick={() => {
+                                  setRangeEmployeeId(emp.id);
+                                  setRangeViewRange(undefined);
+                                  setRangeOpenDay('');
+                                }}
+                              >
+                                <CalendarRange className="mr-2 h-4 w-4" /> Date range
+                              </Button>
+                            </div>
+                          </div>
+                        </CollapsibleContent>
+                      </section>
+                    </Collapsible>
+                  );
+                })}
+              </div>
+            );
+          })}
+        </div>
       </CardContent>
     </Card>
   );
