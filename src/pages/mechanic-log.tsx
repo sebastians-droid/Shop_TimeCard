@@ -1,7 +1,8 @@
 import { useMemo, useState } from 'react';
+import { useQueryClient } from '@tanstack/react-query';
 import { eachDayOfInterval, endOfWeek, format, startOfWeek, subWeeks } from 'date-fns';
 import type { DateRange } from 'react-day-picker';
-import { CalendarIcon, ChevronDown, Clock, Search } from 'lucide-react';
+import { CalendarIcon, Check, ChevronDown, Clock, Search, X } from 'lucide-react';
 import { toast } from '@/lib/toast';
 
 import { Badge } from '@/components/ui/badge';
@@ -12,18 +13,31 @@ import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/component
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
-import { useAllEquipmentAssets, useShopEmployeeList, useShopTimeEntryList } from '@/hooks/use-shop-data';
+import { Textarea } from '@/components/ui/textarea';
+import { VoiceNoteButton } from '@/components/voice-note-button';
+import { useAllEquipmentAssets, useShopEmployeeList, useShopTimeEntryList, useUpdateShopTimeEntry } from '@/hooks/use-shop-data';
 import { mapShopEmployees, type AppShopEmployee } from '@/lib/shop-employees';
 import {
+  applyNoLunchMarker,
+  dayHasNoLunch,
   formatDuration,
   getDayPayMinutes,
   getEntryPaidMinutes,
   getPtoHours,
   getRawDurationMinutes,
   isPtoEntry,
+  notesHaveNoLunch,
   scheduledStartFor,
 } from '@/lib/time-rules';
-import { EMPLOYEE_CODE_NOT_FOUND, findEmployeeByCode, getEntryAssetName, getEntryDivision, getEntryJobNumber } from '@/lib/entry-helpers';
+import {
+  EMPLOYEE_CODE_NOT_FOUND,
+  findEmployeeByCode,
+  getEmployeeNotes,
+  getEntryAssetName,
+  getEntryDivision,
+  getEntryJobNumber,
+} from '@/lib/entry-helpers';
+import { queryKeys } from '@/lib/query-keys';
 import { divisionLabel } from '@/lib/reference-data';
 import { ShopTimeEntryPayTypeKeyToLabel, ShopTimeEntryPTOTypeKeyToLabel, type ShopTimeEntry } from '@/models/shop-time-entry';
 
@@ -35,7 +49,10 @@ export default function MechanicLogPage() {
     from: startOfWeek(now, { weekStartsOn: 0 }),
     to: endOfWeek(now, { weekStartsOn: 0 }),
   });
+  const [editingNotesEntryId, setEditingNotesEntryId] = useState('');
+  const [editingNotes, setEditingNotes] = useState('');
 
+  const queryClient = useQueryClient();
   const {
     data: shopEmployees = [],
     isLoading: employeesLoading,
@@ -45,7 +62,8 @@ export default function MechanicLogPage() {
   } = useShopEmployeeList();
   const employees = useMemo(() => mapShopEmployees(shopEmployees), [shopEmployees]);
   const { data: assets = [] } = useAllEquipmentAssets();
-  const { data: timeEntries = [] } = useShopTimeEntryList();
+  const { data: timeEntries = [], isError: entriesFailed, error: entriesError, refetch: refetchEntries } = useShopTimeEntryList();
+  const updateTimeEntry = useUpdateShopTimeEntry();
 
   const selectedEmployee = employees.find((e: AppShopEmployee) => e.id === selectedEmployeeId);
   // Road mechanics are paid from their actual clock-in rather than a default start.
@@ -66,6 +84,58 @@ export default function MechanicLogPage() {
   const handleResetEmployee = () => {
     setEmployeeCode('');
     setSelectedEmployeeId('');
+    setEditingNotesEntryId('');
+    setEditingNotes('');
+  };
+
+  const voicePhrases = useMemo(
+    () =>
+      [
+        ...assets.map((asset) => asset.asset).filter(Boolean),
+        selectedEmployee?.employeeName,
+        'job',
+        'division',
+        'handoff',
+        'parts',
+        'waiting on parts',
+      ].filter((value): value is string => Boolean(value)),
+    [assets, selectedEmployee?.employeeName],
+  );
+
+  const startEditNotes = (entry: ShopTimeEntry) => {
+    setEditingNotesEntryId(entry.id);
+    setEditingNotes(getEmployeeNotes(entry.notes));
+  };
+
+  const cancelEditNotes = (entry?: ShopTimeEntry) => {
+    if (entry) setEditingNotes(getEmployeeNotes(entry.notes));
+    setEditingNotesEntryId('');
+    setEditingNotes('');
+  };
+
+  const saveNotes = (entry: ShopTimeEntry, day: Date, dayEntries: ShopTimeEntry[]) => {
+    const when = format(day, 'MMM d');
+    const assetName = getEntryAssetName(entry, assets);
+    const nextNotes = applyNoLunchMarker(editingNotes.trim() || undefined, notesHaveNoLunch(entry.notes) || dayHasNoLunch(dayEntries));
+    void queryClient.cancelQueries({ queryKey: queryKeys.timeEntries() });
+    const previous = queryClient.getQueryData<ShopTimeEntry[]>(queryKeys.timeEntries());
+    queryClient.setQueryData<ShopTimeEntry[]>(queryKeys.timeEntries(), (rows) =>
+      rows?.map((row) => (row.id === entry.id ? { ...row, notes: nextNotes || undefined } : row)),
+    );
+    updateTimeEntry.mutate(
+      { id: entry.id, changedFields: { notes: nextNotes } },
+      {
+        onSuccess: () => {
+          setEditingNotesEntryId('');
+          setEditingNotes('');
+          toast.success(`Notes saved for ${when} — ${assetName}.`);
+        },
+        onError: (error) => {
+          if (previous) queryClient.setQueryData(queryKeys.timeEntries(), previous);
+          toast.error(error instanceof Error ? error.message : 'Unable to save notes.');
+        },
+      },
+    );
   };
 
   const setQuickRange = (from: Date, to: Date) => {
@@ -168,6 +238,18 @@ export default function MechanicLogPage() {
               </div>
             </CardHeader>
           </Card>
+
+          {entriesFailed ? (
+            <div className="rounded-md border border-destructive/40 bg-destructive/10 p-3 text-sm text-destructive">
+              <p className="font-medium">Could not load time entries from Dataverse.</p>
+              <p className="mt-1 break-words text-destructive/80">
+                {entriesError instanceof Error ? entriesError.message : 'Grant the app user Read on Shop Time Entry, then retry.'}
+              </p>
+              <Button type="button" variant="outline" className="mt-3" onClick={() => void refetchEntries()}>
+                Retry
+              </Button>
+            </div>
+          ) : null}
 
           {/* Date range picker */}
           <Card className="bg-card text-card-foreground shadow-sm">
@@ -276,6 +358,8 @@ export default function MechanicLogPage() {
                             const jobNum = getEntryJobNumber(entry);
                             const effectiveDivision = getEntryDivision(entry, assets);
                             const div = effectiveDivision ? divisionLabel(Number(effectiveDivision)) : '';
+                            const notes = getEmployeeNotes(entry.notes);
+                            const editing = editingNotesEntryId === entry.id;
                             return (
                               <div key={entry.id} className="rounded-lg border border-border bg-background p-3">
                                 <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
@@ -306,6 +390,64 @@ export default function MechanicLogPage() {
                                     {entry.onCall && <Badge variant="secondary">On Call</Badge>}
                                   </div>
                                 </div>
+                                {editing ? (
+                                  <div className="mt-3 space-y-2">
+                                    <div className="flex items-center justify-between gap-2">
+                                      <Label htmlFor={`log-notes-${entry.id}`}>Notes</Label>
+                                      <VoiceNoteButton
+                                        value={editingNotes}
+                                        onChange={setEditingNotes}
+                                        phrases={voicePhrases}
+                                        disabled={updateTimeEntry.isPending}
+                                      />
+                                    </div>
+                                    <Textarea
+                                      id={`log-notes-${entry.id}`}
+                                      value={editingNotes}
+                                      onChange={(event: React.ChangeEvent<HTMLTextAreaElement>) => setEditingNotes(event.target.value)}
+                                      onKeyDown={(event: React.KeyboardEvent<HTMLTextAreaElement>) => {
+                                        if (event.key === 'Escape') {
+                                          event.preventDefault();
+                                          cancelEditNotes(entry);
+                                        }
+                                        if (event.key === 'Enter' && (event.ctrlKey || event.metaKey)) {
+                                          event.preventDefault();
+                                          saveNotes(entry, d.day, d.entries);
+                                        }
+                                      }}
+                                      placeholder="Add notes for this time entry"
+                                      disabled={updateTimeEntry.isPending}
+                                    />
+                                    <div className="flex flex-wrap items-center justify-end gap-2">
+                                      <Button
+                                        type="button"
+                                        size="icon"
+                                        aria-label="Save notes"
+                                        onClick={() => saveNotes(entry, d.day, d.entries)}
+                                        disabled={updateTimeEntry.isPending}
+                                      >
+                                        <Check className="h-4 w-4" />
+                                      </Button>
+                                      <Button
+                                        type="button"
+                                        size="icon"
+                                        variant="outline"
+                                        aria-label="Cancel notes edit"
+                                        onClick={() => cancelEditNotes(entry)}
+                                        disabled={updateTimeEntry.isPending}
+                                      >
+                                        <X className="h-4 w-4" />
+                                      </Button>
+                                    </div>
+                                  </div>
+                                ) : (
+                                  <div className="mt-3 space-y-2">
+                                    {notes ? <p className="rounded-md bg-muted p-3 text-sm text-muted-foreground">{notes}</p> : null}
+                                    <Button type="button" variant="outline" size="sm" onClick={() => startEditNotes(entry)}>
+                                      {notes ? 'Edit notes' : 'Add notes'}
+                                    </Button>
+                                  </div>
+                                )}
                               </div>
                             );
                           })}
