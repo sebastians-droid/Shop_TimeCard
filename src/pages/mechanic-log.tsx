@@ -2,7 +2,7 @@ import { useMemo, useState } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import { eachDayOfInterval, endOfWeek, format, startOfWeek, subWeeks } from 'date-fns';
 import type { DateRange } from 'react-day-picker';
-import { CalendarIcon, Check, ChevronDown, Clock, Search, X } from 'lucide-react';
+import { CalendarIcon, Check, ChevronDown, Clock, Plus, Search, X } from 'lucide-react';
 import { toast } from '@/lib/toast';
 
 import { Badge } from '@/components/ui/badge';
@@ -14,6 +14,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { Textarea } from '@/components/ui/textarea';
+import { AssetPicker } from '@/components/asset-picker';
 import { VoiceNoteButton } from '@/components/voice-note-button';
 import { useAllEquipmentAssets, useShopEmployeeList, useShopTimeEntryList, useUpdateShopTimeEntry } from '@/hooks/use-shop-data';
 import { mapShopEmployees, type AppShopEmployee } from '@/lib/shop-employees';
@@ -31,13 +32,19 @@ import {
 } from '@/lib/time-rules';
 import {
   EMPLOYEE_CODE_NOT_FOUND,
+  combineSelectedDateAndTime,
   findEmployeeByCode,
+  formatTimeForInput,
+  getAssetDisplayName,
   getEmployeeNotes,
   getEntryAssetName,
   getEntryDivision,
   getEntryJobNumber,
 } from '@/lib/entry-helpers';
+import { dayFirstClockIn, dayLastClockOut, planForgottenJobInsert } from '@/lib/day-session';
+import { apiFetch } from '@/lib/api';
 import { queryKeys } from '@/lib/query-keys';
+import type { EquipmentAsset } from '@/models/equipment-asset';
 import { divisionLabel } from '@/lib/reference-data';
 import { ShopTimeEntryPayTypeKeyToLabel, ShopTimeEntryPTOTypeKeyToLabel, type ShopTimeEntry } from '@/models/shop-time-entry';
 
@@ -51,6 +58,15 @@ export default function MechanicLogPage() {
   });
   const [editingNotesEntryId, setEditingNotesEntryId] = useState('');
   const [editingNotes, setEditingNotes] = useState('');
+  const [addingJobDateKey, setAddingJobDateKey] = useState('');
+  const [jobAssetId, setJobAssetId] = useState('');
+  const [jobAssetRecord, setJobAssetRecord] = useState<Pick<EquipmentAsset, 'id' | 'asset' | 'divisionCode'> | undefined>(undefined);
+  const [jobDivision, setJobDivision] = useState('');
+  const [jobNumber, setJobNumber] = useState('');
+  const [jobNotes, setJobNotes] = useState('');
+  const [jobStartedAt, setJobStartedAt] = useState('');
+  const [jobEndedAt, setJobEndedAt] = useState('');
+  const [jobSaving, setJobSaving] = useState(false);
 
   const queryClient = useQueryClient();
   const {
@@ -81,11 +97,23 @@ export default function MechanicLogPage() {
     toast.success(`Verified ${matched.employeeName}.`);
   };
 
+  const resetJobForm = () => {
+    setAddingJobDateKey('');
+    setJobAssetId('');
+    setJobAssetRecord(undefined);
+    setJobDivision('');
+    setJobNumber('');
+    setJobNotes('');
+    setJobStartedAt('');
+    setJobEndedAt('');
+  };
+
   const handleResetEmployee = () => {
     setEmployeeCode('');
     setSelectedEmployeeId('');
     setEditingNotesEntryId('');
     setEditingNotes('');
+    resetJobForm();
   };
 
   const voicePhrases = useMemo(
@@ -138,6 +166,125 @@ export default function MechanicLogPage() {
     );
   };
 
+  const addForgottenJob = async (day: Date, dayEntries: ShopTimeEntry[]) => {
+    if (!selectedEmployee) {
+      toast.error('Verify your employee code before adding a job.');
+      return;
+    }
+    const selectedAssetForEntry = jobAssetId ? (jobAssetRecord ?? assets.find((asset) => asset.id === jobAssetId)) : undefined;
+    const manualDivision = jobDivision.trim();
+    const manualJobNumber = jobNumber.trim();
+    if (!selectedAssetForEntry && !manualDivision && !manualJobNumber) {
+      toast.error('An asset, division, or job number is required.');
+      return;
+    }
+    const divisionNumber = manualDivision ? Number(manualDivision) : selectedAssetForEntry?.divisionCode;
+    if (manualDivision && !Number.isFinite(divisionNumber)) {
+      toast.error('Division must be a number.');
+      return;
+    }
+    if (!jobStartedAt || !jobEndedAt) {
+      toast.error('Enter the start and end time for this job.');
+      return;
+    }
+    const startedAt = combineSelectedDateAndTime(day, jobStartedAt);
+    const endedAt = combineSelectedDateAndTime(day, jobEndedAt);
+    const plan = planForgottenJobInsert(dayEntries, startedAt, endedAt, payStart);
+    if ('error' in plan) {
+      toast.error(plan.error);
+      return;
+    }
+    const selectedAssetName = selectedAssetForEntry ? getAssetDisplayName(selectedAssetForEntry) : '';
+    const fallbackLabel = [manualDivision ? `Division ${manualDivision}` : '', manualJobNumber ? `Job ${manualJobNumber}` : '']
+      .filter((value: string) => value)
+      .join(' · ');
+    const entryLabel = selectedAssetName
+      ? [selectedAssetName, manualJobNumber ? `Job ${manualJobNumber}` : ''].filter((value: string) => value).join(' · ')
+      : fallbackLabel || 'Time entry';
+    const when = format(day, 'MMM d');
+    const notes = applyNoLunchMarker(jobNotes.trim() || undefined, dayHasNoLunch(dayEntries));
+    const newRow: ShopTimeEntry = {
+      id: `optimistic-job-${startedAt}`,
+      timeEntry: `${selectedEmployee.employeeName} - ${entryLabel}`,
+      employee: { id: selectedEmployee.id, autoNumber: selectedEmployee.autoNumber },
+      asset: selectedAssetForEntry ? { id: selectedAssetForEntry.id, asset: selectedAssetName } : undefined,
+      assetDivision: divisionNumber,
+      division: divisionNumber,
+      jobNumber: manualJobNumber || undefined,
+      clockIn: startedAt,
+      clockOut: endedAt,
+      hours: plan.creates.find((row) => row.kind === 'new')?.hours,
+      workDate: format(day, 'yyyy-MM-dd'),
+      notes,
+    };
+    const remainderRows = plan.creates
+      .filter((row) => row.kind === 'remainder' && row.copyFrom)
+      .map((row) => ({
+        ...row.copyFrom!,
+        id: `optimistic-remainder-${row.clockIn}`,
+        clockIn: row.clockIn,
+        clockOut: row.clockOut,
+        hours: row.hours,
+      }));
+    await queryClient.cancelQueries({ queryKey: queryKeys.timeEntries() });
+    const previous = queryClient.getQueryData<ShopTimeEntry[]>(queryKeys.timeEntries());
+    queryClient.setQueryData<ShopTimeEntry[]>(queryKeys.timeEntries(), (rows) => {
+      const next = (rows ?? []).map((row) => {
+        const patch = plan.patches.find((item) => item.id === row.id);
+        if (!patch) return row;
+        return {
+          ...row,
+          clockIn: patch.clockIn ?? row.clockIn,
+          clockOut: patch.clockOut ?? row.clockOut,
+          hours: patch.hours,
+        };
+      });
+      return [...next, newRow, ...remainderRows];
+    });
+    resetJobForm();
+    setJobSaving(true);
+    try {
+      for (const patch of plan.patches) {
+        await apiFetch(`/api/time-entries/${patch.id}`, {
+          method: 'PATCH',
+          body: JSON.stringify({
+            clockIn: patch.clockIn,
+            clockOut: patch.clockOut,
+            hours: patch.hours,
+          }),
+        });
+      }
+      for (const created of plan.creates) {
+        const source = created.kind === 'remainder' && created.copyFrom ? created.copyFrom : newRow;
+        await apiFetch<ShopTimeEntry>('/api/time-entries', {
+          method: 'POST',
+          body: JSON.stringify({
+            timeEntry: created.kind === 'new' ? newRow.timeEntry : source.timeEntry,
+            employee: source.employee,
+            asset: created.kind === 'new' ? newRow.asset : source.asset,
+            assetDivision: created.kind === 'new' ? newRow.assetDivision : source.assetDivision,
+            division: created.kind === 'new' ? newRow.division : source.division,
+            jobNumber: created.kind === 'new' ? newRow.jobNumber : source.jobNumber,
+            clockIn: created.clockIn,
+            clockOut: created.clockOut,
+            hours: created.hours,
+            workDate: format(day, 'yyyy-MM-dd'),
+            notes: created.kind === 'new' ? notes : source.notes,
+          }),
+        });
+      }
+      await queryClient.invalidateQueries({ queryKey: queryKeys.timeEntries() });
+      toast.success(
+        `Added ${entryLabel} for ${when} from ${format(new Date(startedAt), 'p')} to ${format(new Date(endedAt), 'p')}. Nearby jobs were shortened. Day stays ${format(new Date(plan.firstIn), 'p')} – ${format(new Date(plan.lastOut), 'p')}.`,
+      );
+    } catch (error: unknown) {
+      if (previous) queryClient.setQueryData(queryKeys.timeEntries(), previous);
+      toast.error(error instanceof Error ? error.message : 'Unable to add the job.');
+    } finally {
+      setJobSaving(false);
+    }
+  };
+
   const setQuickRange = (from: Date, to: Date) => {
     setDateRange({ from, to });
   };
@@ -166,7 +313,14 @@ export default function MechanicLogPage() {
       const dateKey = format(day, 'yyyy-MM-dd');
       const entries = filteredEntries.filter((entry: ShopTimeEntry) => entry.clockIn?.startsWith(dateKey));
       const totalHours = getDayPayMinutes(entries, new Date(), payStart).totalMinutes / 60;
-      return { day, dateKey, entries, totalHours };
+      return {
+        day,
+        dateKey,
+        entries,
+        totalHours,
+        firstIn: dayFirstClockIn(entries),
+        lastOut: dayLastClockOut(entries),
+      };
     });
   }, [days, filteredEntries, payStart]);
 
@@ -341,6 +495,9 @@ export default function MechanicLogPage() {
                               <CardTitle className="text-base">{format(d.day, 'EEEE, MMM d')}</CardTitle>
                               <p className="mt-0.5 text-sm text-muted-foreground">
                                 {d.entries.length} {d.entries.length === 1 ? 'entry' : 'entries'}
+                                {d.firstIn
+                                  ? ` · ${format(new Date(d.firstIn), 'p')}${d.lastOut ? ` – ${format(new Date(d.lastOut), 'p')}` : ' · still clocked in'}`
+                                  : ''}
                               </p>
                             </div>
                             <div className="flex items-center gap-4">
@@ -352,6 +509,117 @@ export default function MechanicLogPage() {
                       </CollapsibleTrigger>
                       <CollapsibleContent>
                         <CardContent className="space-y-2 border-t border-border pt-4">
+                          {d.lastOut ? (
+                            <div className="space-y-3">
+                              <Button
+                                type="button"
+                                variant="outline"
+                                onClick={() => {
+                                  resetJobForm();
+                                  setAddingJobDateKey(d.dateKey);
+                                  setJobEndedAt(formatTimeForInput(d.lastOut));
+                                }}
+                              >
+                                <Plus className="mr-2 h-4 w-4" /> Add Job
+                              </Button>
+                              {addingJobDateKey === d.dateKey ? (
+                                <div className="grid gap-3 rounded-lg border border-dashed border-border bg-muted p-3 text-muted-foreground">
+                                  <div className="flex items-center justify-between gap-2">
+                                    <p className="font-medium text-foreground">Add forgotten job</p>
+                                    <Button type="button" size="icon" variant="ghost" aria-label="Cancel new job" onClick={resetJobForm}>
+                                      <X className="h-4 w-4" />
+                                    </Button>
+                                  </div>
+                                  <div className="space-y-2">
+                                    <Label>Equipment asset</Label>
+                                    <AssetPicker
+                                      assets={assets}
+                                      value={jobAssetId}
+                                      onChange={(asset) => {
+                                        setJobAssetRecord(asset);
+                                        setJobAssetId(asset?.id ?? '');
+                                        setJobDivision(asset?.divisionCode === undefined ? '' : String(asset.divisionCode));
+                                      }}
+                                      currentAsset={jobAssetRecord}
+                                    />
+                                  </div>
+                                  <div className="grid gap-3 sm:grid-cols-2">
+                                    <div className="space-y-2">
+                                      <Label htmlFor={`job-started-${d.dateKey}`}>Started</Label>
+                                      <Input
+                                        id={`job-started-${d.dateKey}`}
+                                        type="time"
+                                        className="bg-background"
+                                        value={jobStartedAt}
+                                        onChange={(event: React.ChangeEvent<HTMLInputElement>) => setJobStartedAt(event.target.value)}
+                                      />
+                                    </div>
+                                    <div className="space-y-2">
+                                      <Label htmlFor={`job-ended-${d.dateKey}`}>Ended</Label>
+                                      <Input
+                                        id={`job-ended-${d.dateKey}`}
+                                        type="time"
+                                        className="bg-background"
+                                        value={jobEndedAt}
+                                        onChange={(event: React.ChangeEvent<HTMLInputElement>) => setJobEndedAt(event.target.value)}
+                                      />
+                                    </div>
+                                  </div>
+                                  <p className="text-sm">
+                                    Jobs before this start and after this end shorten immediately. Day stays{' '}
+                                    {format(new Date(d.firstIn ?? d.lastOut), 'p')} – {format(new Date(d.lastOut), 'p')}.
+                                  </p>
+                                  <div className="grid gap-3 sm:grid-cols-2">
+                                    <div className="space-y-2">
+                                      <Label htmlFor={`job-div-${d.dateKey}`}>Division (optional)</Label>
+                                      <Input
+                                        id={`job-div-${d.dateKey}`}
+                                        className="bg-background"
+                                        value={jobDivision}
+                                        onChange={(event: React.ChangeEvent<HTMLInputElement>) => setJobDivision(event.target.value)}
+                                      />
+                                    </div>
+                                    <div className="space-y-2">
+                                      <Label htmlFor={`job-num-${d.dateKey}`}>Job number (optional)</Label>
+                                      <Input
+                                        id={`job-num-${d.dateKey}`}
+                                        className="bg-background"
+                                        value={jobNumber}
+                                        onChange={(event: React.ChangeEvent<HTMLInputElement>) => setJobNumber(event.target.value)}
+                                      />
+                                    </div>
+                                  </div>
+                                  <div className="space-y-2">
+                                    <div className="flex items-center justify-between gap-2">
+                                      <Label htmlFor={`job-notes-${d.dateKey}`}>Notes</Label>
+                                      <VoiceNoteButton
+                                        value={jobNotes}
+                                        onChange={setJobNotes}
+                                        phrases={voicePhrases}
+                                        disabled={jobSaving || updateTimeEntry.isPending}
+                                      />
+                                    </div>
+                                    <Textarea
+                                      id={`job-notes-${d.dateKey}`}
+                                      className="bg-background"
+                                      value={jobNotes}
+                                      onChange={(event: React.ChangeEvent<HTMLTextAreaElement>) => setJobNotes(event.target.value)}
+                                      placeholder="Optional job notes"
+                                    />
+                                  </div>
+                                  <Button
+                                    type="button"
+                                    onClick={() => void addForgottenJob(d.day, d.entries)}
+                                    disabled={jobSaving || updateTimeEntry.isPending}
+                                  >
+                                    Add job
+                                  </Button>
+                                </div>
+                              ) : null}
+                            </div>
+                          ) : d.firstIn ? (
+                            <p className="text-sm text-muted-foreground">Clock out on the timecard before adding a forgotten job.</p>
+                          ) : null}
                           {d.entries.map((entry: ShopTimeEntry) => {
                             const paidMinutes = getRawDurationMinutes(entry);
                             const assetName = getEntryAssetName(entry, assets);
