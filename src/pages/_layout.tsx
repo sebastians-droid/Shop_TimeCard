@@ -1,5 +1,7 @@
 import { NavLink, Outlet, useLocation } from 'react-router-dom';
 
+import { useUser } from '@/hooks/use-user';
+
 const navLinkClassName = ({ isActive }: { isActive: boolean }) =>
   `rounded-md px-3 py-1.5 text-sm font-medium transition-colors ${
     isActive ? 'bg-white/15 text-white' : 'text-white/70 hover:bg-white/10 hover:text-white'
@@ -8,6 +10,8 @@ const navLinkClassName = ({ isActive }: { isActive: boolean }) =>
 export default function Layout() {
   const { pathname } = useLocation();
   const isHome = pathname === '/';
+  const { data: user } = useUser();
+  const showManagerLinks = Boolean(user?.isManager);
 
   return (
     <div className="flex min-h-svh flex-col bg-background text-foreground">
@@ -20,14 +24,8 @@ export default function Layout() {
               <p className="text-[0.7rem] text-white/50 font-medium uppercase tracking-widest">Swank Construction</p>
             </div>
           </NavLink>
-          {!isHome && (
+          {!isHome && showManagerLinks ? (
             <nav className="flex gap-1.5 flex-wrap" aria-label="Primary navigation">
-              <NavLink to="/timecard" className={navLinkClassName}>
-                Timecard
-              </NavLink>
-              <NavLink to="/mechanic-log" className={navLinkClassName}>
-                Mechanic Log
-              </NavLink>
               <NavLink to="/manager" className={navLinkClassName}>
                 Manager
               </NavLink>
@@ -35,7 +33,7 @@ export default function Layout() {
                 Assets & Employees
               </NavLink>
             </nav>
-          )}
+          ) : null}
         </div>
         <div className="h-[3px] bg-gradient-to-r from-[oklch(0.53_0.20_27)] via-[oklch(0.53_0.20_27)] to-transparent" />
       </header>

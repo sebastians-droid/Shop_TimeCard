@@ -2,7 +2,7 @@ import { useMemo, useState } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import { eachDayOfInterval, endOfWeek, format, startOfWeek, subWeeks } from 'date-fns';
 import type { DateRange } from 'react-day-picker';
-import { CalendarIcon, Check, ChevronDown, Clock, Plus, Search, X } from 'lucide-react';
+import { CalendarIcon, Check, ChevronDown, Clock, Plus, X } from 'lucide-react';
 import { toast } from '@/lib/toast';
 
 import { Badge } from '@/components/ui/badge';
@@ -15,6 +15,8 @@ import { Label } from '@/components/ui/label';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { Textarea } from '@/components/ui/textarea';
 import { AssetPicker } from '@/components/asset-picker';
+import { EmployeeCodeSignIn, KioskSessionBar } from '@/components/kiosk-session';
+import { useKioskSession } from '@/hooks/use-kiosk-session';
 import { VoiceNoteButton } from '@/components/voice-note-button';
 import { useAllEquipmentAssets, useShopEmployeeList, useShopTimeEntryList, useUpdateShopTimeEntry } from '@/hooks/use-shop-data';
 import { mapShopEmployees, type AppShopEmployee } from '@/lib/shop-employees';
@@ -31,9 +33,7 @@ import {
   scheduledStartFor,
 } from '@/lib/time-rules';
 import {
-  EMPLOYEE_CODE_NOT_FOUND,
   combineSelectedDateAndTime,
-  findEmployeeByCode,
   formatTimeForInput,
   getAssetDisplayName,
   getEmployeeNotes,
@@ -49,8 +49,7 @@ import { divisionLabel } from '@/lib/reference-data';
 import { ShopTimeEntryPayTypeKeyToLabel, ShopTimeEntryPTOTypeKeyToLabel, type ShopTimeEntry } from '@/models/shop-time-entry';
 
 export default function MechanicLogPage() {
-  const [employeeCode, setEmployeeCode] = useState('');
-  const [selectedEmployeeId, setSelectedEmployeeId] = useState('');
+  const { employeeId: selectedEmployeeId } = useKioskSession();
   const now = new Date();
   const [dateRange, setDateRange] = useState<DateRange | undefined>({
     from: startOfWeek(now, { weekStartsOn: 0 }),
@@ -85,18 +84,6 @@ export default function MechanicLogPage() {
   // Road mechanics are paid from their actual clock-in rather than a default start.
   const payStart = scheduledStartFor(selectedEmployee);
 
-  const handleEmployeeCodeSubmit = (event: React.FormEvent<HTMLFormElement>) => {
-    event.preventDefault();
-    const matched = findEmployeeByCode(employees, employeeCode);
-    if (!matched) {
-      setSelectedEmployeeId('');
-      toast.error(EMPLOYEE_CODE_NOT_FOUND);
-      return;
-    }
-    setSelectedEmployeeId(matched.id);
-    toast.success(`Verified ${matched.employeeName}.`);
-  };
-
   const resetJobForm = () => {
     setAddingJobDateKey('');
     setJobAssetId('');
@@ -108,9 +95,7 @@ export default function MechanicLogPage() {
     setJobEndedAt('');
   };
 
-  const handleResetEmployee = () => {
-    setEmployeeCode('');
-    setSelectedEmployeeId('');
+  const handleAcceptedCode = () => {
     setEditingNotesEntryId('');
     setEditingNotes('');
     resetJobForm();
@@ -340,58 +325,19 @@ export default function MechanicLogPage() {
   return (
     <main className="mx-auto flex w-full max-w-5xl flex-1 flex-col gap-6 p-4 sm:p-6 lg:p-8">
       {!selectedEmployee ? (
-        <Card className="bg-card text-card-foreground shadow-sm">
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2 text-xl">
-              <Search className="h-5 w-5" /> Sign in
-            </CardTitle>
-          </CardHeader>
-          <CardContent>
-            <form className="mx-auto grid max-w-sm gap-3" onSubmit={handleEmployeeCodeSubmit}>
-              <Label htmlFor="mechanic-code">Employee code</Label>
-              <Input
-                id="mechanic-code"
-                inputMode="numeric"
-                maxLength={4}
-                pattern="[0-9]*"
-                type="password"
-                value={employeeCode}
-                onChange={(e: React.ChangeEvent<HTMLInputElement>) => setEmployeeCode(e.target.value.replace(/\D/g, '').slice(0, 4))}
-                placeholder="****"
-              />
-              {employeesFailed ? (
-                <div className="rounded-md border border-destructive/40 bg-destructive/10 p-3 text-sm text-destructive">
-                  <p className="font-medium">Could not load shop employees from Dataverse.</p>
-                  <p className="mt-1 break-words text-destructive/80">
-                    {employeesError instanceof Error ? employeesError.message : 'Grant the app user Read on Shop Employee, then retry.'}
-                  </p>
-                  <Button type="button" variant="outline" className="mt-3" onClick={() => void refetchEmployees()}>
-                    Retry
-                  </Button>
-                </div>
-              ) : null}
-              <Button className="h-12" type="submit" disabled={employeesLoading || employeesFailed || employeeCode.trim().length === 0}>
-                View my work log
-              </Button>
-            </form>
-          </CardContent>
-        </Card>
+        <EmployeeCodeSignIn
+          id="mechanic-code"
+          employees={employees}
+          loading={employeesLoading}
+          failed={employeesFailed}
+          error={employeesError}
+          onRetry={() => void refetchEmployees()}
+          submitLabel="View my work log"
+          onAccepted={handleAcceptedCode}
+        />
       ) : (
         <section className="grid gap-6">
-          {/* Employee header */}
-          <Card className="bg-card text-card-foreground shadow-sm">
-            <CardHeader>
-              <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-                <div>
-                  <CardTitle className="text-xl">{selectedEmployee.employeeName}</CardTitle>
-                  <p className="mt-1 text-sm text-muted-foreground">Employee {selectedEmployee.employeeCode} · Mechanic Log</p>
-                </div>
-                <Button type="button" variant="outline" onClick={handleResetEmployee}>
-                  Change employee
-                </Button>
-              </div>
-            </CardHeader>
-          </Card>
+          <KioskSessionBar employee={selectedEmployee} detail="Mechanic Log" onLeave={handleAcceptedCode} />
 
           {entriesFailed ? (
             <div className="rounded-md border border-destructive/40 bg-destructive/10 p-3 text-sm text-destructive">

@@ -1,6 +1,8 @@
 import { Link } from 'react-router-dom';
 import { ClipboardList, Clock, LayoutDashboard, Wrench } from 'lucide-react';
 
+import { useUser } from '@/hooks/use-user';
+
 const sections = [
   {
     to: '/timecard',
@@ -8,6 +10,7 @@ const sections = [
     title: 'Timecard',
     description: 'Clock in and out on equipment and log daily labor hours.',
     iconBg: 'bg-blue-700',
+    managerOnly: false,
   },
   {
     to: '/mechanic-log',
@@ -15,6 +18,7 @@ const sections = [
     title: 'Mechanic Log',
     description: 'View your work history and daily hours.',
     iconBg: 'bg-teal-700',
+    managerOnly: false,
   },
   {
     to: '/manager',
@@ -22,6 +26,7 @@ const sections = [
     title: 'Manager Dashboard',
     description: 'Review time entries, edit timecards, and export weekly payroll.',
     iconBg: 'bg-amber-600',
+    managerOnly: true,
   },
   {
     to: '/admin',
@@ -29,10 +34,14 @@ const sections = [
     title: 'Assets & Employees',
     description: 'Add, update, or deactivate equipment assets and shop employee records.',
     iconBg: 'bg-emerald-700',
+    managerOnly: true,
   },
 ];
 
 export default function HomePage() {
+  const { data: user, isPending } = useUser();
+  const visibleSections = sections.filter((section) => user?.isManager || !section.managerOnly);
+
   return (
     <main className="flex-1 flex items-center justify-center">
       <div className="mx-auto w-full max-w-3xl px-4 py-16 sm:px-6">
@@ -40,19 +49,27 @@ export default function HomePage() {
           <h1 className="text-3xl font-bold tracking-tight text-foreground sm:text-4xl">Shop Hub</h1>
         </div>
 
-        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-          {sections.map(({ to, icon: Icon, title, description, iconBg }) => (
-            <Link key={to} to={to} className="group">
-              <div className="relative h-full rounded-xl border border-border bg-card p-6 transition-all hover:shadow-md hover:border-primary/25 hover:-translate-y-0.5">
-                <div className={`mb-4 inline-flex h-10 w-10 items-center justify-center rounded-lg ${iconBg} text-white`}>
-                  <Icon className="h-5 w-5" />
+        {isPending ? (
+          <p className="text-center text-sm text-muted-foreground" role="status">
+            Loading…
+          </p>
+        ) : (
+          <div className={`grid gap-4 sm:grid-cols-2 ${visibleSections.length > 2 ? 'lg:grid-cols-4' : ''}`}>
+            {visibleSections.map(({ to, icon: Icon, title, description, iconBg }) => (
+              <Link key={to} to={to} className="group">
+                <div className="relative h-full rounded-xl border border-border bg-card p-6 transition-all hover:shadow-md hover:border-primary/25 hover:-translate-y-0.5">
+                  <div className={`mb-4 inline-flex h-10 w-10 items-center justify-center rounded-lg ${iconBg} text-white`}>
+                    <Icon className="h-5 w-5" />
+                  </div>
+                  <h2 className="text-[0.95rem] font-semibold text-foreground mb-1.5 group-hover:text-primary transition-colors">
+                    {title}
+                  </h2>
+                  <p className="text-sm text-muted-foreground leading-relaxed">{description}</p>
                 </div>
-                <h2 className="text-[0.95rem] font-semibold text-foreground mb-1.5 group-hover:text-primary transition-colors">{title}</h2>
-                <p className="text-sm text-muted-foreground leading-relaxed">{description}</p>
-              </div>
-            </Link>
-          ))}
-        </div>
+              </Link>
+            ))}
+          </div>
+        )}
 
         <p className="mt-10 text-center text-xs text-muted-foreground/60 tracking-wide uppercase">Swank Construction Co.</p>
       </div>
