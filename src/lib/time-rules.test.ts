@@ -5,10 +5,12 @@ import {
   applyNoLunchMarker,
   dayHasNoLunch,
   formatDuration,
+  AWAITING_ASSET_LABEL,
   getDayPayMinutes,
   getEntryPaidMinutes,
   getPtoHours,
   getRawDurationMinutes,
+  isAwaitingAsset,
   isPtoEntry,
   lunchCsvLabel,
   notesHaveNoLunch,
@@ -248,6 +250,64 @@ describe('getDayPayMinutes', () => {
     expect(getDayPayMinutes(day).paidLaborMinutes).toBe(450);
     // NO_SCHEDULED_START suppresses the clamp, paying all 9.5h less lunch.
     expect(getDayPayMinutes(day, new Date(), NO_SCHEDULED_START).paidLaborMinutes).toBe(540);
+  });
+
+  it('pays from the first asset and leaves the waiting punch at zero', () => {
+    const waiting = entry({
+      id: 'wait',
+      timeEntry: `Smith - ${AWAITING_ASSET_LABEL}`,
+      clockIn: at(DAY, '06:30'),
+      clockOut: at(DAY, '07:20'),
+    });
+    const asset = entry({
+      id: 'asset',
+      timeEntry: 'Smith - EX-140',
+      asset: { id: 'a', asset: 'EX-140' },
+      clockIn: at(DAY, '07:20'),
+      clockOut: at(DAY, '15:20'),
+    });
+    const pay = getDayPayMinutes([waiting, asset]);
+
+    expect(isAwaitingAsset(waiting)).toBe(true);
+    expect(pay.minutesByEntryId.get('wait')).toBe(0);
+    // 07:20–15:20 is 8h, less a 30 minute lunch.
+    expect(pay.minutesByEntryId.get('asset')).toBe(450);
+    expect(pay.paidLaborMinutes).toBe(450);
+  });
+
+  it('clamps an early first asset up to the scheduled start and ignores the earlier clock-in', () => {
+    const waiting = entry({
+      id: 'wait',
+      timeEntry: `Smith - ${AWAITING_ASSET_LABEL}`,
+      clockIn: at(DAY, '06:15'),
+      clockOut: at(DAY, '06:40'),
+    });
+    const asset = entry({
+      id: 'asset',
+      timeEntry: 'Smith - EX-140',
+      asset: { id: 'a', asset: 'EX-140' },
+      clockIn: at(DAY, '06:40'),
+      clockOut: at(DAY, '15:00'),
+    });
+    const pay = getDayPayMinutes([waiting, asset]);
+
+    // The 06:40 asset start is pulled forward to 07:00, leaving 8h less lunch.
+    expect(pay.minutesByEntryId.get('wait')).toBe(0);
+    expect(pay.paidLaborMinutes).toBe(450);
+  });
+
+  it('pays nothing for a day that is only a waiting punch', () => {
+    const waiting = entry({
+      id: 'wait',
+      timeEntry: `Smith - ${AWAITING_ASSET_LABEL}`,
+      clockIn: at(DAY, '06:30'),
+      clockOut: at(DAY, '07:00'),
+    });
+    const pay = getDayPayMinutes([waiting]);
+
+    expect(pay.lunchDeducted).toBe(false);
+    expect(pay.paidLaborMinutes).toBe(0);
+    expect(pay.minutesByEntryId.get('wait')).toBe(0);
   });
 
   it('exposes a single entry share through getEntryPaidMinutes', () => {

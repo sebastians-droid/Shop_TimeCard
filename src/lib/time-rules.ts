@@ -43,6 +43,22 @@ export function isPtoEntry(entry: ShopTimeEntry): boolean {
   return getPtoHours(entry) > 0 || entry.jobNumber === 'PTO' || entry.timeEntry.toLowerCase().includes(' - pto');
 }
 
+/** Label stored on a punch that records arrival before any asset has started. */
+export const AWAITING_ASSET_LABEL = 'Waiting';
+
+/**
+ * A clock-in with no job yet. Paid time begins on the first asset, so this
+ * punch is kept for the arrival time and contributes no hours.
+ */
+export function isAwaitingAsset(entry: ShopTimeEntry): boolean {
+  if (isPtoEntry(entry)) return false;
+  if (entry.asset?.id || entry.asset?.asset) return false;
+  if (entry.jobNumber) return false;
+  if (entry.division || entry.assetDivision) return false;
+  const saved = entry.timeEntry.split(' - ').slice(1).join(' - ').trim();
+  return saved === AWAITING_ASSET_LABEL;
+}
+
 export function notesHaveNoLunch(notes?: string): boolean {
   return (notes ?? '').includes(NO_LUNCH_MARKER);
 }
@@ -116,11 +132,15 @@ export function getDayPayMinutes(entries: ShopTimeEntry[], now = new Date(), sch
     .sort((entryA, entryB) => new Date(entryA.clockIn ?? 0).getTime() - new Date(entryB.clockIn ?? 0).getTime());
   const pto = entries.filter((entry) => isPtoEntry(entry));
   const noLunch = dayHasNoLunch(labor);
-  const rawById = new Map(labor.map((entry, index) => [entry.id, getPayableDurationMinutes(entry, index === 0, scheduledStart, now)]));
+  // Waiting punches record arrival only. The scheduled-start clamp and the
+  // quarter-hour rounding run from the first asset, the same way they used to
+  // run from the first punch.
+  const payable = labor.filter((entry) => !isAwaitingAsset(entry));
+  const rawById = new Map(payable.map((entry, index) => [entry.id, getPayableDurationMinutes(entry, index === 0, scheduledStart, now)]));
   const rawSum = [...rawById.values()].reduce((total, minutes) => total + minutes, 0);
   const lunchMinutes = !noLunch && rawSum > 0 ? LUNCH_MINUTES : 0;
   const target = roundToNearestQuarterHour(Math.max(0, rawSum - lunchMinutes));
-  const nearest = labor.map((entry) => ({
+  const nearest = payable.map((entry) => ({
     id: entry.id,
     minutes: roundToNearestQuarterHour(rawById.get(entry.id) ?? 0),
   }));
@@ -130,6 +150,9 @@ export function getDayPayMinutes(entries: ShopTimeEntry[], now = new Date(), sch
     last.minutes = Math.max(0, last.minutes + (target - nearestSum));
   }
   const minutesByEntryId = new Map<string, number>(nearest.map((row) => [row.id, row.minutes]));
+  for (const entry of labor) {
+    if (isAwaitingAsset(entry)) minutesByEntryId.set(entry.id, 0);
+  }
   let ptoMinutes = 0;
   for (const entry of pto) {
     const minutes = getPtoHours(entry) * 60;

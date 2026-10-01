@@ -3,7 +3,7 @@ import { format, startOfDay, startOfWeek, endOfWeek } from 'date-fns';
 import type { EquipmentAsset } from '@/models/equipment-asset';
 import type { ShopTimeEntry, ShopTimeEntryPTOTimeKey } from '@/models/shop-time-entry';
 import { formatEmployeeDisplayName, type AppShopEmployee } from '@/lib/shop-employees';
-import { DEFAULT_SCHEDULED_START, isPtoEntry, stripNoLunchMarker } from '@/lib/time-rules';
+import { DEFAULT_SCHEDULED_START, isAwaitingAsset, isPtoEntry, stripNoLunchMarker } from '@/lib/time-rules';
 
 export type PtoHours = 4 | 8;
 
@@ -22,6 +22,7 @@ export const getAssetDisplayName = (asset?: EquipmentAsset | Pick<EquipmentAsset
  */
 export function getEntryAssetName(entry: ShopTimeEntry, assets: EquipmentAsset[]): string {
   if (isPtoEntry(entry)) return 'PTO';
+  if (isAwaitingAsset(entry)) return 'Waiting';
   const matchedAsset = entry.asset?.id ? assets.find((asset: EquipmentAsset) => asset.id === entry.asset?.id) : undefined;
   if (entry.asset?.asset || matchedAsset) return entry.asset?.asset || getAssetDisplayName(matchedAsset);
   const timeEntryParts = entry.timeEntry.split(' - ');

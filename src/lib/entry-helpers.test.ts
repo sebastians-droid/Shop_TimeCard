@@ -87,6 +87,10 @@ describe('asset name resolution', () => {
     expect(getEntryAssetName(entry({ id: 'e', timeEntry: 'Smith - Time entry', jobNumber: '4821' }), assets)).toBe('Job 4821');
   });
 
+  it('labels a clock-in that is still waiting for a job', () => {
+    expect(getEntryAssetName(entry({ id: 'e', timeEntry: 'Smith - Waiting' }), assets)).toBe('Waiting');
+  });
+
   it('falls back to the job number, then the division, then a placeholder', () => {
     expect(getEntryAssetName(entry({ id: 'e', jobNumber: '4821' }), assets)).toBe('Job 4821');
     expect(getEntryAssetName(entry({ id: 'e', assetDivision: 12 }), assets)).toBe('Division 12');
