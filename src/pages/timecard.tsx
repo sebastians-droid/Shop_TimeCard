@@ -80,6 +80,9 @@ export default function TimecardPage() {
   const { data: user, isPending: userLoading } = useUser();
   const { employeeId: selectedEmployeeId } = useKioskSession();
   const canPunch = user?.canPunch ?? false;
+  const identifiedByLogin = Boolean(user?.shopEmployeeId && !user.requiresEmployeeCode);
+  const showAccessGate = Boolean(user && !user.requiresEmployeeCode && !user.shopEmployeeId && !user.isManager);
+  const showCodeSignIn = !userLoading && !selectedEmployeeId && !identifiedByLogin && !showAccessGate;
   const [selectedAssetId, setSelectedAssetId] = useState<string>('');
   const [selectedAssetRecord, setSelectedAssetRecord] = useState<Pick<EquipmentAsset, 'id' | 'asset' | 'divisionCode'> | undefined>(
     undefined,
@@ -442,10 +445,8 @@ export default function TimecardPage() {
   return (
     <main className="mx-auto flex w-full max-w-5xl flex-1 flex-col gap-6 p-4 sm:p-6 lg:p-8">
       {userLoading ? <p className="text-sm text-muted-foreground">Loading your account…</p> : null}
-      {!userLoading && user && !user.requiresEmployeeCode && !user.shopEmployeeId && !user.isManager ? (
-        <EmployeeAccessGate email={user.email} />
-      ) : null}
-      {!userLoading && !selectedEmployee && user?.requiresEmployeeCode ? (
+      {showAccessGate && user ? <EmployeeAccessGate email={user.email} /> : null}
+      {showCodeSignIn ? (
         <EmployeeCodeSignIn
           id="employee-code"
           employees={employees}
@@ -457,7 +458,7 @@ export default function TimecardPage() {
           onAccepted={handleAcceptedCode}
         />
       ) : null}
-      {!userLoading && !selectedEmployee && user && !user.requiresEmployeeCode && user.shopEmployeeId ? (
+      {!userLoading && !selectedEmployee && identifiedByLogin ? (
         <p className="text-sm text-muted-foreground">Loading your timecard…</p>
       ) : null}
       {selectedEmployee ? (

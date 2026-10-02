@@ -72,7 +72,11 @@ async function resolveAppUser(request) {
 
   const cfg = loadConfig();
   const email = base.email.toLowerCase();
-  const isKioskAccount = cfg.kioskEmails.includes(email);
+  const isProduction = process.env.AZURE_FUNCTIONS_ENVIRONMENT === 'Production' || Boolean(process.env.WEBSITE_SITE_NAME);
+  const skipAuth = process.env.DATAVERSE_LOCAL_SKIP_AUTH === '1' || !isProduction;
+  // Local demo has no kiosk account configured yet — keep the employee-code
+  // punch flow working until KIOSK_EMAILS is set.
+  const isKioskAccount = cfg.kioskEmails.includes(email) || (skipAuth && cfg.kioskEmails.length === 0);
   let shopEmployee = null;
 
   if (!isKioskAccount) {
