@@ -25,7 +25,9 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Textarea } from '@/components/ui/textarea';
 import { VoiceNoteButton } from '@/components/voice-note-button';
 import { AssetPicker } from '@/components/asset-picker';
+import { EmployeeAccessGate } from '@/components/employee-access-gate';
 import { EmployeeCodeSignIn, KioskSessionBar } from '@/components/kiosk-session';
+import { useUser } from '@/hooks/use-user';
 import { useKioskSession } from '@/hooks/use-kiosk-session';
 import {
   useAllEquipmentAssets,
@@ -75,7 +77,9 @@ const getNowIso = () => new Date().toISOString();
 const getWorkDate = (dateTime: string) => format(new Date(dateTime), 'yyyy-MM-dd');
 
 export default function TimecardPage() {
+  const { data: user, isPending: userLoading } = useUser();
   const { employeeId: selectedEmployeeId } = useKioskSession();
+  const canPunch = user?.canPunch ?? false;
   const [selectedAssetId, setSelectedAssetId] = useState<string>('');
   const [selectedAssetRecord, setSelectedAssetRecord] = useState<Pick<EquipmentAsset, 'id' | 'asset' | 'divisionCode'> | undefined>(
     undefined,
@@ -437,7 +441,11 @@ export default function TimecardPage() {
 
   return (
     <main className="mx-auto flex w-full max-w-5xl flex-1 flex-col gap-6 p-4 sm:p-6 lg:p-8">
-      {!selectedEmployee ? (
+      {userLoading ? <p className="text-sm text-muted-foreground">Loading your account…</p> : null}
+      {!userLoading && user && !user.requiresEmployeeCode && !user.shopEmployeeId && !user.isManager ? (
+        <EmployeeAccessGate email={user.email} />
+      ) : null}
+      {!userLoading && !selectedEmployee && user?.requiresEmployeeCode ? (
         <EmployeeCodeSignIn
           id="employee-code"
           employees={employees}
@@ -448,12 +456,17 @@ export default function TimecardPage() {
           submitLabel="View my timecard"
           onAccepted={handleAcceptedCode}
         />
-      ) : (
+      ) : null}
+      {!userLoading && !selectedEmployee && user && !user.requiresEmployeeCode && user.shopEmployeeId ? (
+        <p className="text-sm text-muted-foreground">Loading your timecard…</p>
+      ) : null}
+      {selectedEmployee ? (
         <section className="grid gap-6">
           <KioskSessionBar
             employee={selectedEmployee}
             detail={format(new Date(), 'EEEE, MMM d')}
             onLeave={handleAcceptedCode}
+            showEmployeeSignOut={user?.requiresEmployeeCode ?? true}
             actions={
               <Button type="button" variant="outline" onClick={() => void handleReloadTables()} disabled={assetsLoading || entriesLoading}>
                 <RefreshCw className="mr-2 h-4 w-4" /> Reload tables
@@ -537,29 +550,36 @@ export default function TimecardPage() {
                     </Card>
                   ) : null}
                   {entriesLoading ? <p className="text-sm text-muted-foreground">Loading your timecard...</p> : null}
-                  <div className="flex flex-col gap-2 sm:flex-row">
-                    {!employeeActiveEntry ? (
-                      <Button
-                        type="button"
-                        size="lg"
-                        className="h-14 flex-1 justify-center text-base font-semibold shadow-sm"
-                        onClick={() => void handleClockIn()}
-                        disabled={isClockingIn || createTimeEntry.isPending}
-                      >
-                        {isClockingIn ? 'Clocking in…' : 'Clock in'}
-                      </Button>
-                    ) : (
-                      <Button
-                        type="button"
-                        size="lg"
-                        className="h-14 flex-1 justify-center bg-blue-700 text-base font-semibold text-white hover:bg-blue-800"
-                        onClick={() => setAssetFormMode('start-asset')}
-                      >
-                        <Plus className="mr-2 h-5 w-5" /> Add job
-                      </Button>
-                    )}
-                  </div>
-                  {assetFormMode ? (
+                  {!canPunch ? (
+                    <p className="rounded-lg bg-muted p-4 text-sm text-muted-foreground">
+                      Clock in and clock out are only available on the shop kiosk or from a road mechanic work account. You can still
+                      review and edit past jobs below.
+                    </p>
+                  ) : (
+                    <div className="flex flex-col gap-2 sm:flex-row">
+                      {!employeeActiveEntry ? (
+                        <Button
+                          type="button"
+                          size="lg"
+                          className="h-14 flex-1 justify-center text-base font-semibold shadow-sm"
+                          onClick={() => void handleClockIn()}
+                          disabled={isClockingIn || createTimeEntry.isPending}
+                        >
+                          {isClockingIn ? 'Clocking in…' : 'Clock in'}
+                        </Button>
+                      ) : (
+                        <Button
+                          type="button"
+                          size="lg"
+                          className="h-14 flex-1 justify-center bg-blue-700 text-base font-semibold text-white hover:bg-blue-800"
+                          onClick={() => setAssetFormMode('start-asset')}
+                        >
+                          <Plus className="mr-2 h-5 w-5" /> Add job
+                        </Button>
+                      )}
+                    </div>
+                  )}
+                  {canPunch && assetFormMode ? (
                     <div className="grid gap-4 rounded-lg border border-dashed border-border bg-muted p-4 text-muted-foreground">
                       <div className="flex items-center justify-between gap-3">
                         <p className="font-medium text-foreground">Add job</p>
@@ -831,7 +851,7 @@ export default function TimecardPage() {
                       </div>
                     </div>
                   ))}
-                  {employeeActiveEntry ? (
+                  {canPunch && employeeActiveEntry ? (
                     <AlertDialog>
                       <AlertDialogTrigger asChild>
                         <Button
@@ -864,6 +884,7 @@ export default function TimecardPage() {
                 </CardContent>
               </Card>
 
+              {canPunch ? (
               <Card className="bg-card text-card-foreground shadow-sm">
                 <CardHeader>
                   <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
@@ -937,10 +958,11 @@ export default function TimecardPage() {
                   </CardContent>
                 ) : null}
               </Card>
+              ) : null}
             </>
           )}
         </section>
-      )}
+      ) : null}
     </main>
   );
 }

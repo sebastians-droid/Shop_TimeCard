@@ -85,6 +85,11 @@ function loadConfig() {
     .map((email) => email.trim().toLowerCase())
     .filter(Boolean);
 
+  const kioskEmails = (cleanEnv('KIOSK_EMAILS') || fileCfg.kiosk_emails || '')
+    .split(',')
+    .map((email) => email.trim().toLowerCase())
+    .filter(Boolean);
+
   cachedConfig = {
     orgUrl,
     api: `${orgUrl}/api/data/v9.2`,
@@ -96,8 +101,15 @@ function loadConfig() {
     sharePointSite: cleanEnv('SHAREPOINT_SITE') || fileCfg.sharepoint_site || '',
     sharePointFilePath: cleanEnv('SHAREPOINT_FILE_PATH') || fileCfg.sharepoint_file_path || '',
     managerEmails,
+    kioskEmails,
   };
   return cachedConfig;
+}
+
+function normalizeSignInEmail(value) {
+  if (typeof value !== 'string') return undefined;
+  const email = value.trim().toLowerCase();
+  return email || undefined;
 }
 
 function requireConfig() {
@@ -207,6 +219,7 @@ function mapShopEmployee(row) {
     // Nullable in Dataverse: rows predating the column read as null, which means
     // shop mechanic. Only an explicit true is a road mechanic.
     isRoadMech: row.swank_isroadmech === true,
+    signInEmail: normalizeSignInEmail(related.swank_email ?? row.swank_signinemail),
     employee: name
       ? {
           id: related.swank_employeeid || row._swank_employee_value,
@@ -319,22 +332,52 @@ function timeEntryPayload(record, { isCreate }) {
   return payload;
 }
 
+const SHOP_EMPLOYEE_SELECT =
+  'swank_shopemployeeid,swank_autonumber,swank_empnum,swank_isroadmech,_swank_employee_value';
+const SHOP_EMPLOYEE_EXPAND =
+  '&$expand=swank_Employee($select=swank_employeeid,swank_name,swank_empnum,swank_email)';
+
 async function listEmployees() {
   try {
     const rows = await listAll(
-      '/swank_shopemployees?$select=swank_shopemployeeid,swank_autonumber,swank_empnum,swank_isroadmech,_swank_employee_value&$expand=swank_Employee($select=swank_employeeid,swank_name,swank_empnum)&$filter=statecode eq 0&$orderby=swank_autonumber',
+      `/swank_shopemployees?$select=${SHOP_EMPLOYEE_SELECT}${SHOP_EMPLOYEE_EXPAND}&$filter=statecode eq 0&$orderby=swank_autonumber`,
     );
     return rows.map(mapShopEmployee).filter((row) => typeof row.empNum === 'number');
   } catch (error) {
     try {
       const rows = await listAll(
-        '/swank_shopemployees?$select=swank_shopemployeeid,swank_autonumber,swank_empnum,swank_isroadmech,_swank_employee_value&$filter=statecode eq 0',
+        `/swank_shopemployees?$select=${SHOP_EMPLOYEE_SELECT}&$expand=swank_Employee($select=swank_employeeid,swank_name,swank_empnum)&$filter=statecode eq 0&$orderby=swank_autonumber`,
       );
       return rows.map(mapShopEmployee).filter((row) => typeof row.empNum === 'number');
     } catch {
       throw error;
     }
   }
+}
+
+async function findShopEmployeeBySignInEmail(email) {
+  const normalized = normalizeSignInEmail(email);
+  if (!normalized) return null;
+  const escaped = normalized.replace(/'/g, "''");
+  try {
+    const rows = await listAll(
+      `/swank_shopemployees?$select=${SHOP_EMPLOYEE_SELECT}${SHOP_EMPLOYEE_EXPAND}&$filter=statecode eq 0 and swank_Employee/swank_email eq '${escaped}'`,
+    );
+    const match = rows.map(mapShopEmployee).find((row) => typeof row.empNum === 'number');
+    if (match) return match;
+  } catch {
+    // Column may not exist yet — fall back to scanning the roster.
+  }
+  const roster = await listEmployees();
+  return roster.find((row) => row.signInEmail === normalized) || null;
+}
+
+async function getTimeEntryEmployeeId(id) {
+  const row = await dataverseFetch(
+    'GET',
+    `/swank_shoptimeentries(${id})?$select=swank_shoptimeentryid,_swank_employee_value`,
+  );
+  return row._swank_employee_value || undefined;
 }
 
 async function listAssets() {
@@ -526,6 +569,8 @@ module.exports = {
   loadConfig,
   diagnose,
   listEmployees,
+  findShopEmployeeBySignInEmail,
+  getTimeEntryEmployeeId,
   listLookupEmployees,
   listAssets,
   createAsset,

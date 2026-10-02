@@ -17,7 +17,7 @@ const {
   upsertSchedule,
 } = require('./dataverse');
 const { issueSpeechToken } = require('./speech');
-const { requireUser, requireManager } = require('./auth');
+const { requireUser, requireAppUser, requireManager, assertTimeEntryAccess, assertPunchCreate } = require('./auth');
 let runSync = async () => {
   throw new Error('Sync module not loaded');
 };
@@ -90,7 +90,7 @@ async function handleRequest(request) {
     }
 
     if (method === 'GET' && pathname === '/api/me') {
-      const user = requireUser(request);
+      const user = await requireAppUser(request);
       return json(200, user);
     }
 
@@ -158,8 +158,9 @@ async function handleRequest(request) {
     }
 
     if (method === 'POST' && (pathname === '/api/time-entries' || pathname === '/api/timeEntries')) {
-      requireUser(request);
+      const user = await requireAppUser(request);
       const record = await readJson(request);
+      assertPunchCreate(user, record);
       const ip = clientIp(request);
       if (ip && record.clockIn) record.clockInIp = ip;
       return json(201, await createTimeEntry(record));
@@ -168,8 +169,9 @@ async function handleRequest(request) {
     const entryMatch =
       pathname.match(/^\/api\/time-entries\/([0-9a-f-]{36})$/i) || pathname.match(/^\/api\/timeEntries\/([0-9a-f-]{36})$/i);
     if (entryMatch && method === 'PATCH') {
-      requireUser(request);
+      const user = await requireAppUser(request);
       const record = await readJson(request);
+      await assertTimeEntryAccess(user, entryMatch[1], record);
       const ip = clientIp(request);
       if (ip && record.clockOut) record.clockOutIp = ip;
       return json(200, await updateTimeEntry(entryMatch[1], record));

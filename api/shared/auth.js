@@ -1,4 +1,4 @@
-const { loadConfig } = require('./dataverse');
+const { loadConfig, findShopEmployeeBySignInEmail, getTimeEntryEmployeeId } = require('./dataverse');
 
 function decodePrincipal(headerValue) {
   if (!headerValue) return null;
@@ -61,8 +61,54 @@ function getUser(request) {
   };
 }
 
+function recordTouchesPunch(record) {
+  if (!record || typeof record !== 'object') return false;
+  return record.clockIn !== undefined || record.clockOut !== undefined;
+}
+
+async function resolveAppUser(request) {
+  const base = getUser(request);
+  if (!base) return null;
+
+  const cfg = loadConfig();
+  const email = base.email.toLowerCase();
+  const isKioskAccount = cfg.kioskEmails.includes(email);
+  let shopEmployee = null;
+
+  if (!isKioskAccount) {
+    try {
+      shopEmployee = await findShopEmployeeBySignInEmail(email);
+    } catch {
+      shopEmployee = null;
+    }
+  }
+
+  const isRoadMech = shopEmployee?.isRoadMech === true;
+  const canPunch = isKioskAccount || isRoadMech;
+  const requiresEmployeeCode = isKioskAccount;
+
+  return {
+    ...base,
+    isKioskAccount,
+    requiresEmployeeCode,
+    canPunch,
+    shopEmployeeId: shopEmployee?.id || undefined,
+    isRoadMech: isRoadMech || undefined,
+  };
+}
+
 function requireUser(request) {
   const user = getUser(request);
+  if (!user) {
+    const error = new Error('Sign in with Microsoft 365 to use Shop Timecard.');
+    error.status = 401;
+    throw error;
+  }
+  return user;
+}
+
+async function requireAppUser(request) {
+  const user = await resolveAppUser(request);
   if (!user) {
     const error = new Error('Sign in with Microsoft 365 to use Shop Timecard.');
     error.status = 401;
@@ -81,4 +127,43 @@ function requireManager(request) {
   return user;
 }
 
-module.exports = { getUser, requireUser, requireManager };
+function assertOwnShopEmployee(user, employeeId) {
+  if (user.isManager || user.isKioskAccount) return;
+  if (!employeeId || !user.shopEmployeeId || employeeId !== user.shopEmployeeId) {
+    const error = new Error('You can only change your own timecard entries.');
+    error.status = 403;
+    throw error;
+  }
+}
+
+async function assertTimeEntryAccess(user, entryId, changedFields = {}) {
+  if (user.isManager || user.isKioskAccount) return;
+  const employeeId = await getTimeEntryEmployeeId(entryId);
+  assertOwnShopEmployee(user, employeeId);
+  if (recordTouchesPunch(changedFields) && !user.canPunch) {
+    const error = new Error('Clock in and clock out are only allowed from the shop kiosk or a road mechanic account.');
+    error.status = 403;
+    throw error;
+  }
+}
+
+function assertPunchCreate(user, record) {
+  if (!recordTouchesPunch(record)) return;
+  if (!user.canPunch) {
+    const error = new Error('Clock in and clock out are only allowed from the shop kiosk or a road mechanic account.');
+    error.status = 403;
+    throw error;
+  }
+  assertOwnShopEmployee(user, record.employee?.id);
+}
+
+module.exports = {
+  getUser,
+  resolveAppUser,
+  requireUser,
+  requireAppUser,
+  requireManager,
+  assertTimeEntryAccess,
+  assertPunchCreate,
+  recordTouchesPunch,
+};

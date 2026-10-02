@@ -7,6 +7,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { KioskSessionContext, useKioskSession } from '@/hooks/use-kiosk-session';
+import { useUser } from '@/hooks/use-user';
 import { EMPLOYEE_CODE_NOT_FOUND, findEmployeeByCode } from '@/lib/entry-helpers';
 import type { AppShopEmployee } from '@/lib/shop-employees';
 import { toast } from '@/lib/toast';
@@ -14,13 +15,15 @@ import { toast } from '@/lib/toast';
 /** Shared kiosk routes. Leaving both of these clears the signed-in employee. */
 const KIOSK_PATHS = ['/timecard', '/mechanic-log'];
 
-/** No pointer, key, or scroll activity for this long returns the kiosk to the code screen. */
-const KIOSK_IDLE_MS = 20_000;
+/** Shop kiosk only — personal Microsoft accounts are not signed out for inactivity. */
+const KIOSK_IDLE_MS = 30_000;
 
 export function KioskSessionProvider({ children }: { children: ReactNode }) {
   const [employeeId, setEmployeeId] = useState('');
   const { pathname } = useLocation();
+  const { data: user } = useUser();
   const onKioskRoute = KIOSK_PATHS.includes(pathname);
+  const requiresEmployeeCode = user?.requiresEmployeeCode ?? true;
 
   // Drop the signed-in employee as soon as the kiosk routes are left, before paint.
   if (!onKioskRoute && employeeId) {
@@ -36,7 +39,12 @@ export function KioskSessionProvider({ children }: { children: ReactNode }) {
   }, []);
 
   useEffect(() => {
-    if (!employeeId || !onKioskRoute) return;
+    if (!onKioskRoute || !user?.shopEmployeeId || user.requiresEmployeeCode) return;
+    setEmployeeId(user.shopEmployeeId);
+  }, [onKioskRoute, user?.shopEmployeeId, user?.requiresEmployeeCode]);
+
+  useEffect(() => {
+    if (!employeeId || !onKioskRoute || !requiresEmployeeCode) return;
 
     const signOutForIdle = () => {
       setEmployeeId('');
@@ -59,7 +67,7 @@ export function KioskSessionProvider({ children }: { children: ReactNode }) {
       for (const eventName of events) window.removeEventListener(eventName, reset);
       window.removeEventListener('scroll', reset, { capture: true });
     };
-  }, [employeeId, onKioskRoute]);
+  }, [employeeId, onKioskRoute, requiresEmployeeCode]);
 
   const value = useMemo(() => ({ employeeId, signIn, signOut }), [employeeId, signIn, signOut]);
 
@@ -76,11 +84,13 @@ export function KioskSessionBar({
   detail,
   actions,
   onLeave,
+  showEmployeeSignOut = true,
 }: {
   employee: AppShopEmployee;
   detail: string;
   actions?: ReactNode;
   onLeave?: () => void;
+  showEmployeeSignOut?: boolean;
 }) {
   const { signOut } = useKioskSession();
 
@@ -104,16 +114,18 @@ export function KioskSessionBar({
               </NavLink>
             </nav>
             {actions}
-            <Button
-              type="button"
-              variant="outline"
-              onClick={() => {
-                onLeave?.();
-                signOut();
-              }}
-            >
-              Back to sign-in
-            </Button>
+            {showEmployeeSignOut ? (
+              <Button
+                type="button"
+                variant="outline"
+                onClick={() => {
+                  onLeave?.();
+                  signOut();
+                }}
+              >
+                Back to sign-in
+              </Button>
+            ) : null}
           </div>
         </div>
       </CardHeader>

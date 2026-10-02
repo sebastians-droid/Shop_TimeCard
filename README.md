@@ -8,12 +8,28 @@ This is a port of the Power Apps code app onto **Azure Static Web Apps**. The br
 
 | Table | Entity set | Used for |
 | --- | --- | --- |
-| Shop Employees | `swank_shopemployees` | 4-digit codes and names for kiosk sign-in |
+| Shop Employees | `swank_shopemployees` | 4-digit codes, names, road-mechanic flag, and sign-in email for personal Microsoft login |
 | Employees | `swank_employees` | Display name on the shop employee lookup |
 | Equipment Asset | `swank_equipmentassets` | Asset picker |
 | Shop Time Entries | `swank_shoptimeentries` | Clock-in/out and PTO rows |
 
 Environment: `https://org9cab1d0f.crm.dynamics.com/`
+
+### Work email (Employee)
+
+Add a custom column on **Employee** (`swank_employee`) so mechanics signed in with their own Microsoft 365 account are recognized without the kiosk employee code. Shop Employee already links to Employee — the app matches the signed-in M365 address against this field.
+
+| Setting | Value |
+| --- | --- |
+| Table | Employee (`swank_employee`) |
+| Display name | Email |
+| Logical name | `swank_email` |
+| Type | Email (or Single line of text) |
+| Required | No |
+
+Fill it with each mechanic’s work Microsoft 365 address (same address they use to sign into the app). Road mechanics (`swank_isroadmech` on Shop Employee) can clock in/out from their phone. Shop mechanics can use it to view their timecard and mechanic log on a phone, but clock-in/out stays limited to the shop kiosk account.
+
+Grant the **Shop Timecard API** application user **Read** on Employee (if not already) including the new column.
 
 ## Local run
 
@@ -39,6 +55,7 @@ Locally the API skips Microsoft login (`DATAVERSE_LOCAL_SKIP_AUTH`). In Azure, S
    - `DATAVERSE_CLIENT_ID`
    - `DATAVERSE_CLIENT_SECRET`
    - `MANAGER_EMAILS` (comma-separated, used only for the manager dashboard)
+   - `KIOSK_EMAILS` (comma-separated shared shop kiosk Microsoft 365 accounts — these use the 4-digit employee code; all other accounts are matched by **Email** on Employee)
    - `SPEECH_KEY` and `SPEECH_REGION` (Azure Speech resource for voice notes)
    - `SPEECH_CUSTOM_ENDPOINT_ID` (optional Custom Speech deployment id)
    - `SPEECH_MAX_SECONDS` (optional, default `30`)

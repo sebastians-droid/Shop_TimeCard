@@ -15,7 +15,9 @@ import { Label } from '@/components/ui/label';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { Textarea } from '@/components/ui/textarea';
 import { AssetPicker } from '@/components/asset-picker';
+import { EmployeeAccessGate } from '@/components/employee-access-gate';
 import { EmployeeCodeSignIn, KioskSessionBar } from '@/components/kiosk-session';
+import { useUser } from '@/hooks/use-user';
 import { useKioskSession } from '@/hooks/use-kiosk-session';
 import { VoiceNoteButton } from '@/components/voice-note-button';
 import { useAllEquipmentAssets, useShopEmployeeList, useShopTimeEntryList, useUpdateShopTimeEntry } from '@/hooks/use-shop-data';
@@ -49,7 +51,9 @@ import { divisionLabel } from '@/lib/reference-data';
 import { ShopTimeEntryPayTypeKeyToLabel, ShopTimeEntryPTOTypeKeyToLabel, type ShopTimeEntry } from '@/models/shop-time-entry';
 
 export default function MechanicLogPage() {
+  const { data: user, isPending: userLoading } = useUser();
   const { employeeId: selectedEmployeeId } = useKioskSession();
+  const canPunch = user?.canPunch ?? false;
   const now = new Date();
   const [dateRange, setDateRange] = useState<DateRange | undefined>({
     from: startOfWeek(now, { weekStartsOn: 0 }),
@@ -388,7 +392,11 @@ export default function MechanicLogPage() {
 
   return (
     <main className="mx-auto flex w-full max-w-5xl flex-1 flex-col gap-6 p-4 sm:p-6 lg:p-8">
-      {!selectedEmployee ? (
+      {userLoading ? <p className="text-sm text-muted-foreground">Loading your account…</p> : null}
+      {!userLoading && user && !user.requiresEmployeeCode && !user.shopEmployeeId && !user.isManager ? (
+        <EmployeeAccessGate email={user.email} />
+      ) : null}
+      {!userLoading && !selectedEmployee && user?.requiresEmployeeCode ? (
         <EmployeeCodeSignIn
           id="mechanic-code"
           employees={employees}
@@ -399,9 +407,18 @@ export default function MechanicLogPage() {
           submitLabel="View my work log"
           onAccepted={handleAcceptedCode}
         />
-      ) : (
+      ) : null}
+      {!userLoading && !selectedEmployee && user && !user.requiresEmployeeCode && user.shopEmployeeId ? (
+        <p className="text-sm text-muted-foreground">Loading your work log…</p>
+      ) : null}
+      {selectedEmployee ? (
         <section className="grid gap-6">
-          <KioskSessionBar employee={selectedEmployee} detail="Mechanic Log" onLeave={handleAcceptedCode} />
+          <KioskSessionBar
+            employee={selectedEmployee}
+            detail="Mechanic Log"
+            onLeave={handleAcceptedCode}
+            showEmployeeSignOut={user?.requiresEmployeeCode ?? true}
+          />
 
           {entriesFailed ? (
             <div className="rounded-md border border-destructive/40 bg-destructive/10 p-3 text-sm text-destructive">
@@ -521,18 +538,20 @@ export default function MechanicLogPage() {
                         <CardContent className="space-y-2 border-t border-border pt-4">
                           {d.lastOut ? (
                             <div className="space-y-3">
-                              <Button
-                                type="button"
-                                variant="outline"
-                                onClick={() => {
-                                  resetJobForm();
-                                  setAddingJobDateKey(d.dateKey);
-                                  setJobEndedAt(formatTimeForInput(d.lastOut));
-                                }}
-                              >
-                                <Plus className="mr-2 h-4 w-4" /> Add Job
-                              </Button>
-                              {addingJobDateKey === d.dateKey ? (
+                              {canPunch ? (
+                                <Button
+                                  type="button"
+                                  variant="outline"
+                                  onClick={() => {
+                                    resetJobForm();
+                                    setAddingJobDateKey(d.dateKey);
+                                    setJobEndedAt(formatTimeForInput(d.lastOut));
+                                  }}
+                                >
+                                  <Plus className="mr-2 h-4 w-4" /> Add Job
+                                </Button>
+                              ) : null}
+                              {canPunch && addingJobDateKey === d.dateKey ? (
                                 <div className="grid gap-3 rounded-lg border border-dashed border-border bg-muted p-3 text-muted-foreground">
                                   <div className="flex items-center justify-between gap-2">
                                     <p className="font-medium text-foreground">Add forgotten job</p>
@@ -862,7 +881,7 @@ export default function MechanicLogPage() {
             </Card>
           )}
         </section>
-      )}
+      ) : null}
     </main>
   );
 }

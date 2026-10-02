@@ -8,6 +8,11 @@ export type AppUser = {
   name: string;
   userId: string;
   isManager: boolean;
+  isKioskAccount: boolean;
+  requiresEmployeeCode: boolean;
+  canPunch: boolean;
+  shopEmployeeId?: string;
+  isRoadMech?: boolean;
 };
 
 export const useUser = () => {
