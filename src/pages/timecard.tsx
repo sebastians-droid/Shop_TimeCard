@@ -98,6 +98,7 @@ export default function TimecardPage() {
   const [editingNotesEntryId, setEditingNotesEntryId] = useState<string>('');
   const [editingNotes, setEditingNotes] = useState<string>('');
   const [clockInConfirmation, setClockInConfirmation] = useState<ClockInConfirmation | undefined>(undefined);
+  const [isClockingIn, setIsClockingIn] = useState(false);
 
   const {
     data: shopEmployees = [],
@@ -126,7 +127,11 @@ export default function TimecardPage() {
   const employeeTodayEntries = useMemo(() => {
     if (!selectedEmployeeId || !selectedEmployee) return [];
     const today = format(new Date(), 'yyyy-MM-dd');
-    return employeeEntries.filter((entry: ShopTimeEntry) => entry.clockIn?.startsWith(today));
+    return employeeEntries.filter((entry: ShopTimeEntry) => {
+      if (!entry.clockIn) return false;
+      const clockIn = new Date(entry.clockIn);
+      return !Number.isNaN(clockIn.getTime()) && format(clockIn, 'yyyy-MM-dd') === today;
+    });
   }, [employeeEntries, selectedEmployee, selectedEmployeeId]);
   const employeeActiveEntry = employeeTodayEntries.find((entry: ShopTimeEntry) => !entry.clockOut && !isPtoEntry(entry));
   const dayFirstIn = dayFirstClockIn(employeeTodayEntries);
@@ -212,12 +217,13 @@ export default function TimecardPage() {
       return;
     }
     if (employeeActiveEntry) {
-      toast.error('You are already clocked in. Clock out or start an asset.');
+      toast.error('You are already clocked in. Clock out or add a job.');
       return;
     }
     const clockIn = getNowIso();
-    const pos = await getCurrentPosition();
+    setIsClockingIn(true);
     try {
+      const pos = await getCurrentPosition();
       await createTimeEntry.mutateAsync({
         timeEntry: `${selectedEmployee.employeeName} - ${AWAITING_ASSET_LABEL}`,
         employee: { id: selectedEmployee.id, autoNumber: selectedEmployee.autoNumber },
@@ -230,6 +236,8 @@ export default function TimecardPage() {
       toast.success(`Clocked in at ${format(new Date(clockIn), 'p')}.`);
     } catch (error: unknown) {
       toast.error(error instanceof Error ? error.message : 'Unable to clock in.');
+    } finally {
+      setIsClockingIn(false);
     }
   };
 
@@ -490,7 +498,7 @@ export default function TimecardPage() {
                       <TimerReset className="h-5 w-5" /> Today’s asset timecard
                     </CardTitle>
                     <p className="text-sm text-muted-foreground">
-                      Clock in when you arrive. Start asset when the job begins. Use New job to change equipment. After clock-out, add
+                      Clock in when you arrive. Add a job when work begins, and again to change equipment. After clock-out, add
                       forgotten jobs on Mechanic Log.
                     </p>
                     {dayFirstIn ? (
@@ -536,27 +544,25 @@ export default function TimecardPage() {
                         size="lg"
                         className="h-14 flex-1 justify-center text-base font-semibold shadow-sm"
                         onClick={() => void handleClockIn()}
-                        disabled={createTimeEntry.isPending}
+                        disabled={isClockingIn || createTimeEntry.isPending}
                       >
-                        Clock in
+                        {isClockingIn ? 'Clocking in…' : 'Clock in'}
                       </Button>
                     ) : (
                       <Button
                         type="button"
                         size="lg"
-                        className={`h-14 flex-1 justify-center text-base font-semibold ${isAwaitingAsset(employeeActiveEntry) ? '' : 'bg-blue-700 text-white hover:bg-blue-800'}`}
+                        className="h-14 flex-1 justify-center bg-blue-700 text-base font-semibold text-white hover:bg-blue-800"
                         onClick={() => setAssetFormMode('start-asset')}
                       >
-                        <Plus className="mr-2 h-5 w-5" /> {isAwaitingAsset(employeeActiveEntry) ? 'Start asset' : 'New job'}
+                        <Plus className="mr-2 h-5 w-5" /> Add job
                       </Button>
                     )}
                   </div>
                   {assetFormMode ? (
                     <div className="grid gap-4 rounded-lg border border-dashed border-border bg-muted p-4 text-muted-foreground">
                       <div className="flex items-center justify-between gap-3">
-                        <p className="font-medium text-foreground">
-                          {employeeActiveEntry && isAwaitingAsset(employeeActiveEntry) ? 'Start asset' : 'Start next job'}
-                        </p>
+                        <p className="font-medium text-foreground">Add job</p>
                         <Button type="button" size="icon" variant="ghost" aria-label="Cancel form" onClick={() => setAssetFormMode(null)}>
                           <X className="h-4 w-4" />
                         </Button>
@@ -577,40 +583,6 @@ export default function TimecardPage() {
                           Choose any equipment asset, or leave it blank and enter a division or job number below.
                         </p>
                       </div>
-                      <div className="space-y-2">
-                        <div className="flex items-center justify-between gap-2">
-                          <Label>Notes</Label>
-                          <VoiceNoteButton
-                            value={notes}
-                            onChange={setNotes}
-                            phrases={voicePhrases}
-                            disabled={createTimeEntry.isPending || updateTimeEntry.isPending}
-                          />
-                        </div>
-                        <Textarea
-                          className="bg-background"
-                          value={notes}
-                          onChange={(event: React.ChangeEvent<HTMLTextAreaElement>) => setNotes(event.target.value)}
-                          placeholder="Optional job notes or handoff details"
-                        />
-                      </div>
-                      {employeeActiveEntry ? (
-                        <div className="rounded-lg border border-border bg-background p-3 text-muted-foreground">
-                          {isAwaitingAsset(employeeActiveEntry) ? (
-                            <>
-                              <p className="font-medium text-foreground">
-                                Clocked in {employeeActiveEntry.clockIn ? format(new Date(employeeActiveEntry.clockIn), 'p') : ''}
-                              </p>
-                              <p className="text-sm">Paid time starts when this asset starts. Your clock-in stays on the timecard.</p>
-                            </>
-                          ) : (
-                            <>
-                              <p className="font-medium text-foreground">Current asset: {getEntryAssetName(employeeActiveEntry, assets)}</p>
-                              <p className="text-sm">Starting another asset clocks this one out now and keeps the day’s clock-in.</p>
-                            </>
-                          )}
-                        </div>
-                      ) : null}
                       <div className="grid gap-4 sm:grid-cols-2">
                         <div className="space-y-2">
                           <Label htmlFor="division">Division (optional)</Label>
@@ -633,19 +605,42 @@ export default function TimecardPage() {
                           />
                         </div>
                       </div>
+                      {employeeActiveEntry && !isAwaitingAsset(employeeActiveEntry) ? (
+                        <div className="rounded-lg border border-border bg-background p-3 text-muted-foreground">
+                          <p className="font-medium text-foreground">Current asset: {getEntryAssetName(employeeActiveEntry, assets)}</p>
+                          <p className="text-sm">Starting another asset clocks this one out now and keeps the day’s clock-in.</p>
+                        </div>
+                      ) : null}
+                      <div className="space-y-2">
+                        <div className="flex items-center justify-between gap-2">
+                          <Label>Notes</Label>
+                          <VoiceNoteButton
+                            value={notes}
+                            onChange={setNotes}
+                            phrases={voicePhrases}
+                            disabled={createTimeEntry.isPending || updateTimeEntry.isPending}
+                          />
+                        </div>
+                        <Textarea
+                          className="bg-background"
+                          value={notes}
+                          onChange={(event: React.ChangeEvent<HTMLTextAreaElement>) => setNotes(event.target.value)}
+                          placeholder="Optional job notes or handoff details"
+                        />
+                      </div>
                       <Button
                         className="h-12"
                         type="button"
                         onClick={() => void handleStartAsset()}
                         disabled={assetsLoading || createTimeEntry.isPending || updateTimeEntry.isPending}
                       >
-                        {employeeActiveEntry && isAwaitingAsset(employeeActiveEntry) ? 'Start asset' : 'Start job'}
+                        Add job
                       </Button>
                     </div>
                   ) : null}
                   {employeeTodayEntries.length === 0 && !entriesLoading && !assetFormMode ? (
                     <p className="rounded-lg bg-muted p-4 text-sm text-muted-foreground">
-                      Clock in when you arrive, even if the job has not started. Use Start asset when you begin work.
+                      Clock in when you arrive, even if the job has not started. Use Add job when you begin work.
                     </p>
                   ) : null}
                   {employeeTodayEntries.map((entry: ShopTimeEntry) => (
@@ -717,14 +712,18 @@ export default function TimecardPage() {
                                   <Badge variant="outline">{ShopTimeEntryPTOTypeKeyToLabel[entry.pTOTypeKey]}</Badge>
                                 ) : null}
                                 <p className="text-sm text-muted-foreground">
-                                  {isPtoEntry(entry) ? 'Paid time off' : isAwaitingAsset(entry) ? 'Waiting for a job' : 'Asset'}
+                                  {isPtoEntry(entry) ? 'Paid time off' : isAwaitingAsset(entry) ? 'Clocked in' : 'Asset'}
                                 </p>
                               </div>
-                              <p className="text-lg font-semibold">{getEntryAssetName(entry, assets)}</p>
+                              <p className="text-lg font-semibold">
+                                {isAwaitingAsset(entry) ? 'Clocked in' : getEntryAssetName(entry, assets)}
+                              </p>
                               <p className="text-sm text-muted-foreground">
                                 {isPtoEntry(entry)
                                   ? `${getPtoHours(entry) || Math.round(entry.hours ?? 0)} hours submitted`
-                                  : `Division ${getEntryDivision(entry, assets) || '—'} · Job ${getEntryJobNumber(entry) || '—'}`}
+                                  : isAwaitingAsset(entry)
+                                    ? 'Add a job when work begins.'
+                                    : `Division ${getEntryDivision(entry, assets) || '—'} · Job ${getEntryJobNumber(entry) || '—'}`}
                               </p>
                             </div>
                           )}
@@ -804,13 +803,13 @@ export default function TimecardPage() {
                           ) : (
                             <div className="flex flex-wrap items-center justify-end gap-2">
                               {!entry.clockOut && isAwaitingAsset(entry) ? (
-                                <Badge variant="secondary">Waiting</Badge>
+                                <Badge variant="secondary">Clocked in</Badge>
                               ) : !entry.clockOut && !isPtoEntry(entry) ? (
                                 <Badge variant="secondary">Active</Badge>
                               ) : (
                                 <Badge variant="outline">Complete</Badge>
                               )}
-                              {!isPtoEntry(entry) && !isAwaitingAsset(entry) ? (
+                              {!isPtoEntry(entry) ? (
                                 <Button type="button" variant="outline" onClick={() => handleStartEditAsset(entry)}>
                                   Edit timecard
                                 </Button>

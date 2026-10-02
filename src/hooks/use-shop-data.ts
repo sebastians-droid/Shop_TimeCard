@@ -57,8 +57,13 @@ export function useCreateShopTimeEntry() {
         method: 'POST',
         body: JSON.stringify(record),
       }),
-    onSuccess: () => {
-      client.invalidateQueries({ queryKey: queryKeys.timeEntries() });
+    onSuccess: (created) => {
+      client.setQueryData<ShopTimeEntry[]>(queryKeys.timeEntries(), (current) => {
+        const rows = current ?? [];
+        if (rows.some((row) => row.id === created.id)) return rows;
+        return [created, ...rows];
+      });
+      void client.invalidateQueries({ queryKey: queryKeys.timeEntries() });
     },
   });
 }

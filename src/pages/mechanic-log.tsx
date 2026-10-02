@@ -55,6 +55,13 @@ export default function MechanicLogPage() {
     from: startOfWeek(now, { weekStartsOn: 0 }),
     to: endOfWeek(now, { weekStartsOn: 0 }),
   });
+  const [editingEntryId, setEditingEntryId] = useState('');
+  const [editingAssetId, setEditingAssetId] = useState('');
+  const [editingAssetRecord, setEditingAssetRecord] = useState<Pick<EquipmentAsset, 'id' | 'asset' | 'divisionCode'> | undefined>(
+    undefined,
+  );
+  const [editingDivision, setEditingDivision] = useState('');
+  const [editingJobNumber, setEditingJobNumber] = useState('');
   const [editingNotesEntryId, setEditingNotesEntryId] = useState('');
   const [editingNotes, setEditingNotes] = useState('');
   const [addingJobDateKey, setAddingJobDateKey] = useState('');
@@ -95,12 +102,6 @@ export default function MechanicLogPage() {
     setJobEndedAt('');
   };
 
-  const handleAcceptedCode = () => {
-    setEditingNotesEntryId('');
-    setEditingNotes('');
-    resetJobForm();
-  };
-
   const voicePhrases = useMemo(
     () =>
       [
@@ -115,9 +116,72 @@ export default function MechanicLogPage() {
     [assets, selectedEmployee?.employeeName],
   );
 
+  const startEditTimecard = (entry: ShopTimeEntry) => {
+    setEditingEntryId(entry.id);
+    setEditingAssetId(entry.asset?.id ?? '');
+    setEditingAssetRecord(entry.asset);
+    setEditingDivision(getEntryDivision(entry, assets) ? String(getEntryDivision(entry, assets)) : '');
+    setEditingJobNumber(getEntryJobNumber(entry));
+    setEditingNotesEntryId('');
+    setEditingNotes(getEmployeeNotes(entry.notes));
+  };
+
+  const cancelEditTimecard = () => {
+    setEditingEntryId('');
+    setEditingAssetId('');
+    setEditingAssetRecord(undefined);
+    setEditingDivision('');
+    setEditingJobNumber('');
+    setEditingNotes('');
+  };
+
+  const saveTimecard = async (entry: ShopTimeEntry, day: Date, dayEntries: ShopTimeEntry[]) => {
+    const when = format(day, 'MMM d');
+    const newAsset = editingAssetId
+      ? (editingAssetRecord ?? assets.find((asset: EquipmentAsset) => asset.id === editingAssetId))
+      : undefined;
+    const manualDivision = editingDivision.trim();
+    const manualJobNumber = editingJobNumber.trim();
+    if (manualDivision && !Number.isFinite(Number(manualDivision))) {
+      toast.error('Division must be a number.');
+      return;
+    }
+    const assetLabel = newAsset ? getAssetDisplayName(newAsset) : getEntryAssetName(entry, assets);
+    const entryLabel =
+      [assetLabel, manualJobNumber ? `Job ${manualJobNumber}` : ''].filter((value: string) => value).join(' · ') ||
+      (manualDivision ? `Division ${manualDivision}` : 'Time entry');
+    const employeeName = selectedEmployee?.employeeName ?? entry.employee?.autoNumber ?? 'Employee';
+    const nextNotes = applyNoLunchMarker(editingNotes.trim() || undefined, notesHaveNoLunch(entry.notes) || dayHasNoLunch(dayEntries));
+    try {
+      await updateTimeEntry.mutateAsync({
+        id: entry.id,
+        changedFields: {
+          timeEntry: `${employeeName} - ${entryLabel}`,
+          asset: newAsset ? { id: newAsset.id, asset: getAssetDisplayName(newAsset) } : entry.asset,
+          assetDivision: newAsset ? newAsset.divisionCode : manualDivision ? Number(manualDivision) : undefined,
+          division: newAsset ? newAsset.divisionCode : manualDivision ? Number(manualDivision) : undefined,
+          jobNumber: manualJobNumber || undefined,
+          notes: nextNotes,
+        },
+      });
+      cancelEditTimecard();
+      toast.success(`Timecard updated for ${when} — ${assetLabel}.`);
+    } catch (error: unknown) {
+      toast.error(error instanceof Error ? error.message : 'Unable to update timecard.');
+    }
+  };
+
   const startEditNotes = (entry: ShopTimeEntry) => {
+    cancelEditTimecard();
     setEditingNotesEntryId(entry.id);
     setEditingNotes(getEmployeeNotes(entry.notes));
+  };
+
+  const handleAcceptedCode = () => {
+    cancelEditTimecard();
+    setEditingNotesEntryId('');
+    setEditingNotes('');
+    resetJobForm();
   };
 
   const cancelEditNotes = (entry?: ShopTimeEntry) => {
@@ -573,38 +637,134 @@ export default function MechanicLogPage() {
                             const effectiveDivision = getEntryDivision(entry, assets);
                             const div = effectiveDivision ? divisionLabel(Number(effectiveDivision)) : '';
                             const notes = getEmployeeNotes(entry.notes);
-                            const editing = editingNotesEntryId === entry.id;
+                            const editingTimecard = editingEntryId === entry.id;
+                            const editingNotesOnly = editingNotesEntryId === entry.id;
                             return (
                               <div key={entry.id} className="rounded-lg border border-border bg-background p-3">
-                                <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
-                                  <div className="min-w-0 space-y-1">
-                                    <p className="font-semibold text-foreground">{assetName}</p>
-                                    <div className="flex flex-wrap items-center gap-1.5 text-sm text-muted-foreground">
-                                      <Clock className="h-3.5 w-3.5" />
-                                      <span>{entry.clockIn ? format(new Date(entry.clockIn), 'p') : '—'}</span>
-                                      <span>–</span>
-                                      <span>{entry.clockOut ? format(new Date(entry.clockOut), 'p') : '—'}</span>
-                                      <span className="mx-1">·</span>
-                                      <span className="font-medium text-foreground">{formatDuration(paidMinutes)}</span>
+                                {editingTimecard && !isPtoEntry(entry) ? (
+                                  <div className="space-y-3">
+                                    <div className="space-y-2">
+                                      <Label>Equipment asset</Label>
+                                      <AssetPicker
+                                        assets={assets}
+                                        value={editingAssetId}
+                                        onChange={(asset: Pick<EquipmentAsset, 'id' | 'asset' | 'divisionCode'> | undefined) => {
+                                          setEditingAssetRecord(asset);
+                                          setEditingAssetId(asset?.id ?? '');
+                                          if (asset?.divisionCode !== undefined) {
+                                            setEditingDivision(String(asset.divisionCode));
+                                          }
+                                        }}
+                                        currentAsset={editingAssetRecord ?? entry.asset}
+                                      />
                                     </div>
-                                    <div className="flex flex-wrap items-center gap-1.5 text-sm text-muted-foreground">
-                                      {div && <span>Div {div}</span>}
-                                      {div && jobNum && <span>·</span>}
-                                      {jobNum && <span>Job {jobNum}</span>}
+                                    <div className="grid gap-3 sm:grid-cols-2">
+                                      <div className="space-y-2">
+                                        <Label htmlFor={`edit-division-${entry.id}`}>Division</Label>
+                                        <Input
+                                          id={`edit-division-${entry.id}`}
+                                          className="bg-background"
+                                          value={editingDivision}
+                                          onChange={(event: React.ChangeEvent<HTMLInputElement>) =>
+                                            setEditingDivision(event.target.value.replace(/\D/g, ''))
+                                          }
+                                          placeholder="Optional division code"
+                                        />
+                                      </div>
+                                      <div className="space-y-2">
+                                        <Label htmlFor={`edit-job-${entry.id}`}>Job number</Label>
+                                        <Input
+                                          id={`edit-job-${entry.id}`}
+                                          className="bg-background"
+                                          value={editingJobNumber}
+                                          onChange={(event: React.ChangeEvent<HTMLInputElement>) =>
+                                            setEditingJobNumber(event.target.value)
+                                          }
+                                          placeholder="Optional job number"
+                                        />
+                                      </div>
+                                    </div>
+                                    <div className="space-y-2">
+                                      <div className="flex items-center justify-between gap-2">
+                                        <Label htmlFor={`edit-notes-${entry.id}`}>Notes</Label>
+                                        <VoiceNoteButton
+                                          value={editingNotes}
+                                          onChange={setEditingNotes}
+                                          phrases={voicePhrases}
+                                          disabled={updateTimeEntry.isPending}
+                                        />
+                                      </div>
+                                      <Textarea
+                                        id={`edit-notes-${entry.id}`}
+                                        className="bg-background"
+                                        value={editingNotes}
+                                        onChange={(event: React.ChangeEvent<HTMLTextAreaElement>) => setEditingNotes(event.target.value)}
+                                        placeholder="Optional job notes"
+                                        disabled={updateTimeEntry.isPending}
+                                      />
+                                    </div>
+                                    <div className="flex flex-wrap items-center justify-end gap-2">
+                                      <Button
+                                        type="button"
+                                        size="icon"
+                                        aria-label="Save timecard"
+                                        onClick={() => void saveTimecard(entry, d.day, d.entries)}
+                                        disabled={updateTimeEntry.isPending}
+                                      >
+                                        <Check className="h-4 w-4" />
+                                      </Button>
+                                      <Button
+                                        type="button"
+                                        size="icon"
+                                        variant="outline"
+                                        aria-label="Cancel timecard edit"
+                                        onClick={cancelEditTimecard}
+                                        disabled={updateTimeEntry.isPending}
+                                      >
+                                        <X className="h-4 w-4" />
+                                      </Button>
                                     </div>
                                   </div>
-                                  <div className="flex flex-wrap items-center gap-1.5">
-                                    {entry.payTypeKey && entry.payTypeKey in ShopTimeEntryPayTypeKeyToLabel && (
-                                      <Badge variant="outline">{ShopTimeEntryPayTypeKeyToLabel[entry.payTypeKey]}</Badge>
-                                    )}
-                                    {isPtoEntry(entry) && <Badge variant="secondary">PTO {getPtoHours(entry)}h</Badge>}
-                                    {entry.pTOTypeKey && entry.pTOTypeKey in ShopTimeEntryPTOTypeKeyToLabel && (
-                                      <Badge variant="outline">{ShopTimeEntryPTOTypeKeyToLabel[entry.pTOTypeKey]}</Badge>
-                                    )}
-                                    {entry.onCall && <Badge variant="secondary">On Call</Badge>}
-                                  </div>
-                                </div>
-                                {editing ? (
+                                ) : (
+                                  <>
+                                    <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+                                      <div className="min-w-0 space-y-1">
+                                        <p className="font-semibold text-foreground">{assetName}</p>
+                                        <div className="flex flex-wrap items-center gap-1.5 text-sm text-muted-foreground">
+                                          <Clock className="h-3.5 w-3.5" />
+                                          <span>{entry.clockIn ? format(new Date(entry.clockIn), 'p') : '—'}</span>
+                                          <span>–</span>
+                                          <span>{entry.clockOut ? format(new Date(entry.clockOut), 'p') : '—'}</span>
+                                          <span className="mx-1">·</span>
+                                          <span className="font-medium text-foreground">{formatDuration(paidMinutes)}</span>
+                                        </div>
+                                        <div className="flex flex-wrap items-center gap-1.5 text-sm text-muted-foreground">
+                                          {div && <span>Div {div}</span>}
+                                          {div && jobNum && <span>·</span>}
+                                          {jobNum && <span>Job {jobNum}</span>}
+                                        </div>
+                                      </div>
+                                      <div className="flex flex-wrap items-center gap-1.5">
+                                        {entry.payTypeKey && entry.payTypeKey in ShopTimeEntryPayTypeKeyToLabel && (
+                                          <Badge variant="outline">{ShopTimeEntryPayTypeKeyToLabel[entry.payTypeKey]}</Badge>
+                                        )}
+                                        {isPtoEntry(entry) && <Badge variant="secondary">PTO {getPtoHours(entry)}h</Badge>}
+                                        {entry.pTOTypeKey && entry.pTOTypeKey in ShopTimeEntryPTOTypeKeyToLabel && (
+                                          <Badge variant="outline">{ShopTimeEntryPTOTypeKeyToLabel[entry.pTOTypeKey]}</Badge>
+                                        )}
+                                        {entry.onCall && <Badge variant="secondary">On Call</Badge>}
+                                      </div>
+                                    </div>
+                                    {!isPtoEntry(entry) ? (
+                                      <div className="mt-3">
+                                        <Button type="button" variant="outline" size="sm" onClick={() => startEditTimecard(entry)}>
+                                          Edit timecard
+                                        </Button>
+                                      </div>
+                                    ) : null}
+                                  </>
+                                )}
+                                {editingNotesOnly ? (
                                   <div className="mt-3 space-y-2">
                                     <div className="flex items-center justify-between gap-2">
                                       <Label htmlFor={`log-notes-${entry.id}`}>Notes</Label>
@@ -654,14 +814,14 @@ export default function MechanicLogPage() {
                                       </Button>
                                     </div>
                                   </div>
-                                ) : (
+                                ) : !editingTimecard ? (
                                   <div className="mt-3 space-y-2">
                                     {notes ? <p className="rounded-md bg-muted p-3 text-sm text-muted-foreground">{notes}</p> : null}
                                     <Button type="button" variant="outline" size="sm" onClick={() => startEditNotes(entry)}>
                                       {notes ? 'Edit notes' : 'Add notes'}
                                     </Button>
                                   </div>
-                                )}
+                                ) : null}
                               </div>
                             );
                           })}
