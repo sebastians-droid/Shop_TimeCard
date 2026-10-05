@@ -105,7 +105,13 @@ export function useManagerEntryActions({ employees, assets, timeEntries }: Manag
     const division = selectedAsset ? selectedAsset.divisionCode : manualDivision ? Number(manualDivision) : undefined;
     // A manager-added entry inherits the day's existing lunch override so the
     // day's pay total does not change shape when the row lands.
-    const notes = applyNoLunchMarker(undefined, getDayPayMinutes(existingDayEntries).noLunch);
+    const notes = applyNoLunchMarker(
+      undefined,
+      getDayPayMinutes(existingDayEntries, new Date(), scheduledStartFor(employee), {
+        isRoadMech: employee.isRoadMech,
+        isAdmin: employee.isAdmin,
+      }).noLunch,
+    );
     const provisionalEntry: ShopTimeEntry = {
       id: `provisional-${dayKey}-${employee.id}`,
       timeEntry: `${employee.employeeName} - ${label}`,
@@ -119,7 +125,10 @@ export function useManagerEntryActions({ employees, assets, timeEntries }: Manag
       workDate: dayKey,
     };
     const hours =
-      getEntryPaidMinutes([...existingDayEntries, provisionalEntry], provisionalEntry, new Date(), scheduledStartFor(employee)) / 60;
+      getEntryPaidMinutes([...existingDayEntries, provisionalEntry], provisionalEntry, new Date(), scheduledStartFor(employee), {
+        isRoadMech: employee.isRoadMech,
+        isAdmin: employee.isAdmin,
+      }) / 60;
 
     try {
       await createTimeEntry.mutateAsync({
@@ -171,7 +180,9 @@ export function useManagerEntryActions({ employees, assets, timeEntries }: Manag
       .filter((row: ShopTimeEntry) => getEntryEmployeeKey(row) === getEntryEmployeeKey(entry))
       .map((row: ShopTimeEntry) => (row.id === entry.id ? updatedEntry : row));
     const ptoHours = getPtoHours(entry);
-    const payStart = scheduledStartFor(employees.find((candidate) => candidate.id === entry.employee?.id));
+    const employee = employees.find((candidate) => candidate.id === entry.employee?.id);
+    const payStart = scheduledStartFor(employee);
+    const payProfile = { isRoadMech: employee?.isRoadMech, isAdmin: employee?.isAdmin };
 
     try {
       await updateTimeEntry.mutateAsync({
@@ -186,7 +197,7 @@ export function useManagerEntryActions({ employees, assets, timeEntries }: Manag
           division: !selectedAsset && manualDivision ? Number(manualDivision) : undefined,
           jobNumber: manualJobNumber || undefined,
           payTypeKey: isPtoEntry(entry) ? entry.payTypeKey : editValues.payTypeKey,
-          hours: clockOut ? getEntryPaidMinutes(employeeDayEntries, updatedEntry, new Date(), payStart) / 60 : undefined,
+          hours: clockOut ? getEntryPaidMinutes(employeeDayEntries, updatedEntry, new Date(), payStart, payProfile) / 60 : undefined,
           pTOTimeKey:
             isPtoEntry(entry) && (ptoHours === 4 || ptoHours === 8) ? PTO_TIME_KEY_BY_HOURS[ptoHours as PtoHours] : entry.pTOTimeKey,
           workDate: format(new Date(clockIn), 'yyyy-MM-dd'),

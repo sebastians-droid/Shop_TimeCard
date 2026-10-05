@@ -33,7 +33,7 @@ Three sign-in paths:
 
 Who can do what:
 
-- **Clock in / clock out** — the shop kiosk account, managers, and road mechanics (`swank_isroadmech` on Shop Employee) from their own device. Linked shop mechanics (not road mech) punch at the kiosk only.
+- **Clock in / clock out** — the shop kiosk account, managers, road mechanics (`swank_isroadmech`), and admin staff (`swank_isadmin`) from their own device. Linked shop mechanics (not road mech/admin) punch at the kiosk only. Admin staff always record Division 200 · Job 112 and see only clock-in/out on the timecard.
 - **Add jobs, change assets, edit notes, submit PTO** — any employee on their own timecard from any device, once the day is clocked in. Job times must stay inside the day's clock-in and clock-out.
 - **Manager dashboard** — managers at any time, whether or not they are clocked in. Managers can create, edit, and delete any entry, including clock times and PTO approval.
 

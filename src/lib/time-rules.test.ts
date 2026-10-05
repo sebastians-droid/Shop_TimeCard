@@ -6,6 +6,7 @@ import {
   dayHasNoLunch,
   formatDuration,
   AWAITING_ASSET_LABEL,
+  effectiveDayPayStart,
   getDayPayMinutes,
   getEntryPaidMinutes,
   getPtoHours,
@@ -180,44 +181,37 @@ describe('getDayPayMinutes', () => {
     expect(getDayPayMinutes(day, new Date(), '06:00').paidLaborMinutes).toBe(480);
   });
 
-  it('only clamps the first entry of the day', () => {
+  it('allocates day pay across jobs when the scheduled start is later than clock-in', () => {
     const day = [
       entry({ id: 'first', clockIn: at(DAY, '07:00'), clockOut: at(DAY, '11:00') }),
       entry({ id: 'second', clockIn: at(DAY, '11:00'), clockOut: at(DAY, '15:00') }),
     ];
     const pay = getDayPayMinutes(day, new Date(), '08:00');
 
-    // The 07:00 start is pulled forward to 08:00, leaving 3h on the first entry.
-    expect(pay.minutesByEntryId.get('first')).toBe(180);
-    // 3h + 4h less a 30 minute lunch.
+    // Day pay runs 08:00–15:00 (7h less lunch), split across the two jobs.
     expect(pay.paidLaborMinutes).toBe(390);
+    expect([...pay.minutesByEntryId.values()].reduce((sum, value) => sum + value, 0)).toBe(390);
   });
 
-  it('pays nothing for a first entry that ends before the scheduled start', () => {
+  it('starts day pay at the scheduled start when clock-in is earlier', () => {
     const day = [
       entry({ id: 'early', clockIn: at(DAY, '07:00'), clockOut: at(DAY, '11:00') }),
       entry({ id: 'scheduled', clockIn: at(DAY, '11:00'), clockOut: at(DAY, '15:00') }),
     ];
     const pay = getDayPayMinutes(day, new Date(), '12:00');
 
-    // Clamping moves the clock-in past its own clock-out, so the entry is unpaid.
-    expect(pay.minutesByEntryId.get('early')).toBe(0);
-    // The later entry is never clamped, so it keeps 4h less the lunch deduction.
-    expect(pay.paidLaborMinutes).toBe(210);
+    // Day pay runs 12:00–15:00, not from the 07:00 clock-in.
+    expect(pay.paidLaborMinutes).toBe(150);
   });
 
-  it('reconciles per-entry rounding so the day total stays exact', () => {
+  it('reconciles per-entry allocation so the day total stays exact', () => {
     const day = [
       entry({ id: 'first', clockIn: at(DAY, '07:00'), clockOut: at(DAY, '11:07') }),
       entry({ id: 'second', clockIn: at(DAY, '11:07'), clockOut: at(DAY, '15:00') }),
     ];
     const pay = getDayPayMinutes(day);
 
-    // Raw 480 minutes less a 30 minute lunch, rounded to a quarter hour.
     expect(pay.paidLaborMinutes).toBe(450);
-    // Each entry rounds to 240, and the remainder is absorbed by the last entry.
-    expect(pay.minutesByEntryId.get('first')).toBe(240);
-    expect(pay.minutesByEntryId.get('second')).toBe(210);
     expect([...pay.minutesByEntryId.values()].reduce((sum, value) => sum + value, 0)).toBe(450);
   });
 
@@ -243,6 +237,14 @@ describe('getDayPayMinutes', () => {
     expect(pay.minutesByEntryId.get('pto')).toBe(240);
   });
 
+  it('pays an admin employee from the earlier of clock-in and scheduled start', () => {
+    const day = [entry({ id: 'a', clockIn: at(DAY, '06:30'), clockOut: at(DAY, '15:00') })];
+    expect(getDayPayMinutes(day, new Date(), '07:00', { isAdmin: true }).paidLaborMinutes).toBe(480);
+    expect(getDayPayMinutes([entry({ id: 'b', clockIn: at(DAY, '08:00'), clockOut: at(DAY, '15:00') })], new Date(), '07:00', {
+      isAdmin: true,
+    }).paidLaborMinutes).toBe(450);
+  });
+
   it('pays a road mechanic from the actual clock-in instead of a default start', () => {
     const day = [entry({ id: 'a', clockIn: at(DAY, '05:30'), clockOut: at(DAY, '15:00') })];
 
@@ -252,7 +254,7 @@ describe('getDayPayMinutes', () => {
     expect(getDayPayMinutes(day, new Date(), NO_SCHEDULED_START).paidLaborMinutes).toBe(540);
   });
 
-  it('pays from the first asset and leaves the waiting punch at zero', () => {
+  it('pays the full day window and leaves the waiting punch at zero when jobs exist', () => {
     const waiting = entry({
       id: 'wait',
       timeEntry: `Smith - ${AWAITING_ASSET_LABEL}`,
@@ -270,12 +272,12 @@ describe('getDayPayMinutes', () => {
 
     expect(isAwaitingAsset(waiting)).toBe(true);
     expect(pay.minutesByEntryId.get('wait')).toBe(0);
-    // 07:20–15:20 is 8h, less a 30 minute lunch.
-    expect(pay.minutesByEntryId.get('asset')).toBe(450);
-    expect(pay.paidLaborMinutes).toBe(450);
+    // Day pay runs 07:00–15:20 (8h 20m less lunch).
+    expect(pay.minutesByEntryId.get('asset')).toBe(465);
+    expect(pay.paidLaborMinutes).toBe(465);
   });
 
-  it('clamps an early first asset up to the scheduled start and ignores the earlier clock-in', () => {
+  it('uses the scheduled start for day pay when clock-in is early and a job follows', () => {
     const waiting = entry({
       id: 'wait',
       timeEntry: `Smith - ${AWAITING_ASSET_LABEL}`,
@@ -291,29 +293,43 @@ describe('getDayPayMinutes', () => {
     });
     const pay = getDayPayMinutes([waiting, asset]);
 
-    // The 06:40 asset start is pulled forward to 07:00, leaving 8h less lunch.
     expect(pay.minutesByEntryId.get('wait')).toBe(0);
     expect(pay.paidLaborMinutes).toBe(450);
   });
 
-  it('pays nothing for a day that is only a waiting punch', () => {
+  it('pays a clock-out day with only a day punch and no jobs', () => {
     const waiting = entry({
       id: 'wait',
       timeEntry: `Smith - ${AWAITING_ASSET_LABEL}`,
       clockIn: at(DAY, '06:30'),
-      clockOut: at(DAY, '07:00'),
+      clockOut: at(DAY, '15:00'),
     });
     const pay = getDayPayMinutes([waiting]);
 
-    expect(pay.lunchDeducted).toBe(false);
-    expect(pay.paidLaborMinutes).toBe(0);
-    expect(pay.minutesByEntryId.get('wait')).toBe(0);
+    expect(pay.paidLaborMinutes).toBe(450);
+    expect(pay.minutesByEntryId.get('wait')).toBe(450);
   });
 
   it('exposes a single entry share through getEntryPaidMinutes', () => {
     const first = entry({ id: 'first', clockIn: at(DAY, '07:00'), clockOut: at(DAY, '11:00') });
     const day = [first, entry({ id: 'second', clockIn: at(DAY, '11:00'), clockOut: at(DAY, '15:00') })];
-    expect(getEntryPaidMinutes(day, first)).toBe(240);
+    expect(getEntryPaidMinutes(day, first)).toBe(225);
+  });
+});
+
+describe('effectiveDayPayStart', () => {
+  it('pays shop employees from scheduled start unless they clock in late', () => {
+    expect(effectiveDayPayStart(at(DAY, '06:30'), '07:00')).toBe(at(DAY, '07:00'));
+    expect(effectiveDayPayStart(at(DAY, '08:00'), '07:00')).toBe(at(DAY, '08:00'));
+  });
+
+  it('pays admin employees from whichever comes first: clock-in or scheduled start', () => {
+    expect(effectiveDayPayStart(at(DAY, '06:30'), '07:00', { isAdmin: true })).toBe(at(DAY, '06:30'));
+    expect(effectiveDayPayStart(at(DAY, '08:00'), '07:00', { isAdmin: true })).toBe(at(DAY, '07:00'));
+  });
+
+  it('pays road mechanics from the actual clock-in', () => {
+    expect(effectiveDayPayStart(at(DAY, '05:30'), NO_SCHEDULED_START, { isRoadMech: true })).toBe(at(DAY, '05:30'));
   });
 });
 
@@ -324,6 +340,10 @@ describe('scheduledStartFor', () => {
 
   it('passes the stored start through for shop mechanics', () => {
     expect(scheduledStartFor({ isRoadMech: false }, '06:00')).toBe('06:00');
+  });
+
+  it('passes the stored start through for admin employees', () => {
+    expect(scheduledStartFor({ isAdmin: true }, '06:00')).toBe('06:00');
   });
 
   it('leaves an unknown employee on the default-start path', () => {

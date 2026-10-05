@@ -15,6 +15,7 @@ export type AppUser = {
   linkedPersonalLogin: boolean;
   shopEmployeeId?: string;
   isRoadMech?: boolean;
+  isAdmin?: boolean;
 };
 
 export const useUser = () => {

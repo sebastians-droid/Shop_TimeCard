@@ -67,6 +67,7 @@ import { useReloadTables } from '@/hooks/use-reload-tables';
 import { ShopTimeEntryPTOTypeKeyToLabel, type ShopTimeEntry, type ShopTimeEntryPTOTypeKey } from '@/models/shop-time-entry';
 import { getCurrentPosition } from '@/lib/geolocation';
 import { isLinkedPersonalLogin, shouldShowEmployeeAccessGate, shouldShowEmployeeCodeSignIn } from '@/lib/app-access';
+import { ADMIN_DIVISION, ADMIN_JOB_NUMBER, adminTimeEntryLabel, isAdminEmployee } from '@/lib/admin-timecard';
 type ClockInConfirmation = {
   employeeName: string;
   asset: string;
@@ -124,6 +125,7 @@ export default function TimecardPage() {
   const switchJob = useSwitchShopTimeEntryJob();
 
   const selectedEmployee = employees.find((employee: AppShopEmployee) => employee.id === selectedEmployeeId);
+  const adminEmployee = isAdminEmployee(selectedEmployee, user);
   const employeeEntries = useMemo(() => {
     if (!selectedEmployeeId || !selectedEmployee) return [];
     return timeEntries
@@ -154,7 +156,14 @@ export default function TimecardPage() {
   // Road mechanics start whenever they punch in, so their early time is paid
   // rather than being pulled forward to the default start.
   const payStart = scheduledStartFor(selectedEmployee);
-  const todayPay = useMemo(() => getDayPayMinutes(employeeTodayEntries, new Date(), payStart), [employeeTodayEntries, payStart]);
+  const payProfile = useMemo(
+    () => ({ isRoadMech: selectedEmployee?.isRoadMech, isAdmin: adminEmployee }),
+    [adminEmployee, selectedEmployee?.isRoadMech],
+  );
+  const todayPay = useMemo(
+    () => getDayPayMinutes(employeeTodayEntries, new Date(), payStart, payProfile),
+    [employeeTodayEntries, payProfile, payStart],
+  );
   const voicePhrases = useMemo(
     () =>
       [
@@ -232,21 +241,35 @@ export default function TimecardPage() {
       return;
     }
     if (employeeActiveEntry) {
-      toast.error('You are already clocked in. Clock out or add a job.');
+      toast.error(adminEmployee ? 'You are already clocked in. Clock out to end your day.' : 'You are already clocked in. Clock out or add a job.');
       return;
     }
     const clockIn = getNowIso();
     setIsClockingIn(true);
     try {
       const pos = await getCurrentPosition();
-      await createTimeEntry.mutateAsync({
-        timeEntry: `${selectedEmployee.employeeName} - ${AWAITING_ASSET_LABEL}`,
-        employee: { id: selectedEmployee.id, autoNumber: selectedEmployee.autoNumber },
-        clockIn,
-        clockInLat: pos?.lat,
-        clockInLon: pos?.lon,
-        workDate: getWorkDate(clockIn),
-      });
+      await createTimeEntry.mutateAsync(
+        adminEmployee
+          ? {
+              timeEntry: adminTimeEntryLabel(selectedEmployee.employeeName),
+              employee: { id: selectedEmployee.id, autoNumber: selectedEmployee.autoNumber },
+              clockIn,
+              clockInLat: pos?.lat,
+              clockInLon: pos?.lon,
+              workDate: getWorkDate(clockIn),
+              division: ADMIN_DIVISION,
+              assetDivision: ADMIN_DIVISION,
+              jobNumber: ADMIN_JOB_NUMBER,
+            }
+          : {
+              timeEntry: `${selectedEmployee.employeeName} - ${AWAITING_ASSET_LABEL}`,
+              employee: { id: selectedEmployee.id, autoNumber: selectedEmployee.autoNumber },
+              clockIn,
+              clockInLat: pos?.lat,
+              clockInLon: pos?.lon,
+              workDate: getWorkDate(clockIn),
+            },
+      );
       resetEntryForm();
       toast.success(`Clocked in at ${format(new Date(clockIn), 'p')}.`);
     } catch (error: unknown) {
@@ -267,7 +290,7 @@ export default function TimecardPage() {
       return;
     }
     const { selectedAssetForEntry, divisionNumber, selectedAssetName, manualJobNumber, entryLabel } = selection;
-    const wasWaiting = isAwaitingAsset(employeeActiveEntry);
+    const wasDayPunch = isAwaitingAsset(employeeActiveEntry);
     const switchAt = getNowIso();
     const closedActiveEntry = { ...employeeActiveEntry, clockOut: switchAt };
     const dayAfterClose = employeeTodayEntries.map((entry: ShopTimeEntry) =>
@@ -278,7 +301,7 @@ export default function TimecardPage() {
       await switchJob.mutateAsync({
         activeEntryId: closedActiveEntry.id,
         switchAt,
-        closingHours: getEntryPaidMinutes(dayAfterClose, closedActiveEntry, new Date(), payStart) / 60,
+        closingHours: getEntryPaidMinutes(dayAfterClose, closedActiveEntry, new Date(), payStart, payProfile) / 60,
         lat: pos?.lat,
         lon: pos?.lon,
         next: {
@@ -302,7 +325,7 @@ export default function TimecardPage() {
         clockIn: switchAt,
       });
       toast.success(
-        wasWaiting
+        wasDayPunch
           ? `Started ${entryLabel} at ${format(new Date(switchAt), 'p')}.`
           : `Started ${entryLabel}. Previous asset closed at ${format(new Date(switchAt), 'p')}.`,
       );
@@ -357,7 +380,7 @@ export default function TimecardPage() {
         id: entry.id,
         changedFields: {
           clockOut,
-          hours: getEntryPaidMinutes(dayEntries, updatedEntry, new Date(), payStart) / 60,
+          hours: getEntryPaidMinutes(dayEntries, updatedEntry, new Date(), payStart, payProfile) / 60,
           clockOutLat: pos?.lat,
           clockOutLon: pos?.lon,
         },
@@ -505,11 +528,12 @@ export default function TimecardPage() {
                 <CardHeader>
                   <div className="flex flex-col gap-1">
                     <CardTitle className="flex items-center gap-2 text-xl">
-                      <TimerReset className="h-5 w-5" /> Today’s asset timecard
+                      <TimerReset className="h-5 w-5" /> {adminEmployee ? 'Today’s timecard' : 'Today’s asset timecard'}
                     </CardTitle>
                     <p className="text-sm text-muted-foreground">
-                      Clock in when you arrive. Add a job when work begins, and again to change equipment. After clock-out, add
-                      forgotten jobs on Mechanic Log.
+                      {adminEmployee
+                        ? `Clock in and clock out for your day. Time is recorded to Division ${ADMIN_DIVISION} · Job ${ADMIN_JOB_NUMBER}.`
+                        : 'Clock in when you arrive. Add a job when work begins, and again to change equipment. After clock-out, add forgotten jobs on Mechanic Log.'}
                     </p>
                     {dayFirstIn ? (
                       <p className="text-sm font-medium text-foreground">
@@ -563,7 +587,7 @@ export default function TimecardPage() {
                         >
                           {isClockingIn ? 'Clocking in…' : 'Clock in'}
                         </Button>
-                      ) : (
+                      ) : adminEmployee ? null : (
                         <Button
                           type="button"
                           size="lg"
@@ -575,32 +599,20 @@ export default function TimecardPage() {
                       )}
                     </div>
                   )}
-                  {awaitingFirstJob && !assetFormMode ? (
-                    <button
-                      type="button"
-                      className="w-full rounded-lg border border-dashed border-border bg-muted/40 p-4 text-left transition-colors hover:bg-muted/70"
-                      onClick={() => setAssetFormMode('start-asset')}
-                    >
-                      <div className="grid gap-4 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-start">
+                  {adminEmployee && employeeActiveEntry ? (
+                    <div className="rounded-lg border border-border bg-background p-4">
+                      <div className="flex flex-wrap items-center justify-between gap-3">
                         <div className="space-y-1">
-                          <p className="text-sm text-muted-foreground">Job</p>
-                          <p className="text-lg font-semibold text-muted-foreground">Not started</p>
-                          <p className="text-sm text-muted-foreground">Choose an asset when work begins — paid time starts with the first job.</p>
+                          <p className="text-sm text-muted-foreground">Today</p>
+                          <p className="text-lg font-semibold">
+                            Division {ADMIN_DIVISION} · Job {ADMIN_JOB_NUMBER}
+                          </p>
                         </div>
-                        <div className="space-y-2 text-left sm:text-right">
-                          <div>
-                            <p className="text-sm text-muted-foreground">Started</p>
-                            <p className="text-lg font-semibold text-muted-foreground">—</p>
-                          </div>
-                          <div>
-                            <p className="text-sm text-muted-foreground">Ended</p>
-                            <p className="text-lg font-semibold text-muted-foreground">—</p>
-                          </div>
-                        </div>
+                        <Badge variant="secondary">Clocked in</Badge>
                       </div>
-                    </button>
+                    </div>
                   ) : null}
-                  {assetFormMode && employeeActiveEntry ? (
+                  {!adminEmployee && assetFormMode && employeeActiveEntry ? (
                     <div className="grid gap-4 rounded-lg border border-dashed border-border bg-muted p-4 text-muted-foreground">
                       <div className="flex items-center justify-between gap-3">
                         <p className="font-medium text-foreground">{awaitingFirstJob ? 'Start first job' : 'Add job'}</p>
@@ -681,10 +693,13 @@ export default function TimecardPage() {
                   ) : null}
                   {!employeeActiveEntry && !entriesLoading && !assetFormMode ? (
                     <p className="rounded-lg bg-muted p-4 text-sm text-muted-foreground">
-                      Clock in when you arrive, even if the job has not started. Use Add job when you begin work.
+                      {adminEmployee
+                        ? 'Clock in when you arrive to start your day.'
+                        : 'Clock in when you arrive, even if the job has not started. Use Add job when you begin work.'}
                     </p>
                   ) : null}
-                  {displayedTodayEntries.map((entry: ShopTimeEntry) => (
+                  {!adminEmployee
+                    ? displayedTodayEntries.map((entry: ShopTimeEntry) => (
                     <div key={entry.id} className="rounded-lg border border-border bg-background p-4">
                       <div className="grid gap-4 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-start">
                         <div>
@@ -863,7 +878,35 @@ export default function TimecardPage() {
                         </div>
                       </div>
                     </div>
-                  ))}
+                  ))
+                    : null}
+                  {adminEmployee
+                    ? displayedTodayEntries
+                        .filter((entry: ShopTimeEntry) => entry.clockOut)
+                        .map((entry: ShopTimeEntry) => (
+                          <div key={entry.id} className="rounded-lg border border-border bg-background p-4">
+                            <div className="grid gap-4 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-start">
+                              <div className="space-y-1">
+                                <p className="text-sm text-muted-foreground">Today</p>
+                                <p className="text-lg font-semibold">
+                                  Division {ADMIN_DIVISION} · Job {ADMIN_JOB_NUMBER}
+                                </p>
+                              </div>
+                              <div className="space-y-2 text-left sm:text-right">
+                                <div>
+                                  <p className="text-sm text-muted-foreground">Clock in</p>
+                                  <p className="text-lg font-semibold">{entry.clockIn ? format(new Date(entry.clockIn), 'p') : '—'}</p>
+                                </div>
+                                <div>
+                                  <p className="text-sm text-muted-foreground">Clock out</p>
+                                  <p className="text-lg font-semibold">{entry.clockOut ? format(new Date(entry.clockOut), 'p') : '—'}</p>
+                                </div>
+                                <Badge variant="outline">Complete</Badge>
+                              </div>
+                            </div>
+                          </div>
+                        ))
+                    : null}
                   {canPunch && employeeActiveEntry ? (
                     <AlertDialog>
                       <AlertDialogTrigger asChild>
@@ -901,6 +944,7 @@ export default function TimecardPage() {
                 </CardContent>
               </Card>
 
+              {!adminEmployee ? (
               <Card className="bg-card text-card-foreground shadow-sm">
                 <CardHeader>
                   <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
@@ -974,6 +1018,7 @@ export default function TimecardPage() {
                   </CardContent>
                 ) : null}
               </Card>
+              ) : null}
             </>
           )}
         </section>

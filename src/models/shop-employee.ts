@@ -10,4 +10,6 @@ export interface ShopEmployee {
   empNum?: number;
   /** Road mechanics have no scheduled start; their paid day begins at clock-in. */
   isRoadMech?: boolean;
+  /** Admin staff punch in/out on their own account; time is always Division 200 / Job 112. */
+  isAdmin?: boolean;
 }

@@ -220,6 +220,7 @@ function mapShopEmployee(row) {
     // Nullable in Dataverse: rows predating the column read as null, which means
     // shop mechanic. Only an explicit true is a road mechanic.
     isRoadMech: row.swank_isroadmech === true,
+    isAdmin: row.swank_isadmin === true,
     signInEmail: normalizeSignInEmail(related.swank_companyemail ?? row.swank_signinemail),
     employee: name
       ? {
@@ -334,7 +335,7 @@ function timeEntryPayload(record, { isCreate }) {
 }
 
 const SHOP_EMPLOYEE_SELECT =
-  'swank_shopemployeeid,swank_autonumber,swank_empnum,swank_isroadmech,_swank_employee_value';
+  'swank_shopemployeeid,swank_autonumber,swank_empnum,swank_isroadmech,swank_isadmin,_swank_employee_value';
 const SHOP_EMPLOYEE_EXPAND =
   '&$expand=swank_Employee($select=swank_employeeid,swank_name,swank_empnum,swank_companyemail)';
 

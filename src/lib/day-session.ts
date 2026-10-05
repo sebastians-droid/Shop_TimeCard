@@ -1,4 +1,4 @@
-import { getEntryPaidMinutes, isPtoEntry } from '@/lib/time-rules';
+import { getEntryPaidMinutes, isPtoEntry, type EmployeePayProfile } from '@/lib/time-rules';
 import type { ShopTimeEntry } from '@/models/shop-time-entry';
 
 export function laborEntries(entries: ShopTimeEntry[]): ShopTimeEntry[] {
@@ -90,6 +90,7 @@ export function planForgottenJobInsert(
   startedAt: string,
   endedAt: string,
   payStart?: string | null,
+  employee?: EmployeePayProfile | null,
 ): ForgottenJobInsert | { error: string } {
   const start = new Date(startedAt).getTime();
   const end = new Date(endedAt).getTime();
@@ -170,7 +171,7 @@ export function planForgottenJobInsert(
         id: entry.id,
         clockIn: next.clockIn !== entry.clockIn ? next.clockIn : undefined,
         clockOut: next.clockOut !== entry.clockOut ? next.clockOut : undefined,
-        hours: getEntryPaidMinutes(dayAfter, next, new Date(), payStart) / 60,
+        hours: getEntryPaidMinutes(dayAfter, next, new Date(), payStart, employee) / 60,
       },
     ];
   });
@@ -179,7 +180,7 @@ export function planForgottenJobInsert(
     {
       clockIn: startedAt,
       clockOut: endedAt,
-      hours: getEntryPaidMinutes(dayAfter, createdJob, new Date(), payStart) / 60,
+      hours: getEntryPaidMinutes(dayAfter, createdJob, new Date(), payStart, employee) / 60,
       kind: 'new',
     },
   ];
@@ -187,7 +188,7 @@ export function planForgottenJobInsert(
     creates.push({
       clockIn: remainder.clockIn,
       clockOut: remainder.clockOut,
-      hours: getEntryPaidMinutes(dayAfter, remainderJob, new Date(), payStart) / 60,
+      hours: getEntryPaidMinutes(dayAfter, remainderJob, new Date(), payStart, employee) / 60,
       kind: 'remainder',
       copyFrom: remainder.template,
     });

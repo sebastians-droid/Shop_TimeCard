@@ -4,6 +4,7 @@ export type AppShopEmployee = ShopEmployee & {
   employeeName: string;
   employeeCode: number;
   isRoadMech: boolean;
+  isAdmin: boolean;
 };
 
 const NAME_SUFFIXES = new Set(['JR', 'SR', 'II', 'III', 'IV', 'V']);
@@ -93,5 +94,6 @@ export const mapShopEmployees = (employees: ShopEmployee[]): AppShopEmployee[] =
       employeeName: formatEmployeeDisplayName(employee.employee?.name1) || employee.autoNumber || `Employee ${employee.empNum}`,
       employeeCode: employee.empNum as number,
       isRoadMech: employee.isRoadMech === true,
+      isAdmin: employee.isAdmin === true,
     }))
     .sort((employeeA: AppShopEmployee, employeeB: AppShopEmployee) => employeeA.employeeName.localeCompare(employeeB.employeeName));

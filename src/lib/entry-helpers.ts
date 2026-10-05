@@ -125,7 +125,7 @@ export const formatScheduledStartTime = (time: string) => {
   return format(date, 'p');
 };
 
-export const scheduledStartCaption = (employee: { isRoadMech?: boolean } | null | undefined, storedStart?: string) => {
+export const scheduledStartCaption = (employee: { isRoadMech?: boolean; isAdmin?: boolean } | null | undefined, storedStart?: string) => {
   if (employee?.isRoadMech) return 'Starts at clock-in';
   return `Scheduled start ${formatScheduledStartTime(storedStart || DEFAULT_SCHEDULED_START)}`;
 };

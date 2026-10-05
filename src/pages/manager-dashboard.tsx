@@ -210,7 +210,10 @@ export default function ManagerDashboardPage() {
         const employeeId = summary.entries[0]?.employee?.id;
         const employee = employees.find((candidate: AppShopEmployee) => candidate.id === employeeId);
         const storedStart = employeeId ? scheduleByEmployeeDay.get(`${employeeId}-${selectedDayKey}`) : undefined;
-        const pay = getDayPayMinutes(summary.entries, new Date(), scheduledStartFor(employee, storedStart));
+        const pay = getDayPayMinutes(summary.entries, new Date(), scheduledStartFor(employee, storedStart), {
+          isRoadMech: employee?.isRoadMech,
+          isAdmin: employee?.isAdmin,
+        });
         return {
           ...summary,
           totalMinutes: pay.totalMinutes,
@@ -252,7 +255,13 @@ export default function ManagerDashboardPage() {
     });
     return [...groups.values()].reduce((total: number, dayEntries: ShopTimeEntry[]) => {
       const employee = employees.find((candidate: AppShopEmployee) => candidate.id === dayEntries[0]?.employee?.id);
-      return total + getDayPayMinutes(dayEntries, new Date(), scheduledStartFor(employee)).totalMinutes;
+      return (
+        total +
+        getDayPayMinutes(dayEntries, new Date(), scheduledStartFor(employee), {
+          isRoadMech: employee?.isRoadMech,
+          isAdmin: employee?.isAdmin,
+        }).totalMinutes
+      );
     }, 0);
   }, [employees, weeklyEntries]);
 
@@ -270,7 +279,10 @@ export default function ManagerDashboardPage() {
         .filter((entry: ShopTimeEntry) => entry.employee?.id === rangeViewEmployeeId && entry.clockIn?.startsWith(dayKey))
         .sort((a: ShopTimeEntry, b: ShopTimeEntry) => new Date(a.clockIn ?? '').getTime() - new Date(b.clockIn ?? '').getTime());
       const storedStart = scheduleByEmployeeDay.get(`${rangeViewEmployeeId}-${dayKey}`);
-      const pay = getDayPayMinutes(dayEntries, new Date(), scheduledStartFor(rangeViewEmployee, storedStart));
+      const pay = getDayPayMinutes(dayEntries, new Date(), scheduledStartFor(rangeViewEmployee, storedStart), {
+        isRoadMech: rangeViewEmployee?.isRoadMech,
+        isAdmin: rangeViewEmployee?.isAdmin,
+      });
       return {
         day,
         dayKey,

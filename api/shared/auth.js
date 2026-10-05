@@ -97,7 +97,8 @@ async function resolveAppUser(request) {
   }
 
   const isRoadMech = shopEmployee?.isRoadMech === true;
-  const canPunch = base.isManager || isKioskAccount || isRoadMech;
+  const isAdmin = shopEmployee?.isAdmin === true;
+  const canPunch = base.isManager || isKioskAccount || isRoadMech || isAdmin;
   const requiresEmployeeCode = isKioskAccount;
   // Work M365 login matched to Company Email on Employee — timecard opens directly
   // on phone with no kiosk code and no idle sign-out; punch stays at the kiosk.
@@ -111,6 +112,7 @@ async function resolveAppUser(request) {
     linkedPersonalLogin,
     shopEmployeeId: shopEmployee?.id || undefined,
     isRoadMech: isRoadMech || undefined,
+    isAdmin: isAdmin || undefined,
   };
 }
 

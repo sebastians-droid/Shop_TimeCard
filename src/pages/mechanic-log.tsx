@@ -97,6 +97,10 @@ export default function MechanicLogPage() {
   const selectedEmployee = employees.find((e: AppShopEmployee) => e.id === selectedEmployeeId);
   // Road mechanics are paid from their actual clock-in rather than a default start.
   const payStart = scheduledStartFor(selectedEmployee);
+  const payProfile = useMemo(
+    () => ({ isRoadMech: selectedEmployee?.isRoadMech, isAdmin: selectedEmployee?.isAdmin }),
+    [selectedEmployee?.isAdmin, selectedEmployee?.isRoadMech],
+  );
 
   const resetJobForm = () => {
     setAddingJobDateKey('');
@@ -245,7 +249,7 @@ export default function MechanicLogPage() {
     }
     const startedAt = combineSelectedDateAndTime(day, jobStartedAt);
     const endedAt = combineSelectedDateAndTime(day, jobEndedAt);
-    const plan = planForgottenJobInsert(dayEntries, startedAt, endedAt, payStart);
+    const plan = planForgottenJobInsert(dayEntries, startedAt, endedAt, payStart, payProfile);
     if ('error' in plan) {
       toast.error(plan.error);
       return;
@@ -368,7 +372,7 @@ export default function MechanicLogPage() {
     return days.map((day) => {
       const dateKey = format(day, 'yyyy-MM-dd');
       const entries = filteredEntries.filter((entry: ShopTimeEntry) => entry.clockIn?.startsWith(dateKey));
-      const totalHours = getDayPayMinutes(entries, new Date(), payStart).totalMinutes / 60;
+      const totalHours = getDayPayMinutes(entries, new Date(), payStart, payProfile).totalMinutes / 60;
       return {
         day,
         dateKey,
@@ -378,7 +382,7 @@ export default function MechanicLogPage() {
         lastOut: dayLastClockOut(entries),
       };
     });
-  }, [days, filteredEntries, payStart]);
+  }, [days, filteredEntries, payProfile, payStart]);
 
   const rangeTotalHours = useMemo(() => Math.round(dayData.reduce((sum, d) => sum + d.totalHours, 0) * 100) / 100, [dayData]);
 
@@ -387,11 +391,11 @@ export default function MechanicLogPage() {
     for (const d of dayData) {
       for (const entry of d.entries) {
         const name = getEntryAssetName(entry, assets);
-        map.set(name, (map.get(name) ?? 0) + getEntryPaidMinutes(d.entries, entry, new Date(), payStart) / 60);
+        map.set(name, (map.get(name) ?? 0) + getEntryPaidMinutes(d.entries, entry, new Date(), payStart, payProfile) / 60);
       }
     }
     return [...map.entries()].map(([name, total]) => ({ name, total: Math.round(total * 100) / 100 })).sort((a, b) => b.total - a.total);
-  }, [dayData, assets, payStart]);
+  }, [dayData, assets, payProfile, payStart]);
 
   return (
     <main className="mx-auto flex w-full max-w-5xl flex-1 flex-col gap-6 p-4 sm:p-6 lg:p-8">

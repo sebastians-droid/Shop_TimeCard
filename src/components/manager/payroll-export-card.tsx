@@ -109,7 +109,10 @@ export function PayrollExportCard({
         const employee = empId ? employees.find((candidate) => candidate.id === empId) : undefined;
         const dayHours = dayKeys.map((dayKey) => {
           const scheduled = scheduledStartFor(employee, empId ? scheduleMap.get(`${empId}-${dayKey}`) : undefined);
-          return getDayPayMinutes(entriesByDay.get(dayKey) ?? [], undefined, scheduled).totalMinutes;
+          return getDayPayMinutes(entriesByDay.get(dayKey) ?? [], undefined, scheduled, {
+            isRoadMech: employee?.isRoadMech,
+            isAdmin: employee?.isAdmin,
+          }).totalMinutes;
         });
         const noLunchDays = dayKeys.flatMap((dayKey, index) => {
           const pay = getDayPayMinutes(entriesByDay.get(dayKey) ?? []);
@@ -128,7 +131,15 @@ export function PayrollExportCard({
               workDate: getEntryWorkDateKey(entry),
               punchIn: entry.clockIn ? format(new Date(entry.clockIn), 'M/d/yyyy p') : '',
               punchOut: entry.clockOut ? format(new Date(entry.clockOut), 'M/d/yyyy p') : '',
-              hours: Math.round((getEntryPaidMinutes(dayEntries, entry, undefined, dayScheduled) / 60) * 100) / 100,
+              hours:
+                Math.round(
+                  (getEntryPaidMinutes(dayEntries, entry, undefined, dayScheduled, {
+                    isRoadMech: employee?.isRoadMech,
+                    isAdmin: employee?.isAdmin,
+                  }) /
+                    60) *
+                    100,
+                ) / 100,
               lunch: isPtoEntry(entry) ? '' : lunchCsvLabel(dayEntries),
               ptoTime: isPtoEntry(entry) ? `${getPtoHours(entry)} hours` : '',
               ptoType: entry.pTOTypeKey ? ShopTimeEntryPTOTypeKeyToLabel[entry.pTOTypeKey] : '',
