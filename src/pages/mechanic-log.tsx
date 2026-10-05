@@ -49,14 +49,14 @@ import { queryKeys } from '@/lib/query-keys';
 import type { EquipmentAsset } from '@/models/equipment-asset';
 import { divisionLabel } from '@/lib/reference-data';
 import { ShopTimeEntryPayTypeKeyToLabel, ShopTimeEntryPTOTypeKeyToLabel, type ShopTimeEntry } from '@/models/shop-time-entry';
+import { isLinkedPersonalLogin, shouldShowEmployeeAccessGate, shouldShowEmployeeCodeSignIn } from '@/lib/app-access';
 
 export default function MechanicLogPage() {
   const { data: user, isPending: userLoading } = useUser();
   const { employeeId: selectedEmployeeId } = useKioskSession();
-  const canPunch = user?.canPunch ?? false;
-  const identifiedByLogin = Boolean(user?.shopEmployeeId && !user.requiresEmployeeCode);
-  const showAccessGate = Boolean(user && !user.requiresEmployeeCode && !user.shopEmployeeId && !user.isManager);
-  const showCodeSignIn = !userLoading && !selectedEmployeeId && !identifiedByLogin && !showAccessGate;
+  const linkedPersonalLogin = isLinkedPersonalLogin(user);
+  const showAccessGate = shouldShowEmployeeAccessGate(user);
+  const showCodeSignIn = shouldShowEmployeeCodeSignIn(user, userLoading, selectedEmployeeId);
   const now = new Date();
   const [dateRange, setDateRange] = useState<DateRange | undefined>({
     from: startOfWeek(now, { weekStartsOn: 0 }),
@@ -409,7 +409,7 @@ export default function MechanicLogPage() {
           onAccepted={handleAcceptedCode}
         />
       ) : null}
-      {!userLoading && !selectedEmployee && identifiedByLogin ? (
+      {!userLoading && !selectedEmployee && linkedPersonalLogin ? (
         <p className="text-sm text-muted-foreground">Loading your work log…</p>
       ) : null}
       {selectedEmployee ? (
@@ -539,20 +539,18 @@ export default function MechanicLogPage() {
                         <CardContent className="space-y-2 border-t border-border pt-4">
                           {d.lastOut ? (
                             <div className="space-y-3">
-                              {canPunch ? (
-                                <Button
-                                  type="button"
-                                  variant="outline"
-                                  onClick={() => {
-                                    resetJobForm();
-                                    setAddingJobDateKey(d.dateKey);
-                                    setJobEndedAt(formatTimeForInput(d.lastOut));
-                                  }}
-                                >
-                                  <Plus className="mr-2 h-4 w-4" /> Add Job
-                                </Button>
-                              ) : null}
-                              {canPunch && addingJobDateKey === d.dateKey ? (
+                              <Button
+                                type="button"
+                                variant="outline"
+                                onClick={() => {
+                                  resetJobForm();
+                                  setAddingJobDateKey(d.dateKey);
+                                  setJobEndedAt(formatTimeForInput(d.lastOut));
+                                }}
+                              >
+                                <Plus className="mr-2 h-4 w-4" /> Add Job
+                              </Button>
+                              {addingJobDateKey === d.dateKey ? (
                                 <div className="grid gap-3 rounded-lg border border-dashed border-border bg-muted p-3 text-muted-foreground">
                                   <div className="flex items-center justify-between gap-2">
                                     <p className="font-medium text-foreground">Add forgotten job</p>

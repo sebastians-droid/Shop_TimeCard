@@ -219,7 +219,7 @@ function mapShopEmployee(row) {
     // Nullable in Dataverse: rows predating the column read as null, which means
     // shop mechanic. Only an explicit true is a road mechanic.
     isRoadMech: row.swank_isroadmech === true,
-    signInEmail: normalizeSignInEmail(related.swank_email ?? row.swank_signinemail),
+    signInEmail: normalizeSignInEmail(related.swank_companyemail ?? row.swank_signinemail),
     employee: name
       ? {
           id: related.swank_employeeid || row._swank_employee_value,
@@ -335,7 +335,7 @@ function timeEntryPayload(record, { isCreate }) {
 const SHOP_EMPLOYEE_SELECT =
   'swank_shopemployeeid,swank_autonumber,swank_empnum,swank_isroadmech,_swank_employee_value';
 const SHOP_EMPLOYEE_EXPAND =
-  '&$expand=swank_Employee($select=swank_employeeid,swank_name,swank_empnum,swank_email)';
+  '&$expand=swank_Employee($select=swank_employeeid,swank_name,swank_empnum,swank_companyemail)';
 
 async function listEmployees() {
   try {
@@ -361,7 +361,7 @@ async function findShopEmployeeBySignInEmail(email) {
   const escaped = normalized.replace(/'/g, "''");
   try {
     const rows = await listAll(
-      `/swank_shopemployees?$select=${SHOP_EMPLOYEE_SELECT}${SHOP_EMPLOYEE_EXPAND}&$filter=statecode eq 0 and swank_Employee/swank_email eq '${escaped}'`,
+      `/swank_shopemployees?$select=${SHOP_EMPLOYEE_SELECT}${SHOP_EMPLOYEE_EXPAND}&$filter=statecode eq 0 and swank_Employee/swank_companyemail eq '${escaped}'`,
     );
     const match = rows.map(mapShopEmployee).find((row) => typeof row.empNum === 'number');
     if (match) return match;
@@ -372,12 +372,26 @@ async function findShopEmployeeBySignInEmail(email) {
   return roster.find((row) => row.signInEmail === normalized) || null;
 }
 
-async function getTimeEntryEmployeeId(id) {
+async function getTimeEntryPunch(id) {
   const row = await dataverseFetch(
     'GET',
-    `/swank_shoptimeentries(${id})?$select=swank_shoptimeentryid,_swank_employee_value`,
+    `/swank_shoptimeentries(${id})?$select=swank_shoptimeentryid,_swank_employee_value,swank_clockin,swank_clockout,swank_hours,swank_workdate`,
   );
-  return row._swank_employee_value || undefined;
+  return {
+    id: row.swank_shoptimeentryid,
+    employeeId: row._swank_employee_value || undefined,
+    clockIn: row.swank_clockin || undefined,
+    clockOut: row.swank_clockout || undefined,
+    hours: toNumber(row.swank_hours),
+    workDate: row.swank_workdate || undefined,
+  };
+}
+
+async function listEmployeeTimeEntries(employeeId, { from, to }) {
+  const rows = await listAll(
+    `/swank_shoptimeentries?$select=swank_shoptimeentryid,swank_timeentry,swank_clockin,swank_clockout,swank_jobnumber,swank_workdate,swank_ptotime&$filter=statecode eq 0 and _swank_employee_value eq ${employeeId} and swank_clockin ge ${from} and swank_clockin le ${to}`,
+  );
+  return rows.map(mapTimeEntry);
 }
 
 async function listAssets() {
@@ -570,7 +584,8 @@ module.exports = {
   diagnose,
   listEmployees,
   findShopEmployeeBySignInEmail,
-  getTimeEntryEmployeeId,
+  getTimeEntryPunch,
+  listEmployeeTimeEntries,
   listLookupEmployees,
   listAssets,
   createAsset,

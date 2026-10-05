@@ -17,17 +17,25 @@ Environment: `https://org9cab1d0f.crm.dynamics.com/`
 
 ### Work email (Employee)
 
-Add a custom column on **Employee** (`swank_employee`) so mechanics signed in with their own Microsoft 365 account are recognized without the kiosk employee code. Shop Employee already links to Employee — the app matches the signed-in M365 address against this field.
+Mechanics signed in with their own Microsoft 365 account are recognized without the kiosk employee code by matching the signed-in address against **Company Email** (`swank_companyemail`) on **Employee** (`swank_employee`). Shop Employee already links to Employee.
 
-| Setting | Value |
-| --- | --- |
-| Table | Employee (`swank_employee`) |
-| Display name | Email |
-| Logical name | `swank_email` |
-| Type | Email (or Single line of text) |
-| Required | No |
+Fill it with each mechanic’s work Microsoft 365 address (same address they use to sign into the app). Until it is filled in, a personal login sees “Shop employee record not linked”.
 
-Fill it with each mechanic’s work Microsoft 365 address (same address they use to sign into the app). Road mechanics (`swank_isroadmech` on Shop Employee) can clock in/out from their phone. Shop mechanics can use it to view their timecard and mechanic log on a phone, but clock-in/out stays limited to the shop kiosk account.
+Example: Josh Brezinski (`jbrezinski@swankco.com`) and Gary Beck (`garyb@swankco.com`) open **Timecard** and **Mechanic Log** directly on their phones after Microsoft 365 sign-in — no kiosk employee code, no 30-second idle sign-out. They still **clock in and clock out only at the shop kiosk** (`KIOSK_EMAILS` account + employee code).
+
+Three sign-in paths:
+
+| Account | How they open a timecard | Clock in / out | Session |
+| --- | --- | --- | --- |
+| **Linked work email** (Company Email on Employee) | Timecard opens automatically | Shop kiosk only | Stays signed in on phone |
+| **Shop kiosk** (`KIOSK_EMAILS`) | 4-digit employee code | Kiosk (or manager / road mech rules) | 30 s idle sign-out |
+| **Unlinked work email** | Blocked until email is added in Dataverse | — | — |
+
+Who can do what:
+
+- **Clock in / clock out** — the shop kiosk account, managers, and road mechanics (`swank_isroadmech` on Shop Employee) from their own device. Linked shop mechanics (not road mech) punch at the kiosk only.
+- **Add jobs, change assets, edit notes, submit PTO** — any employee on their own timecard from any device, once the day is clocked in. Job times must stay inside the day's clock-in and clock-out.
+- **Manager dashboard** — managers at any time, whether or not they are clocked in. Managers can create, edit, and delete any entry, including clock times and PTO approval.
 
 Grant the **Shop Timecard API** application user **Read** on Employee (if not already) including the new column.
 

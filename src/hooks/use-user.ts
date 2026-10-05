@@ -11,6 +11,8 @@ export type AppUser = {
   isKioskAccount: boolean;
   requiresEmployeeCode: boolean;
   canPunch: boolean;
+  /** Work email linked on Employee — opens timecard without a kiosk code. */
+  linkedPersonalLogin: boolean;
   shopEmployeeId?: string;
   isRoadMech?: boolean;
 };

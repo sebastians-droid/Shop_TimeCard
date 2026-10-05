@@ -13,11 +13,19 @@ const {
   createTimeEntry,
   updateTimeEntry,
   deleteTimeEntry,
+  getTimeEntryPunch,
   listSchedules,
   upsertSchedule,
 } = require('./dataverse');
 const { issueSpeechToken } = require('./speech');
-const { requireUser, requireAppUser, requireManager, assertTimeEntryAccess, assertPunchCreate } = require('./auth');
+const {
+  requireUser,
+  requireAppUser,
+  requireManager,
+  assertTimeEntryAccess,
+  assertTimeEntryCreate,
+  assertJobSwitch,
+} = require('./auth');
 let runSync = async () => {
   throw new Error('Sync module not loaded');
 };
@@ -160,10 +168,40 @@ async function handleRequest(request) {
     if (method === 'POST' && (pathname === '/api/time-entries' || pathname === '/api/timeEntries')) {
       const user = await requireAppUser(request);
       const record = await readJson(request);
-      assertPunchCreate(user, record);
+      await assertTimeEntryCreate(user, record);
       const ip = clientIp(request);
       if (ip && record.clockIn) record.clockInIp = ip;
       return json(201, await createTimeEntry(record));
+    }
+
+    const switchMatch = pathname.match(/^\/api\/time-entries\/([0-9a-f-]{36})\/switch-job$/i);
+    if (switchMatch && method === 'POST') {
+      const user = await requireAppUser(request);
+      const body = await readJson(request);
+      const next = { ...(body.next || {}) };
+      const switchAt = body.switchAt;
+      const active = await getTimeEntryPunch(switchMatch[1]);
+      await assertJobSwitch(user, active, next, switchAt);
+      const ip = clientIp(request);
+      const closed = await updateTimeEntry(active.id, {
+        clockOut: switchAt,
+        hours: body.closingHours,
+        clockOutLat: body.lat,
+        clockOutLon: body.lon,
+        clockOutIp: ip,
+      });
+      delete next.clockOut;
+      next.clockIn = switchAt;
+      next.clockInLat = body.lat;
+      next.clockInLon = body.lon;
+      if (ip) next.clockInIp = ip;
+      try {
+        const created = await createTimeEntry(next);
+        return json(201, { closed, created });
+      } catch (createError) {
+        await updateTimeEntry(active.id, { clockOut: '', hours: active.hours ?? null }).catch(() => undefined);
+        throw createError;
+      }
     }
 
     const entryMatch =

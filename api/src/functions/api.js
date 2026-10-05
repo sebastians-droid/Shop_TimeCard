@@ -72,6 +72,13 @@ app.http('timeEntries', {
   handler: azureHandler,
 });
 
+app.http('timeEntrySwitchJob', {
+  methods: ['POST'],
+  authLevel: 'anonymous',
+  route: 'time-entries/{id}/switch-job',
+  handler: azureHandler,
+});
+
 app.http('schedules', {
   methods: ['GET', 'PATCH'],
   authLevel: 'anonymous',

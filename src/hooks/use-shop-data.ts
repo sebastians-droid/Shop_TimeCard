@@ -82,6 +82,34 @@ export function useUpdateShopTimeEntry() {
   });
 }
 
+export type JobSwitch = {
+  activeEntryId: string;
+  switchAt: string;
+  closingHours: number;
+  lat?: number;
+  lon?: number;
+  next: Omit<ShopTimeEntry, 'id'>;
+};
+
+/** Closes the running job and starts the next one in a single server call. */
+export function useSwitchShopTimeEntryJob() {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: ({ activeEntryId, ...body }: JobSwitch) =>
+      apiFetch<{ closed: ShopTimeEntry; created: ShopTimeEntry }>(`/api/time-entries/${activeEntryId}/switch-job`, {
+        method: 'POST',
+        body: JSON.stringify(body),
+      }),
+    onSuccess: ({ closed, created }) => {
+      client.setQueryData<ShopTimeEntry[]>(queryKeys.timeEntries(), (current) => {
+        const rows = (current ?? []).map((row) => (row.id === closed.id ? closed : row));
+        return rows.some((row) => row.id === created.id) ? rows : [created, ...rows];
+      });
+      void client.invalidateQueries({ queryKey: queryKeys.timeEntries() });
+    },
+  });
+}
+
 export function useDeleteShopTimeEntry() {
   const client = useQueryClient();
   return useMutation({
