@@ -4,7 +4,7 @@
   "client_id": "YOUR-APP-REGISTRATION-CLIENT-ID",
   "client_secret": "YOUR-CLIENT-SECRET",
   "manager_emails": "alisonh@swankco.com,bryank@swankco.com,beaul@swankco.com,sebastians@swankco.com,nickl@swankco.com",
-  "kiosk_emails": "shoptimecard@swankco.com",
+  "kiosk_emails": "shoptimecard@swankco.com,shopkiosk@swankco.com,mechanicshop@swankco.com",
   "speech_key": "YOUR-AZURE-SPEECH-KEY",
   "speech_region": "eastus",
   "speech_custom_endpoint_id": "",

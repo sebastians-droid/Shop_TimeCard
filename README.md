@@ -57,16 +57,16 @@ Locally the API skips Microsoft login (`DATAVERSE_LOCAL_SKIP_AUTH`). In Azure, S
    - API location: `api`
    - Output location: `dist`
 3. Authentication → Microsoft → current tenant only.
-4. Add application settings on the Static Web App:
+4. Add application settings on the Static Web App (secrets only — email allowlists ship in the repo):
    - `DATAVERSE_ORG_URL`
    - `DATAVERSE_TENANT_ID`
    - `DATAVERSE_CLIENT_ID`
    - `DATAVERSE_CLIENT_SECRET`
-   - `MANAGER_EMAILS` (comma-separated, used only for the manager dashboard)
-   - `KIOSK_EMAILS` (comma-separated shared shop kiosk Microsoft 365 accounts — these use the 4-digit employee code; all other accounts are matched by **Email** on Employee)
    - `SPEECH_KEY` and `SPEECH_REGION` (Azure Speech resource for voice notes)
    - `SPEECH_CUSTOM_ENDPOINT_ID` (optional Custom Speech deployment id)
    - `SPEECH_MAX_SECONDS` (optional, default `30`)
+
+   **Manager and kiosk emails** default from `api/shared/dataverse.js` (same list as `dataverse.local.json.example`). Push to GitHub to change them in production. Optional Azure overrides: `MANAGER_EMAILS`, `KIOSK_EMAILS` (comma-separated). `dataverse.local.json` is gitignored and used for local dev only — Azure never reads it.
 
 The Dataverse application user needs:
 

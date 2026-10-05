@@ -76,16 +76,17 @@ function loadConfig() {
 
   const orgUrl = (cleanEnv('DATAVERSE_ORG_URL') || fileCfg.org_url || 'https://org9cab1d0f.crm.dynamics.com').replace(/\/$/, '');
 
-  const managerEmails = (
-    cleanEnv('MANAGER_EMAILS') ||
-    fileCfg.manager_emails ||
-    ['alisonh@swankco.com', 'bryank@swankco.com', 'beaul@swankco.com', 'sebastians@swankco.com', 'nickl@swankco.com'].join(',')
-  )
+  const defaultManagerEmails =
+    'alisonh@swankco.com,bryank@swankco.com,beaul@swankco.com,sebastians@swankco.com,nickl@swankco.com';
+  // Deployed with the repo — Azure/local env vars may override. dataverse.local.json is gitignored and not read on Azure.
+  const defaultKioskEmails = 'shoptimecard@swankco.com,shopkiosk@swankco.com,mechanicshop@swankco.com';
+
+  const managerEmails = (cleanEnv('MANAGER_EMAILS') || fileCfg.manager_emails || defaultManagerEmails)
     .split(',')
     .map((email) => email.trim().toLowerCase())
     .filter(Boolean);
 
-  const kioskEmails = (cleanEnv('KIOSK_EMAILS') || fileCfg.kiosk_emails || '')
+  const kioskEmails = (cleanEnv('KIOSK_EMAILS') || fileCfg.kiosk_emails || defaultKioskEmails)
     .split(',')
     .map((email) => email.trim().toLowerCase())
     .filter(Boolean);
