@@ -14,6 +14,8 @@ export type PayrollDetailRow = {
   jobNumber: string;
   payType: string;
   status: string;
+  /** Semicolon-separated review flags, e.g. active punches or shifts over 12 hours. */
+  flags: string;
   notes: string;
   scheduledStart: string;
   clockInDistance?: number | null;
@@ -26,6 +28,7 @@ export type PayrollEmployeeExport = {
   dayHours: number[];
   noLunchDays: string[];
   weekHours: number;
+  reviewFlags?: string;
   rows: PayrollDetailRow[];
 };
 
@@ -64,6 +67,11 @@ const headerFill: ExcelJS.FillPattern = {
   fgColor: { argb: 'FF1F4E79' },
 };
 const headerFont: Partial<ExcelJS.Font> = { bold: true, color: { argb: 'FFFFFFFF' } };
+const flaggedRowFill: ExcelJS.FillPattern = {
+  type: 'pattern',
+  pattern: 'solid',
+  fgColor: { argb: 'FFFFF3CD' },
+};
 
 function styleHeader(row: ExcelJS.Row) {
   row.font = headerFont;
@@ -83,23 +91,29 @@ export async function buildPayrollWorkbookBlob(data: PayrollWeekExport): Promise
   const usedNames = new Set<string>(['summary']);
 
   const summary = workbook.addWorksheet('Summary', { views: [{ state: 'frozen', ySplit: 3 }] });
-  summary.mergeCells('A1:K1');
+  summary.mergeCells('A1:L1');
   summary.getCell('A1').value = `Shop Timecard weekly summary · ${weekLabel}`;
   summary.getCell('A1').font = { bold: true, size: 14 };
-  summary.getCell('A2').value = 'Hours are paid time after lunch and 15-minute rounding.';
+  summary.getCell('A2').value =
+    'Hours are paid time after lunch and 15-minute rounding. Yellow rows on employee sheets flag active punches or shifts over 12 hours.';
   summary.getCell('A2').font = { italic: true, color: { argb: 'FF666666' } };
 
-  const summaryHeader = summary.addRow(['Employee', 'Employee number', ...dayHeaders, 'Week total', 'No-lunch days']);
+  const summaryHeader = summary.addRow(['Employee', 'Employee number', ...dayHeaders, 'Week total', 'No-lunch days', 'Review flags']);
   styleHeader(summaryHeader);
 
   data.employees.forEach((employee) => {
+    const reviewFlags = employee.reviewFlags ?? '';
     const row = summary.addRow([
       employee.name,
       employee.number,
       ...employee.dayHours.map((minutes) => (minutes > 0 ? hoursNumber(minutes) : '')),
       hoursNumber(employee.weekHours),
       employee.noLunchDays.join(', '),
+      reviewFlags,
     ]);
+    if (reviewFlags) {
+      row.getCell(12).fill = flaggedRowFill;
+    }
     row.eachCell((cell, colNumber) => {
       if (colNumber >= 3 && colNumber <= 10) {
         cell.numFmt = '0.00';
@@ -116,6 +130,7 @@ export async function buildPayrollWorkbookBlob(data: PayrollWeekExport): Promise
     ),
     hoursNumber(data.employees.reduce((total, employee) => total + employee.weekHours, 0)),
     '',
+    '',
   ]);
   totalsRow.font = { bold: true };
   totalsRow.eachCell((cell, colNumber) => {
@@ -125,7 +140,14 @@ export async function buildPayrollWorkbookBlob(data: PayrollWeekExport): Promise
     }
   });
 
-  summary.columns = [{ width: 28 }, { width: 16 }, ...dayHeaders.map(() => ({ width: 12 })), { width: 12 }, { width: 28 }];
+  summary.columns = [
+    { width: 28 },
+    { width: 16 },
+    ...dayHeaders.map(() => ({ width: 12 })),
+    { width: 12 },
+    { width: 28 },
+    { width: 24 },
+  ];
 
   const detailHeaders = [
     'Employee',
@@ -145,6 +167,7 @@ export async function buildPayrollWorkbookBlob(data: PayrollWeekExport): Promise
     'Job number',
     'Pay type',
     'Status',
+    'Flags',
     'Clock In Dist (mi)',
     'Clock Out Dist (mi)',
   ];
@@ -178,10 +201,16 @@ export async function buildPayrollWorkbookBlob(data: PayrollWeekExport): Promise
         detail.jobNumber,
         detail.payType,
         detail.status,
+        detail.flags,
         detail.clockInDistance != null ? detail.clockInDistance : '',
         detail.clockOutDistance != null ? detail.clockOutDistance : '',
       ]);
       row.getCell(7).numFmt = '0.00';
+      if (detail.flags) {
+        row.eachCell((cell) => {
+          cell.fill = flaggedRowFill;
+        });
+      }
     });
     if (employee.rows.length > 0) {
       const total = sheet.addRow([
@@ -192,6 +221,7 @@ export async function buildPayrollWorkbookBlob(data: PayrollWeekExport): Promise
         '',
         'Employee week total',
         hoursNumber(employee.weekHours),
+        '',
         '',
         '',
         '',
@@ -226,6 +256,7 @@ export async function buildPayrollWorkbookBlob(data: PayrollWeekExport): Promise
       { width: 14 },
       { width: 16 },
       { width: 12 },
+      { width: 28 },
       { width: 18 },
       { width: 18 },
     ];

@@ -237,12 +237,9 @@ describe('getDayPayMinutes', () => {
     expect(pay.minutesByEntryId.get('pto')).toBe(240);
   });
 
-  it('pays an admin employee from the earlier of clock-in and scheduled start', () => {
+  it('pays an admin employee from clock-in like a road mechanic', () => {
     const day = [entry({ id: 'a', clockIn: at(DAY, '06:30'), clockOut: at(DAY, '15:00') })];
-    expect(getDayPayMinutes(day, new Date(), '07:00', { isAdmin: true }).paidLaborMinutes).toBe(480);
-    expect(getDayPayMinutes([entry({ id: 'b', clockIn: at(DAY, '08:00'), clockOut: at(DAY, '15:00') })], new Date(), '07:00', {
-      isAdmin: true,
-    }).paidLaborMinutes).toBe(450);
+    expect(getDayPayMinutes(day, new Date(), NO_SCHEDULED_START, { isAdmin: true }).paidLaborMinutes).toBe(480);
   });
 
   it('pays a road mechanic from the actual clock-in instead of a default start', () => {
@@ -323,9 +320,9 @@ describe('effectiveDayPayStart', () => {
     expect(effectiveDayPayStart(at(DAY, '08:00'), '07:00')).toBe(at(DAY, '08:00'));
   });
 
-  it('pays admin employees from whichever comes first: clock-in or scheduled start', () => {
+  it('pays admin employees from clock-in like road mechanics', () => {
     expect(effectiveDayPayStart(at(DAY, '06:30'), '07:00', { isAdmin: true })).toBe(at(DAY, '06:30'));
-    expect(effectiveDayPayStart(at(DAY, '08:00'), '07:00', { isAdmin: true })).toBe(at(DAY, '07:00'));
+    expect(effectiveDayPayStart(at(DAY, '08:00'), '07:00', { isAdmin: true })).toBe(at(DAY, '08:00'));
   });
 
   it('pays road mechanics from the actual clock-in', () => {
@@ -342,8 +339,8 @@ describe('scheduledStartFor', () => {
     expect(scheduledStartFor({ isRoadMech: false }, '06:00')).toBe('06:00');
   });
 
-  it('passes the stored start through for admin employees', () => {
-    expect(scheduledStartFor({ isAdmin: true }, '06:00')).toBe('06:00');
+  it('suppresses the scheduled start for admin employees', () => {
+    expect(scheduledStartFor({ isAdmin: true }, '06:00')).toBe(NO_SCHEDULED_START);
   });
 
   it('leaves an unknown employee on the default-start path', () => {

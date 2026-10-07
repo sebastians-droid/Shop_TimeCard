@@ -23,11 +23,15 @@ export function payProfileFor(employee: EmployeePayProfile | null | undefined): 
   return { isRoadMech: employee.isRoadMech, isAdmin: employee.isAdmin };
 }
 
-/** A road mechanic's clock-in is never pulled forward; shop and admin use schedule rules. */
+export function paysFromClockIn(employee: EmployeePayProfile | null | undefined): boolean {
+  return Boolean(employee?.isRoadMech || employee?.isAdmin);
+}
+
+/** Road and admin employees are paid from clock-in; shop uses a scheduled start. */
 export const scheduledStartFor = (
   employee: EmployeePayProfile | null | undefined,
   storedStart?: string,
-) => (employee?.isRoadMech ? NO_SCHEDULED_START : storedStart);
+) => (paysFromClockIn(employee) ? NO_SCHEDULED_START : storedStart);
 
 export function roundToNearestQuarterHour(minutes: number): number {
   if (!Number.isFinite(minutes) || minutes <= 0) return 0;
@@ -122,8 +126,7 @@ function dayLastClockOutFromLabor(labor: ShopTimeEntry[]): string | undefined {
 
 /**
  * When paid time begins for the day.
- * - Road: actual clock-in.
- * - Admin: earlier of clock-in and scheduled start.
+ * - Road and admin: actual clock-in.
  * - Shop: scheduled start unless clock-in is later, then clock-in.
  */
 export function effectiveDayPayStart(
@@ -131,7 +134,7 @@ export function effectiveDayPayStart(
   scheduledStart: string | null | undefined,
   employee?: EmployeePayProfile | null,
 ): string {
-  if (employee?.isRoadMech || scheduledStart === NO_SCHEDULED_START) {
+  if (paysFromClockIn(employee) || scheduledStart === NO_SCHEDULED_START) {
     return dayFirstClockInIso;
   }
   const effectiveStart = scheduledStart ?? DEFAULT_SCHEDULED_START;
@@ -139,9 +142,6 @@ export function effectiveDayPayStart(
   const scheduled = new Date(dayFirstClockInIso);
   const [hours, minutes] = effectiveStart.split(':').map(Number);
   scheduled.setHours(hours, minutes, 0, 0);
-  if (employee?.isAdmin) {
-    return clockInDate.getTime() <= scheduled.getTime() ? dayFirstClockInIso : scheduled.toISOString();
-  }
   return clockInDate.getTime() > scheduled.getTime() ? dayFirstClockInIso : scheduled.toISOString();
 }
 

@@ -11,8 +11,12 @@ import {
   formatWeekRangeLabel,
   scheduledStartCaption,
   getAssetDisplayName,
+  dayClockCaption,
   getEmployeeNotes,
   getEntryAssetName,
+  jobEntriesForDisplay,
+  entriesForPayrollExport,
+  PAYROLL_AWAITING_LABEL,
   getEntryDivision,
   getEntryEmployeeKey,
   getEntryEmployeeName,
@@ -89,6 +93,34 @@ describe('asset name resolution', () => {
 
   it('labels a clock-in that is still waiting for a job', () => {
     expect(getEntryAssetName(entry({ id: 'e', timeEntry: 'Smith - Waiting' }), assets)).toBe('Waiting');
+  });
+
+  it('hides waiting punches from manager job lists', () => {
+    const waiting = entry({ id: 'w', timeEntry: 'Smith - Waiting', clockIn: at('2026-03-10', '06:30') });
+    const job = entry({ id: 'j', timeEntry: 'Smith - LOADER-7', clockIn: at('2026-03-10', '07:00') });
+    expect(jobEntriesForDisplay([waiting, job])).toEqual([job]);
+  });
+
+  it('keeps open day punches in payroll export so active clock-ins can be flagged', () => {
+    const waiting = entry({ id: 'w', timeEntry: 'Smith - Waiting', clockIn: at('2026-03-10', '06:30') });
+    const job = entry({ id: 'j', timeEntry: 'Smith - LOADER-7', clockIn: at('2026-03-10', '07:00'), clockOut: at('2026-03-10', '15:00') });
+    expect(entriesForPayrollExport([waiting, job])).toEqual([waiting, job]);
+  });
+
+  it('drops closed waiting punches from payroll export', () => {
+    const waiting = entry({
+      id: 'w',
+      timeEntry: 'Smith - Waiting',
+      clockIn: at('2026-03-10', '06:30'),
+      clockOut: at('2026-03-10', '06:45'),
+    });
+    const job = entry({ id: 'j', timeEntry: 'Smith - LOADER-7', clockIn: at('2026-03-10', '07:00') });
+    expect(entriesForPayrollExport([waiting, job])).toEqual([job]);
+  });
+
+  it('summarizes day clock-in in the header instead of a waiting card', () => {
+    const waiting = entry({ id: 'w', timeEntry: 'Smith - Waiting', clockIn: at('2026-03-10', '06:30') });
+    expect(dayClockCaption([waiting])).toMatch(/Day clock-in .* · still clocked in/);
   });
 
   it('falls back to the job number, then the division, then a placeholder', () => {
@@ -204,6 +236,10 @@ describe('scheduled start labels', () => {
 
   it('notes a road mechanic is paid from clock-in', () => {
     expect(scheduledStartCaption({ isRoadMech: true }, '06:00')).toBe('Starts at clock-in');
+  });
+
+  it('notes an admin employee is paid from clock-in', () => {
+    expect(scheduledStartCaption({ isAdmin: true }, '06:00')).toBe('Admin — starts at clock-in');
   });
 
   it('uses the stored shop start, then the 7:00 default', () => {

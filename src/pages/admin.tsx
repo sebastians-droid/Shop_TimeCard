@@ -1,5 +1,5 @@
-import { useMemo, useState } from 'react';
-import { Check, Pencil, Plus, Search, Trash2, X } from 'lucide-react';
+import { memo, useCallback, useMemo, useState } from 'react';
+import { Check, Pencil, Plus, Trash2, X } from 'lucide-react';
 import { toast } from '@/lib/toast';
 
 import {
@@ -11,7 +11,6 @@ import {
   AlertDialogFooter,
   AlertDialogHeader,
   AlertDialogTitle,
-  AlertDialogTrigger,
 } from '@/components/ui/alert-dialog';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -19,7 +18,9 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { SortableTableHeader, type SortState } from '@/components/admin/sortable-table-header';
 import { AccessCheckingCard, ManagerAccessDeniedCard } from '@/components/system/access-cards';
+import { compareNumber, compareText, EMPTY_SORT, toggleSort, type SortDirection } from '@/lib/admin-table';
 import {
   useAllEquipmentAssets,
   useCreateAsset,
@@ -35,7 +36,13 @@ import type { EquipmentAsset } from '@/models/equipment-asset';
 import type { ShopEmployee } from '@/models/shop-employee';
 import { useUser } from '@/hooks/use-user';
 import { DIVISIONS, EQUIPMENT_CATEGORIES, divisionLabel, picklistForCode, categoryLabel } from '@/lib/reference-data';
-import { formatEmployeeDisplayName, shopEmployeeDisplayName } from '@/lib/shop-employees';
+import {
+  employeeMechanicType,
+  employeeMechanicTypeLabel,
+  formatEmployeeDisplayName,
+  MECHANIC_TYPE_ORDER,
+  shopEmployeeDisplayName,
+} from '@/lib/shop-employees';
 
 // ─── Asset editor ────────────────────────────────────────────────────────────
 
@@ -120,27 +127,110 @@ function AssetForm({
   );
 }
 
+type AssetSortColumn = 'asset' | 'category' | 'division' | 'details';
+
+function sortAssets(rows: EquipmentAsset[], sort: SortState<AssetSortColumn>): EquipmentAsset[] {
+  if (rows.length <= 1) return rows;
+
+  const indexed = rows.map((asset) => ({
+    asset,
+    assetKey: asset.asset,
+    categoryKey: categoryLabel(asset.equipmentCategory) || '',
+    divisionKey: asset.divisionCode,
+    detailsKey: asset.assetDetail || '',
+  }));
+
+  if (!sort.column) {
+    indexed.sort((rowA, rowB) => rowA.assetKey.localeCompare(rowB.assetKey, undefined, { numeric: true }));
+    return indexed.map((row) => row.asset);
+  }
+
+  const direction: SortDirection = sort.direction;
+  indexed.sort((rowA, rowB) => {
+    switch (sort.column) {
+      case 'asset':
+        return compareText(rowA.assetKey, rowB.assetKey, direction);
+      case 'category':
+        return compareText(rowA.categoryKey, rowB.categoryKey, direction);
+      case 'division':
+        return compareNumber(rowA.divisionKey, rowB.divisionKey, direction);
+      case 'details':
+        return compareText(rowA.detailsKey, rowB.detailsKey, direction);
+      default:
+        return 0;
+    }
+  });
+  return indexed.map((row) => row.asset);
+}
+
+const AssetsTableHead = memo(function AssetsTableHead({
+  sort,
+  onSortColumn,
+}: {
+  sort: SortState<AssetSortColumn>;
+  onSortColumn: (column: AssetSortColumn) => void;
+}) {
+  return (
+    <thead>
+      <tr className="border-b bg-muted/50 text-left">
+        <SortableTableHeader column="asset" label="Asset" sort={sort} onSortColumn={onSortColumn} />
+        <SortableTableHeader column="category" label="Category" sort={sort} onSortColumn={onSortColumn} className="hidden md:table-cell" />
+        <SortableTableHeader column="division" label="Division" sort={sort} onSortColumn={onSortColumn} />
+        <SortableTableHeader column="details" label="Details" sort={sort} onSortColumn={onSortColumn} className="hidden sm:table-cell" />
+        <th className="w-24 px-3 py-2" />
+      </tr>
+    </thead>
+  );
+});
+
+const AssetTableRow = memo(function AssetTableRow({
+  asset,
+  onEdit,
+  onDeactivate,
+}: {
+  asset: EquipmentAsset;
+  onEdit: (asset: EquipmentAsset) => void;
+  onDeactivate: (asset: EquipmentAsset) => void;
+}) {
+  return (
+    <tr className="border-b last:border-0 hover:bg-muted/30">
+      <td className="px-3 py-2 font-medium">{asset.asset}</td>
+      <td className="px-3 py-2 text-muted-foreground hidden md:table-cell">{categoryLabel(asset.equipmentCategory) || '—'}</td>
+      <td className="px-3 py-2">
+        <Badge variant="outline">{divisionLabel(asset.divisionCode)}</Badge>
+      </td>
+      <td className="px-3 py-2 text-muted-foreground hidden sm:table-cell">{asset.assetDetail || '—'}</td>
+      <td className="px-3 py-2">
+        <div className="flex gap-1 justify-end">
+          <Button variant="ghost" size="icon-sm" onClick={() => onEdit(asset)} title="Edit">
+            <Pencil className="h-3.5 w-3.5" />
+          </Button>
+          <Button variant="ghost" size="icon-sm" onClick={() => onDeactivate(asset)} title="Deactivate">
+            <Trash2 className="h-3.5 w-3.5 text-destructive" />
+          </Button>
+        </div>
+      </td>
+    </tr>
+  );
+});
+
 function AssetsSection() {
   const { data: assets = [], isLoading } = useAllEquipmentAssets();
   const createMut = useCreateAsset();
   const updateMut = useUpdateAsset();
   const deactivateMut = useDeactivateAsset();
 
-  const [search, setSearch] = useState('');
+  const [sort, setSort] = useState<SortState<AssetSortColumn>>(EMPTY_SORT);
   const [adding, setAdding] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [draft, setDraft] = useState<AssetDraft>(emptyAssetDraft);
+  const [deactivateTarget, setDeactivateTarget] = useState<EquipmentAsset | null>(null);
 
-  const filtered = useMemo(() => {
-    if (!search.trim()) return assets;
-    const q = search.toLowerCase();
-    return assets.filter(
-      (a) =>
-        a.asset.toLowerCase().includes(q) ||
-        (a.assetDetail || '').toLowerCase().includes(q) ||
-        divisionLabel(a.divisionCode).toLowerCase().includes(q),
-    );
-  }, [assets, search]);
+  const sortedAssets = useMemo(() => sortAssets(assets, sort), [assets, sort]);
+  const handleSortColumn = useCallback((column: AssetSortColumn) => {
+    setSort((current) => toggleSort(current, column));
+  }, []);
+  const requestDeactivate = useCallback((asset: EquipmentAsset) => setDeactivateTarget(asset), []);
 
   function startAdd() {
     setAdding(true);
@@ -148,7 +238,7 @@ function AssetsSection() {
     setDraft(emptyAssetDraft);
   }
 
-  function startEdit(a: EquipmentAsset) {
+  const startEdit = useCallback((a: EquipmentAsset) => {
     setAdding(false);
     setEditingId(a.id);
     setDraft({
@@ -157,7 +247,7 @@ function AssetsSection() {
       divisionCode: a.divisionCode != null ? String(a.divisionCode) : '',
       equipmentCategory: a.equipmentCategory != null ? String(a.equipmentCategory) : '',
     });
-  }
+  }, []);
 
   function cancel() {
     setAdding(false);
@@ -215,15 +305,9 @@ function AssetsSection() {
         <h2 className="text-xl font-semibold">
           Equipment Assets <Badge variant="secondary">{assets.length}</Badge>
         </h2>
-        <div className="flex gap-2">
-          <div className="relative flex-1 sm:w-64">
-            <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
-            <Input className="pl-8" placeholder="Search assets…" value={search} onChange={(e) => setSearch(e.target.value)} />
-          </div>
-          <Button size="sm" onClick={startAdd} disabled={adding}>
-            <Plus className="h-4 w-4" /> Add
-          </Button>
-        </div>
+        <Button size="sm" onClick={startAdd} disabled={adding} className="w-full sm:w-auto">
+          <Plus className="h-4 w-4" /> Add
+        </Button>
       </div>
 
       {adding && (
@@ -237,24 +321,16 @@ function AssetsSection() {
       ) : (
         <div className="rounded-md border">
           <table className="w-full text-sm">
-            <thead>
-              <tr className="border-b bg-muted/50 text-left">
-                <th className="px-3 py-2 font-medium">Asset</th>
-                <th className="px-3 py-2 font-medium hidden md:table-cell">Category</th>
-                <th className="px-3 py-2 font-medium">Division</th>
-                <th className="px-3 py-2 font-medium hidden sm:table-cell">Details</th>
-                <th className="px-3 py-2 font-medium w-24"></th>
-              </tr>
-            </thead>
+            <AssetsTableHead sort={sort} onSortColumn={handleSortColumn} />
             <tbody>
-              {filtered.length === 0 && (
+              {sortedAssets.length === 0 && (
                 <tr>
                   <td colSpan={5} className="px-3 py-6 text-center text-muted-foreground">
                     No assets found.
                   </td>
                 </tr>
               )}
-              {filtered.map((a) =>
+              {sortedAssets.map((a) =>
                 editingId === a.id ? (
                   <tr key={a.id}>
                     <td colSpan={5} className="p-2">
@@ -269,46 +345,35 @@ function AssetsSection() {
                     </td>
                   </tr>
                 ) : (
-                  <tr key={a.id} className="border-b last:border-0 hover:bg-muted/30">
-                    <td className="px-3 py-2 font-medium">{a.asset}</td>
-                    <td className="px-3 py-2 text-muted-foreground hidden md:table-cell">{categoryLabel(a.equipmentCategory) || '—'}</td>
-                    <td className="px-3 py-2">
-                      <Badge variant="outline">{divisionLabel(a.divisionCode)}</Badge>
-                    </td>
-                    <td className="px-3 py-2 text-muted-foreground hidden sm:table-cell">{a.assetDetail || '—'}</td>
-                    <td className="px-3 py-2">
-                      <div className="flex gap-1 justify-end">
-                        <Button variant="ghost" size="icon-sm" onClick={() => startEdit(a)} title="Edit">
-                          <Pencil className="h-3.5 w-3.5" />
-                        </Button>
-                        <AlertDialog>
-                          <AlertDialogTrigger asChild>
-                            <Button variant="ghost" size="icon-sm" title="Deactivate">
-                              <Trash2 className="h-3.5 w-3.5 text-destructive" />
-                            </Button>
-                          </AlertDialogTrigger>
-                          <AlertDialogContent>
-                            <AlertDialogHeader>
-                              <AlertDialogTitle>Deactivate {a.asset}?</AlertDialogTitle>
-                              <AlertDialogDescription>
-                                This will deactivate the asset. It can be reactivated later in Dataverse.
-                              </AlertDialogDescription>
-                            </AlertDialogHeader>
-                            <AlertDialogFooter>
-                              <AlertDialogCancel>Cancel</AlertDialogCancel>
-                              <AlertDialogAction onClick={() => handleDeactivate(a)}>Deactivate</AlertDialogAction>
-                            </AlertDialogFooter>
-                          </AlertDialogContent>
-                        </AlertDialog>
-                      </div>
-                    </td>
-                  </tr>
+                  <AssetTableRow key={a.id} asset={a} onEdit={startEdit} onDeactivate={requestDeactivate} />
                 ),
               )}
             </tbody>
           </table>
         </div>
       )}
+
+      <AlertDialog open={deactivateTarget != null} onOpenChange={(open) => !open && setDeactivateTarget(null)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Deactivate {deactivateTarget?.asset}?</AlertDialogTitle>
+            <AlertDialogDescription>
+              This will deactivate the asset. It can be reactivated later in Dataverse.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={() => {
+                if (deactivateTarget) void handleDeactivate(deactivateTarget);
+                setDeactivateTarget(null);
+              }}
+            >
+              Deactivate
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </section>
   );
 }
@@ -399,29 +464,106 @@ function EmployeeForm({
   );
 }
 
+type EmployeeSortColumn = 'name' | 'empNum' | 'type';
+
+function sortEmployees(rows: ShopEmployee[], sort: SortState<EmployeeSortColumn>): ShopEmployee[] {
+  if (rows.length <= 1) return rows;
+
+  const indexed = rows.map((employee) => ({
+    employee,
+    nameKey: shopEmployeeDisplayName(employee),
+    empNumKey: employee.empNum,
+    typeKey: MECHANIC_TYPE_ORDER.indexOf(employeeMechanicType(employee)),
+  }));
+
+  if (!sort.column) {
+    indexed.sort((rowA, rowB) => {
+      const typeOrder = rowA.typeKey - rowB.typeKey;
+      if (typeOrder !== 0) return typeOrder;
+      return rowA.nameKey.localeCompare(rowB.nameKey);
+    });
+    return indexed.map((row) => row.employee);
+  }
+
+  const direction: SortDirection = sort.direction;
+  indexed.sort((rowA, rowB) => {
+    switch (sort.column) {
+      case 'name':
+        return compareText(rowA.nameKey, rowB.nameKey, direction);
+      case 'empNum':
+        return compareNumber(rowA.empNumKey, rowB.empNumKey, direction);
+      case 'type':
+        return compareNumber(rowA.typeKey, rowB.typeKey, direction);
+      default:
+        return 0;
+    }
+  });
+  return indexed.map((row) => row.employee);
+}
+
+const EmployeesTableHead = memo(function EmployeesTableHead({
+  sort,
+  onSortColumn,
+}: {
+  sort: SortState<EmployeeSortColumn>;
+  onSortColumn: (column: EmployeeSortColumn) => void;
+}) {
+  return (
+    <thead>
+      <tr className="border-b bg-muted/50 text-left">
+        <SortableTableHeader column="name" label="Employee Name" sort={sort} onSortColumn={onSortColumn} />
+        <SortableTableHeader column="empNum" label="Emp #" sort={sort} onSortColumn={onSortColumn} />
+        <SortableTableHeader column="type" label="Type" sort={sort} onSortColumn={onSortColumn} />
+        <th className="w-16 px-3 py-2" />
+      </tr>
+    </thead>
+  );
+});
+
+const EmployeeTableRow = memo(function EmployeeTableRow({
+  employee,
+  onDeactivate,
+}: {
+  employee: ShopEmployee;
+  onDeactivate: (employee: ShopEmployee) => void;
+}) {
+  const type = employeeMechanicType(employee);
+  return (
+    <tr className="border-b last:border-0 hover:bg-muted/30">
+      <td className="px-3 py-2 font-medium">{shopEmployeeDisplayName(employee)}</td>
+      <td className="px-3 py-2">{employee.empNum ?? '—'}</td>
+      <td className="px-3 py-2">
+        <Badge variant={type === 'admin' ? 'default' : type === 'road' ? 'secondary' : 'outline'}>
+          {employeeMechanicTypeLabel(employee)}
+        </Badge>
+      </td>
+      <td className="px-3 py-2">
+        <div className="flex gap-1 justify-end">
+          <Button variant="ghost" size="icon-sm" onClick={() => onDeactivate(employee)} title="Deactivate">
+            <Trash2 className="h-3.5 w-3.5 text-destructive" />
+          </Button>
+        </div>
+      </td>
+    </tr>
+  );
+});
+
 function EmployeesSection() {
   const { data: employees = [], isLoading } = useShopEmployeeList();
   const { data: lookupEmployees = [] } = useLookupEmployees();
   const createMut = useCreateShopEmployee();
   const deactivateMut = useDeactivateShopEmployee();
 
-  const [search, setSearch] = useState('');
+  const [sort, setSort] = useState<SortState<EmployeeSortColumn>>(EMPTY_SORT);
   const [adding, setAdding] = useState(false);
   const [draft, setDraft] = useState<EmployeeDraft>(emptyEmployeeDraft);
+  const [deactivateTarget, setDeactivateTarget] = useState<ShopEmployee | null>(null);
 
-  const filtered = useMemo(() => {
-    const q = search.trim().toLowerCase();
-    const rows = q
-      ? employees.filter((e) => {
-          const display = shopEmployeeDisplayName(e).toLowerCase();
-          const raw = (e.employee?.name1 || '').toLowerCase();
-          return (
-            display.includes(q) || raw.includes(q) || (e.autoNumber || '').toLowerCase().includes(q) || String(e.empNum || '').includes(q)
-          );
-        })
-      : employees;
-    return [...rows].sort((a, b) => shopEmployeeDisplayName(a).localeCompare(shopEmployeeDisplayName(b)));
-  }, [employees, search]);
+  const sortedEmployees = useMemo(() => sortEmployees(employees, sort), [employees, sort]);
+  const handleSortColumn = useCallback((column: EmployeeSortColumn) => {
+    setSort((current) => toggleSort(current, column));
+  }, []);
+  const requestDeactivate = useCallback((employee: ShopEmployee) => setDeactivateTarget(employee), []);
 
   function startAdd() {
     setAdding(true);
@@ -462,15 +604,9 @@ function EmployeesSection() {
         <h2 className="text-xl font-semibold">
           Shop Employees <Badge variant="secondary">{employees.length}</Badge>
         </h2>
-        <div className="flex gap-2">
-          <div className="relative flex-1 sm:w-64">
-            <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
-            <Input className="pl-8" placeholder="Search employees…" value={search} onChange={(e) => setSearch(e.target.value)} />
-          </div>
-          <Button size="sm" onClick={startAdd} disabled={adding}>
-            <Plus className="h-4 w-4" /> Add
-          </Button>
-        </div>
+        <Button size="sm" onClick={startAdd} disabled={adding} className="w-full sm:w-auto">
+          <Plus className="h-4 w-4" /> Add
+        </Button>
       </div>
 
       {adding && (
@@ -492,54 +628,44 @@ function EmployeesSection() {
       ) : (
         <div className="rounded-md border">
           <table className="w-full text-sm">
-            <thead>
-              <tr className="border-b bg-muted/50 text-left">
-                <th className="px-3 py-2 font-medium">Employee Name</th>
-                <th className="px-3 py-2 font-medium">Emp #</th>
-                <th className="px-3 py-2 font-medium w-16"></th>
-              </tr>
-            </thead>
+            <EmployeesTableHead sort={sort} onSortColumn={handleSortColumn} />
             <tbody>
-              {filtered.length === 0 && (
+              {sortedEmployees.length === 0 && (
                 <tr>
-                  <td colSpan={3} className="px-3 py-6 text-center text-muted-foreground">
+                  <td colSpan={4} className="px-3 py-6 text-center text-muted-foreground">
                     No employees found.
                   </td>
                 </tr>
               )}
-              {filtered.map((emp) => (
-                <tr key={emp.id} className="border-b last:border-0 hover:bg-muted/30">
-                  <td className="px-3 py-2 font-medium">{shopEmployeeDisplayName(emp)}</td>
-                  <td className="px-3 py-2">{emp.empNum ?? '—'}</td>
-                  <td className="px-3 py-2">
-                    <div className="flex gap-1 justify-end">
-                      <AlertDialog>
-                        <AlertDialogTrigger asChild>
-                          <Button variant="ghost" size="icon-sm" title="Deactivate">
-                            <Trash2 className="h-3.5 w-3.5 text-destructive" />
-                          </Button>
-                        </AlertDialogTrigger>
-                        <AlertDialogContent>
-                          <AlertDialogHeader>
-                            <AlertDialogTitle>Deactivate {shopEmployeeDisplayName(emp)}?</AlertDialogTitle>
-                            <AlertDialogDescription>
-                              This will deactivate the shop employee record. It can be reactivated later in Dataverse.
-                            </AlertDialogDescription>
-                          </AlertDialogHeader>
-                          <AlertDialogFooter>
-                            <AlertDialogCancel>Cancel</AlertDialogCancel>
-                            <AlertDialogAction onClick={() => handleDeactivate(emp)}>Deactivate</AlertDialogAction>
-                          </AlertDialogFooter>
-                        </AlertDialogContent>
-                      </AlertDialog>
-                    </div>
-                  </td>
-                </tr>
+              {sortedEmployees.map((emp) => (
+                <EmployeeTableRow key={emp.id} employee={emp} onDeactivate={requestDeactivate} />
               ))}
             </tbody>
           </table>
         </div>
       )}
+
+      <AlertDialog open={deactivateTarget != null} onOpenChange={(open) => !open && setDeactivateTarget(null)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Deactivate {deactivateTarget ? shopEmployeeDisplayName(deactivateTarget) : ''}?</AlertDialogTitle>
+            <AlertDialogDescription>
+              This will deactivate the shop employee record. It can be reactivated later in Dataverse.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={() => {
+                if (deactivateTarget) void handleDeactivate(deactivateTarget);
+                setDeactivateTarget(null);
+              }}
+            >
+              Deactivate
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </section>
   );
 }

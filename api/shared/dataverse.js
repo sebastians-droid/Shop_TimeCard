@@ -444,6 +444,7 @@ async function createShopEmployee(record) {
   if (record.autoNumber) payload.swank_autonumber = record.autoNumber;
   if (record.empNum !== undefined) payload.swank_empnum = record.empNum;
   if (record.isRoadMech !== undefined) payload.swank_isroadmech = Boolean(record.isRoadMech);
+  if (record.isAdmin !== undefined) payload.swank_isadmin = Boolean(record.isAdmin);
   if (record.employeeId) {
     payload['swank_Employee@odata.bind'] = `/swank_employees(${record.employeeId})`;
   }
@@ -456,6 +457,7 @@ async function updateShopEmployee(id, record) {
   if (record.autoNumber !== undefined) payload.swank_autonumber = record.autoNumber || null;
   if (record.empNum !== undefined) payload.swank_empnum = record.empNum;
   if (record.isRoadMech !== undefined) payload.swank_isroadmech = Boolean(record.isRoadMech);
+  if (record.isAdmin !== undefined) payload.swank_isadmin = Boolean(record.isAdmin);
   if (record.employeeId !== undefined) {
     payload['swank_Employee@odata.bind'] = record.employeeId ? `/swank_employees(${record.employeeId})` : null;
   }

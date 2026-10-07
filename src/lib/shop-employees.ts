@@ -82,6 +82,37 @@ export function shopEmployeeDisplayName(employee: Pick<ShopEmployee, 'autoNumber
   return formatEmployeeDisplayName(employee.employee?.name1) || employee.autoNumber || '—';
 }
 
+export type EmployeeMechanicType = 'admin' | 'road' | 'shop';
+
+export const MECHANIC_TYPE_ORDER: EmployeeMechanicType[] = ['shop', 'road', 'admin'];
+
+export function employeeMechanicType(employee: { isRoadMech?: boolean; isAdmin?: boolean }): EmployeeMechanicType {
+  if (employee.isAdmin) return 'admin';
+  if (employee.isRoadMech) return 'road';
+  return 'shop';
+}
+
+export function employeeMechanicTypeLabel(employee: { isRoadMech?: boolean; isAdmin?: boolean }): string {
+  switch (employeeMechanicType(employee)) {
+    case 'admin':
+      return 'Admin';
+    case 'road':
+      return 'Road mechanic';
+    case 'shop':
+      return 'Shop mechanic';
+  }
+}
+
+export function compareEmployeesByTypeThenName(
+  employeeA: { isRoadMech?: boolean; isAdmin?: boolean },
+  employeeB: { isRoadMech?: boolean; isAdmin?: boolean },
+  nameA: string,
+  nameB: string,
+): number {
+  const typeOrder = MECHANIC_TYPE_ORDER.indexOf(employeeMechanicType(employeeA)) - MECHANIC_TYPE_ORDER.indexOf(employeeMechanicType(employeeB));
+  return typeOrder !== 0 ? typeOrder : nameA.localeCompare(nameB);
+}
+
 export const mapShopEmployees = (employees: ShopEmployee[]): AppShopEmployee[] =>
   employees
     .map((employee: ShopEmployee) => ({

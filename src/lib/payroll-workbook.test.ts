@@ -15,6 +15,7 @@ function row(overrides: Partial<PayrollDetailRow> & { workDate: string; hours: n
     jobNumber: '',
     payType: '',
     status: '',
+    flags: '',
     notes: '',
     scheduledStart: '',
     ...overrides,
@@ -112,5 +113,45 @@ describe('buildPayrollWorkbookBlob', () => {
     const total = sheet!.getRow(3).values as Array<string | number | undefined>;
     expect(total[rtCol] ?? '').toBe('');
     expect(total[otCol] ?? '').toBe('');
+  });
+
+  it('includes review flags and highlights flagged detail rows', async () => {
+    const employee: PayrollEmployeeExport = {
+      name: 'Test Mechanic',
+      number: '1234',
+      dayHours: [780, 0, 0, 0, 0, 0, 0],
+      noLunchDays: [],
+      weekHours: 780,
+      reviewFlags: '1 active, 1 over 12h',
+      rows: [
+        row({
+          workDate: '2026-03-09',
+          punchIn: '3/9/2026 5:00 AM',
+          punchOut: '',
+          hours: 13,
+          scheduledStart: '07:00',
+          asset: 'PT318',
+          status: 'Active',
+          flags: 'Active — no clock-out; Shift over 12 hours',
+        }),
+      ],
+    };
+    const blob = await buildPayrollWorkbookBlob({
+      weekStart: new Date(2026, 2, 8),
+      weekEnd: new Date(2026, 2, 14),
+      employees: [employee],
+    });
+    const ExcelJS = (await import('exceljs')).default;
+    const workbook = new ExcelJS.Workbook();
+    await workbook.xlsx.load(await blob.arrayBuffer());
+    const summary = workbook.getWorksheet('Summary');
+    expect(summary?.getRow(4).getCell(12).value).toBe('1 active, 1 over 12h');
+    const sheet = workbook.worksheets.find((candidate) => candidate.name !== 'Summary');
+    const headers = (sheet!.getRow(1).values as Array<string | undefined>).map((value) => value ?? '');
+    expect(headers).toContain('Flags');
+    const flagsCol = headers.indexOf('Flags');
+    const data = sheet!.getRow(2).values as Array<string | number | undefined>;
+    expect(data[flagsCol]).toContain('Active');
+    expect(sheet!.getRow(2).getCell(flagsCol).fill).toMatchObject({ type: 'pattern' });
   });
 });

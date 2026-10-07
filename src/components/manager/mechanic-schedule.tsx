@@ -1,6 +1,6 @@
 import { useMemo, useState, type DragEvent } from 'react';
 import { eachDayOfInterval, format, startOfDay } from 'date-fns';
-import { CalendarIcon, CalendarRange, ChevronDown, Copy, GripVertical, Phone, Truck, Wrench, X } from 'lucide-react';
+import { CalendarIcon, CalendarRange, ChevronDown, Copy, GripVertical, Phone, Shield, Truck, Wrench, X } from 'lucide-react';
 import type { DateRange } from 'react-day-picker';
 import { toast } from '@/lib/toast';
 
@@ -13,7 +13,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { useScheduleList, useSetRoadMechanic, useUpsertSchedule, type MechanicScheduleRow } from '@/hooks/use-shop-data';
+import { useScheduleList, useSetEmployeeMechanicType, useUpsertSchedule, type MechanicScheduleRow } from '@/hooks/use-shop-data';
 import type { AppShopEmployee } from '@/lib/shop-employees';
 import type { ShopTimeEntry } from '@/models/shop-time-entry';
 import { getPtoHours, isPtoEntry } from '@/lib/time-rules';
@@ -22,7 +22,9 @@ import { ShopTimeEntryPTOTypeKeyToLabel } from '@/models/shop-time-entry';
 
 const DEFAULT_START = '07:00';
 
-type MechanicColumn = 'shop' | 'road';
+type MechanicColumn = 'shop' | 'road' | 'admin';
+
+const COLUMN_ORDER: MechanicColumn[] = ['shop', 'road', 'admin'];
 
 const COLUMNS: Record<MechanicColumn, { title: string; icon: typeof Wrench; blurb: string; empty: string }> = {
   shop: {
@@ -37,7 +39,53 @@ const COLUMNS: Record<MechanicColumn, { title: string; icon: typeof Wrench; blur
     blurb: 'No scheduled start — the day begins at clock-in.',
     empty: 'No road mechanics. Drag someone here to pay them from their clock-in.',
   },
+  admin: {
+    title: 'Admin',
+    icon: Shield,
+    blurb: 'No scheduled start — clock-in/out only on Division 200 · Job 112.',
+    empty: 'No admin staff. Drag someone here for admin timecard rules.',
+  },
 };
+
+const OTHER_COLUMNS: Record<MechanicColumn, MechanicColumn[]> = {
+  shop: ['road', 'admin'],
+  road: ['shop', 'admin'],
+  admin: ['shop', 'road'],
+};
+
+function columnFlags(column: MechanicColumn): Pick<AppShopEmployee, 'isRoadMech' | 'isAdmin'> {
+  switch (column) {
+    case 'shop':
+      return { isRoadMech: false, isAdmin: false };
+    case 'road':
+      return { isRoadMech: true, isAdmin: false };
+    case 'admin':
+      return { isRoadMech: false, isAdmin: true };
+  }
+}
+
+const COLUMN_SHORT_LABEL: Record<MechanicColumn, string> = {
+  shop: 'Shop',
+  road: 'Road',
+  admin: 'Admin',
+};
+
+function scheduleCaption(emp: Pick<AppShopEmployee, 'isRoadMech' | 'isAdmin'>, startTime: string): string {
+  if (emp.isAdmin) return 'Admin — starts at clock-in';
+  if (emp.isRoadMech) return 'Starts at clock-in';
+  return `Start ${startTime}`;
+}
+
+function moveSuccessMessage(emp: AppShopEmployee, target: MechanicColumn, startTime: string): string {
+  switch (target) {
+    case 'admin':
+      return `${emp.employeeName} is now admin — paid from clock-in on Division 200 · Job 112.`;
+    case 'road':
+      return `${emp.employeeName} is now a road mechanic — paid from clock-in.`;
+    case 'shop':
+      return `${emp.employeeName} is now a shop mechanic — scheduled start ${startTime}.`;
+  }
+}
 
 type MechanicScheduleProps = {
   employees: AppShopEmployee[];
@@ -177,7 +225,7 @@ export function MechanicSchedule({ employees, timeEntries }: MechanicSchedulePro
   const queryTo = rangeViewRange?.to ? format(rangeViewRange.to, "yyyy-MM-dd'T'23:59:59'Z'") : `${dayKey}T23:59:59Z`;
   const { data: schedules = [], isLoading: schedulesLoading, error: schedulesError } = useScheduleList(queryFrom, queryTo);
   const upsertSchedule = useUpsertSchedule();
-  const setRoadMechanic = useSetRoadMechanic();
+  const setEmployeeMechanicType = useSetEmployeeMechanicType();
 
   const scheduleMap = useMemo(() => {
     const map = new Map<string, MechanicScheduleRow>();
@@ -207,8 +255,9 @@ export function MechanicSchedule({ employees, timeEntries }: MechanicSchedulePro
 
   const byColumn = useMemo(
     () => ({
-      shop: sortedEmployees.filter((emp) => !emp.isRoadMech),
-      road: sortedEmployees.filter((emp) => emp.isRoadMech),
+      shop: sortedEmployees.filter((emp) => !emp.isRoadMech && !emp.isAdmin),
+      road: sortedEmployees.filter((emp) => emp.isRoadMech && !emp.isAdmin),
+      admin: sortedEmployees.filter((emp) => emp.isAdmin),
     }),
     [sortedEmployees],
   );
@@ -280,17 +329,12 @@ export function MechanicSchedule({ employees, timeEntries }: MechanicSchedulePro
   };
 
   const handleMoveColumn = (emp: AppShopEmployee, target: MechanicColumn) => {
-    const isRoadMech = target === 'road';
-    if (emp.isRoadMech === isRoadMech) return;
-    setRoadMechanic.mutate(
-      { id: emp.id, isRoadMech },
+    const flags = columnFlags(target);
+    if (emp.isRoadMech === flags.isRoadMech && emp.isAdmin === flags.isAdmin) return;
+    setEmployeeMechanicType.mutate(
+      { id: emp.id, ...flags },
       {
-        onSuccess: () =>
-          toast.success(
-            isRoadMech
-              ? `${emp.employeeName} is now a road mechanic — paid from clock-in.`
-              : `${emp.employeeName} is now a shop mechanic — scheduled start ${getStart(emp.id, dayKey)}.`,
-          ),
+        onSuccess: () => toast.success(moveSuccessMessage(emp, target, getStart(emp.id, dayKey))),
       },
     );
   };
@@ -321,9 +365,11 @@ export function MechanicSchedule({ employees, timeEntries }: MechanicSchedulePro
               </CardTitle>
               <p className="mt-1 text-sm text-muted-foreground">
                 Employee {rangeEmployee?.employeeCode} &middot;{' '}
-                {rangeEmployee?.isRoadMech
-                  ? 'Road mechanic — set on-call for a date range.'
-                  : 'Set start times and on-call for a date range.'}
+                {rangeEmployee?.isAdmin
+                  ? 'Admin — set on-call for a date range.'
+                  : rangeEmployee?.isRoadMech
+                    ? 'Road mechanic — set on-call for a date range.'
+                    : 'Set start times and on-call for a date range.'}
               </p>
             </div>
             <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
@@ -341,7 +387,7 @@ export function MechanicSchedule({ employees, timeEntries }: MechanicSchedulePro
                   {sortedEmployees.map((emp) => (
                     <SelectItem key={emp.id} value={emp.id}>
                       {emp.employeeName}
-                      {emp.isRoadMech ? ' (Road)' : ''}
+                      {emp.isAdmin ? ' (Admin)' : emp.isRoadMech ? ' (Road)' : ''}
                     </SelectItem>
                   ))}
                 </SelectContent>
@@ -415,7 +461,7 @@ export function MechanicSchedule({ employees, timeEntries }: MechanicSchedulePro
                       <div>
                         <p className="font-semibold text-sm">{format(day, 'EEEE, MMM d')}</p>
                         <p className="text-xs text-muted-foreground">
-                          {rangeEmployee?.isRoadMech ? 'Starts at clock-in' : `Start ${startTime}`}
+                          {rangeEmployee ? scheduleCaption(rangeEmployee, startTime) : `Start ${startTime}`}
                         </p>
                       </div>
                       <div className="flex items-center gap-2">
@@ -442,7 +488,7 @@ export function MechanicSchedule({ employees, timeEntries }: MechanicSchedulePro
                         startTime={startTime}
                         onCall={onCall}
                         showApplyAll={showApplyAll}
-                        showScheduledStart={!rangeEmployee?.isRoadMech}
+                        showScheduledStart={!rangeEmployee?.isRoadMech && !rangeEmployee?.isAdmin}
                         onSave={handleSave}
                         onApplyAll={handleApplyAllDays}
                       />
@@ -503,10 +549,10 @@ export function MechanicSchedule({ employees, timeEntries }: MechanicSchedulePro
             {schedulesError instanceof Error ? ` (${schedulesError.message})` : null}
           </p>
         ) : null}
-        <div className="grid grid-cols-2 gap-4">
-          {(['shop', 'road'] as MechanicColumn[]).map((column) => {
+        <div className="grid grid-cols-1 gap-4 xl:grid-cols-3">
+          {COLUMN_ORDER.map((column) => {
             const { title, icon: ColumnIcon, blurb, empty } = COLUMNS[column];
-            const isRoad = column === 'road';
+            const showScheduledStart = column === 'shop';
             const list = byColumn[column];
 
             return (
@@ -561,7 +607,7 @@ export function MechanicSchedule({ employees, timeEntries }: MechanicSchedulePro
                               <div className="min-w-0">
                                 <p className="truncate font-semibold">{emp.employeeName}</p>
                                 <p className="text-sm text-muted-foreground">
-                                  Employee {emp.employeeCode} &middot; {isRoad ? 'Starts at clock-in' : `Start ${startTime}`}
+                                  Employee {emp.employeeCode} &middot; {scheduleCaption(emp, startTime)}
                                 </p>
                               </div>
                             </div>
@@ -589,22 +635,26 @@ export function MechanicSchedule({ employees, timeEntries }: MechanicSchedulePro
                               startTime={startTime}
                               onCall={onCall}
                               showApplyAll={showApplyAll}
-                              showScheduledStart={!isRoad}
+                              showScheduledStart={showScheduledStart}
                               onSave={handleSave}
                               onApplyAll={handleApplyAllDays}
                             />
                             <div className="flex flex-wrap gap-2">
-                              {/* Dragging is the quick path; this button is what makes the
-                                  move reachable by keyboard and reliable on a tablet. */}
-                              <Button
-                                type="button"
-                                variant="outline"
-                                size="sm"
-                                onClick={() => handleMoveColumn(emp, isRoad ? 'shop' : 'road')}
-                              >
-                                {isRoad ? <Wrench className="mr-2 h-4 w-4" /> : <Truck className="mr-2 h-4 w-4" />}
-                                Move to {isRoad ? 'Shop' : 'Road'}
-                              </Button>
+                              {OTHER_COLUMNS[column].map((target) => {
+                                const TargetIcon = COLUMNS[target].icon;
+                                return (
+                                  <Button
+                                    key={target}
+                                    type="button"
+                                    variant="outline"
+                                    size="sm"
+                                    onClick={() => handleMoveColumn(emp, target)}
+                                  >
+                                    <TargetIcon className="mr-2 h-4 w-4" />
+                                    Move to {COLUMN_SHORT_LABEL[target]}
+                                  </Button>
+                                );
+                              })}
                               <Button
                                 type="button"
                                 variant="outline"

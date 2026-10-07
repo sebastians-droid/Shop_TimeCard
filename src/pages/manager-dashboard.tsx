@@ -79,6 +79,8 @@ import {
   getWeekRange,
   formatWeekRangeLabel,
   scheduledStartCaption,
+  jobEntriesForDisplay,
+  dayClockCaption,
 } from '@/lib/entry-helpers';
 import {
   ShopTimeEntryPayTypeKeyToLabel,
@@ -594,19 +596,19 @@ export default function ManagerDashboardPage() {
       {managerView === 'timecards' && !rangeViewEmployeeId ? (
         <Card className="bg-card text-card-foreground shadow-sm">
           <CardHeader>
-            <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
-              <div>
+            <div className="flex flex-col gap-4 xl:flex-row xl:items-start xl:justify-between">
+              <div className="min-w-0 shrink-0">
                 <CardTitle className="flex items-center gap-2 text-xl">
                   <Users className="h-5 w-5" /> Employee timecards
                 </CardTitle>
                 <p className="mt-1 text-sm text-muted-foreground">{format(selectedDate, 'EEEE, MMM d')}</p>
               </div>
-              <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+              <div className="grid w-full min-w-0 gap-2 grid-cols-1 sm:grid-cols-2 xl:grid-cols-[minmax(0,10.5rem)_minmax(0,6.5rem)_minmax(12rem,1fr)_auto_auto] xl:items-center xl:max-w-4xl xl:justify-end">
                 <Popover>
                   <PopoverTrigger asChild>
-                    <Button type="button" variant="outline" className="justify-start bg-background sm:w-56">
-                      <CalendarIcon className="mr-2 h-4 w-4" />
-                      {format(selectedDate, 'MMM d, yyyy')}
+                    <Button type="button" variant="outline" className="h-9 w-full justify-start bg-background">
+                      <CalendarIcon className="mr-2 h-4 w-4 shrink-0" />
+                      <span className="truncate">{format(selectedDate, 'MMM d, yyyy')}</span>
                     </Button>
                   </PopoverTrigger>
                   <PopoverContent className="w-auto p-0" align="end">
@@ -626,23 +628,23 @@ export default function ManagerDashboardPage() {
                     />
                   </PopoverContent>
                 </Popover>
-                <Button type="button" variant="secondary" onClick={() => setManagerView('map')} className="w-full sm:w-auto">
-                  <MapIcon className="mr-2 h-4 w-4" /> See Map
+                <Button type="button" variant="secondary" onClick={() => setManagerView('map')} className="h-9 w-full whitespace-nowrap">
+                  <MapIcon className="mr-2 h-4 w-4 shrink-0" /> See Map
                 </Button>
-                <div className="relative w-full sm:w-72">
-                  <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2" />
+                <div className="relative min-w-0 sm:col-span-2 xl:col-span-1">
+                  <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
                   <Input
                     value={search}
                     onChange={(event: React.ChangeEvent<HTMLInputElement>) => setSearch(event.target.value)}
-                    className="pl-9"
+                    className="h-9 pl-9"
                     placeholder="Search employee"
                   />
                 </div>
-                <Button type="button" variant="secondary" onClick={handleStartMissedEntry} className="w-full sm:w-auto">
-                  <Plus className="mr-2 h-4 w-4" /> Add missed entry
+                <Button type="button" variant="secondary" onClick={handleStartMissedEntry} className="h-9 w-full whitespace-nowrap">
+                  <Plus className="mr-2 h-4 w-4 shrink-0" /> Add missed entry
                 </Button>
-                <Button type="button" variant="secondary" onClick={() => handleStartAddPto()} className="w-full sm:w-auto">
-                  <Plus className="mr-2 h-4 w-4" /> Add PTO
+                <Button type="button" variant="secondary" onClick={() => handleStartAddPto()} className="h-9 w-full whitespace-nowrap">
+                  <Plus className="mr-2 h-4 w-4 shrink-0" /> Add PTO
                 </Button>
               </div>
             </div>
@@ -913,6 +915,8 @@ export default function ManagerDashboardPage() {
             ) : null}
             {employeeSummaries.map((summary: EmployeeDailySummary) => {
               const isOpen = openEmployeeKeys.includes(summary.employeeKey);
+              const displayEntries = jobEntriesForDisplay(summary.entries);
+              const dayClockLabel = dayClockCaption(summary.entries);
               return (
                 <Collapsible key={summary.employeeKey} open={isOpen} onOpenChange={() => handleToggleEmployee(summary.employeeKey)} asChild>
                   <section className="rounded-lg border border-border bg-background">
@@ -924,8 +928,9 @@ export default function ManagerDashboardPage() {
                         <div>
                           <h2 className="text-lg font-semibold">{summary.employeeName}</h2>
                           <p className="text-sm text-muted-foreground">
-                            Employee {summary.employeeNumber} · {summary.scheduledStartLabel} · {summary.entries.length} entries ·{' '}
-                            {formatDuration(summary.totalMinutes)}
+                            Employee {summary.employeeNumber} · {summary.scheduledStartLabel}
+                            {dayClockLabel ? ` · ${dayClockLabel}` : ''} · {displayEntries.length}{' '}
+                            {displayEntries.length === 1 ? 'entry' : 'entries'} · {formatDuration(summary.totalMinutes)}
                             {summary.noLunch ? ' · No lunch' : summary.lunchDeducted ? ' · Lunch 0.5h' : ''}
                           </p>
                         </div>
@@ -965,7 +970,7 @@ export default function ManagerDashboardPage() {
                     </div>
                     <CollapsibleContent>
                       <div className="space-y-3 border-t border-border p-4">
-                        {summary.entries.map((entry: ShopTimeEntry) => {
+                        {displayEntries.map((entry: ShopTimeEntry) => {
                           const isEditing = editingEntryId === entry.id;
                           return (
                             <div key={entry.id} className="rounded-lg border border-border bg-card p-4 text-card-foreground">
@@ -1335,6 +1340,7 @@ export default function ManagerDashboardPage() {
                     {employees.map((emp: AppShopEmployee) => (
                       <SelectItem key={emp.id} value={emp.id}>
                         {emp.employeeName}
+                        {emp.isAdmin ? ' (Admin)' : emp.isRoadMech ? ' (Road)' : ''}
                       </SelectItem>
                     ))}
                   </SelectContent>
@@ -1401,7 +1407,10 @@ export default function ManagerDashboardPage() {
                 noLunch: dayNoLunch,
                 onCall: dayOnCall,
                 scheduledStartLabel,
-              }) => (
+              }) => {
+                const displayDayEntries = jobEntriesForDisplay(dayEntries);
+                const dayClockLabel = dayClockCaption(dayEntries);
+                return (
                 <Collapsible
                   key={dayKey}
                   open={rangeOpenDay === dayKey}
@@ -1414,14 +1423,15 @@ export default function ManagerDashboardPage() {
                         <div>
                           <p className="font-semibold text-sm">{format(day, 'EEEE, MMM d')}</p>
                           <p className="text-xs text-muted-foreground">
-                            {scheduledStartLabel} · {dayEntries.length} {dayEntries.length === 1 ? 'entry' : 'entries'} ·{' '}
-                            {formatDuration(dayMinutes)}
+                            {scheduledStartLabel}
+                            {dayClockLabel ? ` · ${dayClockLabel}` : ''} · {displayDayEntries.length}{' '}
+                            {displayDayEntries.length === 1 ? 'entry' : 'entries'} · {formatDuration(dayMinutes)}
                             {dayNoLunch ? ' · No lunch' : ''}
                           </p>
                         </div>
                         <div className="flex items-center gap-2">
-                          {dayEntries.length === 0 ? (
-                            <Badge variant="outline">No entries</Badge>
+                          {displayDayEntries.length === 0 ? (
+                            <Badge variant="outline">{dayClockLabel ? 'Clocked in' : 'No entries'}</Badge>
                           ) : (
                             <Badge variant="secondary">{formatDuration(dayMinutes)}</Badge>
                           )}
@@ -1445,8 +1455,12 @@ export default function ManagerDashboardPage() {
                         />
                       </div>
                       <div className="space-y-2 border-t border-border p-3">
-                        {dayEntries.length === 0 ? <p className="text-sm text-muted-foreground">No entries for this day.</p> : null}
-                        {dayEntries.map((entry: ShopTimeEntry) => {
+                        {displayDayEntries.length === 0 ? (
+                          <p className="text-sm text-muted-foreground">
+                            {dayClockLabel ? `${dayClockLabel}.` : 'No entries for this day.'}
+                          </p>
+                        ) : null}
+                        {displayDayEntries.map((entry: ShopTimeEntry) => {
                           const isRangeEditing = editingEntryId === entry.id;
                           return (
                             <div key={entry.id} className="rounded-lg border border-border bg-card p-3 text-card-foreground">
@@ -1836,8 +1850,8 @@ export default function ManagerDashboardPage() {
                     </CollapsibleContent>
                   </section>
                 </Collapsible>
-              ),
-            )}
+              );
+            })}
 
             {rangeViewRange?.from && rangeViewRange?.to && rangeViewDays.every((d) => d.entries.length === 0) ? (
               <p className="rounded-lg bg-muted p-4 text-sm text-muted-foreground">

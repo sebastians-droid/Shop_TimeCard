@@ -3,6 +3,7 @@ import { format, startOfDay, startOfWeek, endOfWeek } from 'date-fns';
 import type { EquipmentAsset } from '@/models/equipment-asset';
 import type { ShopTimeEntry, ShopTimeEntryPTOTimeKey } from '@/models/shop-time-entry';
 import { formatEmployeeDisplayName, type AppShopEmployee } from '@/lib/shop-employees';
+import { dayFirstClockIn, dayLastClockOut } from '@/lib/day-session';
 import { DEFAULT_SCHEDULED_START, isAwaitingAsset, isPtoEntry, stripNoLunchMarker } from '@/lib/time-rules';
 
 export type PtoHours = 4 | 8;
@@ -20,6 +21,34 @@ export const getAssetDisplayName = (asset?: EquipmentAsset | Pick<EquipmentAsset
  * returning nothing: linked asset, then the name saved on the entry label, then
  * the job number or division. It always returns a non-empty string.
  */
+/** Job rows shown in manager views — excludes the arrival-only waiting punch. */
+export function jobEntriesForDisplay(entries: ShopTimeEntry[]): ShopTimeEntry[] {
+  return entries.filter((entry) => !isAwaitingAsset(entry));
+}
+
+/** Payroll export rows: job entries plus any open day punch still waiting for a job. */
+export function entriesForPayrollExport(entries: ShopTimeEntry[]): ShopTimeEntry[] {
+  const jobs = jobEntriesForDisplay(entries);
+  const jobIds = new Set(jobs.map((entry) => entry.id));
+  const openAwaiting = entries.filter((entry) => isAwaitingAsset(entry) && !entry.clockOut && !jobIds.has(entry.id));
+  return [...jobs, ...openAwaiting].sort(
+    (entryA, entryB) => new Date(entryA.clockIn ?? 0).getTime() - new Date(entryB.clockIn ?? 0).getTime(),
+  );
+}
+
+export const PAYROLL_AWAITING_LABEL = 'Clocked in — no job started';
+
+export function dayClockCaption(entries: ShopTimeEntry[]): string {
+  const firstIn = dayFirstClockIn(entries);
+  if (!firstIn) return '';
+  const lastOut = dayLastClockOut(entries);
+  const stillIn = entries.some((entry) => !isPtoEntry(entry) && !entry.clockOut);
+  const inLabel = format(new Date(firstIn), 'p');
+  if (lastOut) return `Day clock-in ${inLabel} · Day clock-out ${format(new Date(lastOut), 'p')}`;
+  if (stillIn) return `Day clock-in ${inLabel} · still clocked in`;
+  return `Day clock-in ${inLabel}`;
+}
+
 export function getEntryAssetName(entry: ShopTimeEntry, assets: EquipmentAsset[]): string {
   if (isPtoEntry(entry)) return 'PTO';
   if (isAwaitingAsset(entry)) return 'Waiting';
@@ -126,6 +155,7 @@ export const formatScheduledStartTime = (time: string) => {
 };
 
 export const scheduledStartCaption = (employee: { isRoadMech?: boolean; isAdmin?: boolean } | null | undefined, storedStart?: string) => {
+  if (employee?.isAdmin) return 'Admin — starts at clock-in';
   if (employee?.isRoadMech) return 'Starts at clock-in';
   return `Scheduled start ${formatScheduledStartTime(storedStart || DEFAULT_SCHEDULED_START)}`;
 };
