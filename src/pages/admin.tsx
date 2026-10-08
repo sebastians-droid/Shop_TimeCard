@@ -676,7 +676,20 @@ type Tab = 'assets' | 'employees';
 
 export default function AdminPage() {
   const [tab, setTab] = useState<Tab>('assets');
-  const { data: user, isLoading: userLoading } = useUser();
+  const { data: user, isLoading: userLoading, isError: userFailed, error: userError } = useUser();
+
+  if (userFailed) {
+    return (
+      <AccessCheckingCard
+        title="Microsoft 365 sign-in failed"
+        message={
+          userError instanceof Error
+            ? userError.message
+            : 'Refresh the page and sign in with Microsoft 365 again.'
+        }
+      />
+    );
+  }
 
   if (userLoading || !user) {
     return <AccessCheckingCard message="Loading your Microsoft 365 identity." />;

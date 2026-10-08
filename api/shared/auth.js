@@ -1,4 +1,5 @@
 const { loadConfig, findShopEmployeeBySignInEmail, getTimeEntryPunch, listEmployeeTimeEntries } = require('./dataverse');
+const { collectSignInEmails, firstAllowlistedEmail } = require('./sign-in-identity');
 
 const PUNCH_DENIED_MESSAGE =
   'Clock in and clock out happen at the shop kiosk. Once you are clocked in, you can add jobs from any device.';
@@ -27,6 +28,29 @@ function headerGet(request, name) {
   return request.headers[name] || request.headers[name.toLowerCase()] || '';
 }
 
+function claimValue(principal, ...types) {
+  const wanted = new Set(types);
+  for (const claim of principal?.claims || []) {
+    const type = claim.typ || claim.type || '';
+    if (!wanted.has(type)) continue;
+    const value = claim.val ?? claim.value;
+    if (typeof value === 'string' && value.trim()) return value.trim();
+  }
+  return '';
+}
+
+function identityFromEmails(emails, cfg, { userId = '', name = '' } = {}) {
+  const allowlisted = firstAllowlistedEmail(emails, cfg.managerEmails);
+  const email = allowlisted || emails[0] || '';
+  return {
+    userId,
+    email,
+    emails,
+    name: name || email,
+    isManager: Boolean(allowlisted),
+  };
+}
+
 function getUser(request) {
   const principal = decodePrincipal(headerGet(request, 'x-ms-client-principal') || headerGet(request, 'X-MS-CLIENT-PRINCIPAL'));
   const cfg = loadConfig();
@@ -34,40 +58,35 @@ function getUser(request) {
   const skipAuth = process.env.DATAVERSE_LOCAL_SKIP_AUTH === '1' || !isProduction;
 
   if (!principal) {
-    const headerEmail = (headerGet(request, 'x-ms-client-principal-name') || request.user?.username || '').toLowerCase();
-    if (headerEmail) {
-      return {
+    const headerEmail = headerGet(request, 'x-ms-client-principal-name') || request.user?.username || '';
+    const emails = collectSignInEmails(null, headerEmail);
+    if (emails.length > 0 || headerEmail.trim()) {
+      const identity = identityFromEmails(emails, cfg, {
         userId: headerGet(request, 'x-ms-client-principal-id') || request.user?.id || '',
-        email: headerEmail,
-        name: headerEmail,
-        isManager: cfg.managerEmails.includes(headerEmail),
-      };
+      });
+      if (!identity.email && headerEmail.trim()) {
+        identity.email = headerEmail.trim();
+        identity.name = headerEmail.trim();
+      }
+      return identity;
     }
     if (!skipAuth) return null;
     const email = (process.env.DEV_USER_EMAIL || cfg.managerEmails[0] || 'local-dev@swankco.com').toLowerCase();
     return {
       userId: 'local-dev',
       email,
+      emails: [email],
       name: process.env.DEV_USER_NAME || 'Local developer',
       isManager: cfg.managerEmails.length === 0 || cfg.managerEmails.includes(email),
     };
   }
 
-  const claims = Object.fromEntries((principal.claims || []).map((claim) => [claim.typ || claim.type, claim.val || claim.value]));
-  const email = (
-    principal.userDetails ||
-    claims['http://schemas.xmlsoap.org/ws/2005/05/identity/claims/emailaddress'] ||
-    claims.preferred_username ||
-    ''
-  ).toLowerCase();
-  const name = claims.name || claims['http://schemas.xmlsoap.org/ws/2005/05/identity/claims/name'] || email;
+  const emails = collectSignInEmails(principal);
+  const name =
+    claimValue(principal, 'name', 'http://schemas.xmlsoap.org/ws/2005/05/identity/claims/name') ||
+    (principal.userDetails && !principal.userDetails.includes('@') ? principal.userDetails : '');
 
-  return {
-    userId: principal.userId || '',
-    email,
-    name,
-    isManager: cfg.managerEmails.includes(email),
-  };
+  return identityFromEmails(emails, cfg, { userId: principal.userId || '', name });
 }
 
 function recordTouchesPunch(record) {
@@ -80,19 +99,22 @@ async function resolveAppUser(request) {
   if (!base) return null;
 
   const cfg = loadConfig();
-  const email = base.email.toLowerCase();
+  const emails = base.emails?.length ? base.emails : base.email ? [base.email.toLowerCase()] : [];
   const isProduction = process.env.AZURE_FUNCTIONS_ENVIRONMENT === 'Production' || Boolean(process.env.WEBSITE_SITE_NAME);
   const skipAuth = process.env.DATAVERSE_LOCAL_SKIP_AUTH === '1' || !isProduction;
   // Local demo has no kiosk account configured yet — keep the employee-code
   // punch flow working until KIOSK_EMAILS is set.
-  const isKioskAccount = cfg.kioskEmails.includes(email) || (skipAuth && cfg.kioskEmails.length === 0);
+  const isKioskAccount = emails.some((email) => cfg.kioskEmails.includes(email)) || (skipAuth && cfg.kioskEmails.length === 0);
   let shopEmployee = null;
 
   if (!isKioskAccount) {
-    try {
-      shopEmployee = await findShopEmployeeBySignInEmail(email);
-    } catch {
-      shopEmployee = null;
+    for (const email of emails) {
+      try {
+        shopEmployee = await findShopEmployeeBySignInEmail(email);
+      } catch {
+        shopEmployee = null;
+      }
+      if (shopEmployee) break;
     }
   }
 
@@ -104,8 +126,11 @@ async function resolveAppUser(request) {
   // on phone with no kiosk code and no idle sign-out; punch stays at the kiosk.
   const linkedPersonalLogin = Boolean(shopEmployee?.id && !isKioskAccount);
 
+  const publicUser = { ...base };
+  delete publicUser.emails;
+
   return {
-    ...base,
+    ...publicUser,
     isKioskAccount,
     requiresEmployeeCode,
     canPunch,

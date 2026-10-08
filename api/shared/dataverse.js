@@ -1,5 +1,6 @@
 const fs = require('node:fs');
 const path = require('node:path');
+const { parseEmailList } = require('./sign-in-identity');
 
 const PTO_TIME_TO_VALUE = {
   PTOTimeKey04: 290180000,
@@ -81,15 +82,23 @@ function loadConfig() {
   // Deployed with the repo — Azure/local env vars may override. dataverse.local.json is gitignored and not read on Azure.
   const defaultKioskEmails = 'shoptimecard@swankco.com,shopkiosk@swankco.com,mechanicshop@swankco.com';
 
-  const managerEmails = (cleanEnv('MANAGER_EMAILS') || fileCfg.manager_emails || defaultManagerEmails)
-    .split(',')
-    .map((email) => email.trim().toLowerCase())
-    .filter(Boolean);
+  // Union, not replace: a partial MANAGER_EMAILS setting used to drop everyone
+  // who was only in the built-in list, so some managers signed in and were denied.
+  const managerEmails = [
+    ...new Set([
+      ...parseEmailList(defaultManagerEmails),
+      ...parseEmailList(cleanEnv('MANAGER_EMAILS')),
+      ...parseEmailList(fileCfg.manager_emails),
+    ]),
+  ];
 
-  const kioskEmails = (cleanEnv('KIOSK_EMAILS') || fileCfg.kiosk_emails || defaultKioskEmails)
-    .split(',')
-    .map((email) => email.trim().toLowerCase())
-    .filter(Boolean);
+  const kioskEmails = [
+    ...new Set([
+      ...parseEmailList(defaultKioskEmails),
+      ...parseEmailList(cleanEnv('KIOSK_EMAILS')),
+      ...parseEmailList(fileCfg.kiosk_emails),
+    ]),
+  ];
 
   cachedConfig = {
     orgUrl,
@@ -619,7 +628,6 @@ async function closeOpenPunches(employeeId, { clockOut, lat, lon, ip, entries = 
   }
 
   open.sort((entryA, entryB) => new Date(entryA.clockIn).getTime() - new Date(entryB.clockIn).getTime());
-  const now = Date.now();
   const due = open.filter((entry) => autoClockOutDue(entry, now));
   const live = open.filter((entry) => !autoClockOutDue(entry, now));
   const at = clockOut && Number.isFinite(new Date(clockOut).getTime()) ? clockOut : new Date().toISOString();

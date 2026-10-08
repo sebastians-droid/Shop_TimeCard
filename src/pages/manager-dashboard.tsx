@@ -129,7 +129,7 @@ export default function ManagerDashboardPage() {
   const [rangeOpenDay, setRangeOpenDay] = useState('');
   const [rangeAddingForDay, setRangeAddingForDay] = useState('');
   const [rangePtoForDay, setRangePtoForDay] = useState('');
-  const { data: user, isLoading: userLoading } = useUser();
+  const { data: user, isLoading: userLoading, isError: userFailed, error: userError } = useUser();
   const { data: shopEmployees = [], isLoading: employeesLoading } = useShopEmployeeList();
   const employees = useMemo(() => mapShopEmployees(shopEmployees), [shopEmployees]);
   const { data: assets = [], isLoading: assetsLoading, refetch: refetchAssets } = useAllEquipmentAssets();
@@ -500,6 +500,19 @@ export default function ManagerDashboardPage() {
       updatingKey: `${rangeViewEmployeeId}-${dayKey}`,
       employeeName: rangeViewEmployee?.employeeName ?? 'employee',
     });
+
+  if (userFailed) {
+    return (
+      <AccessCheckingCard
+        title="Microsoft 365 sign-in failed"
+        message={
+          userError instanceof Error
+            ? userError.message
+            : 'Refresh the page and sign in with Microsoft 365 again.'
+        }
+      />
+    );
+  }
 
   if (userLoading || !user) {
     return (
