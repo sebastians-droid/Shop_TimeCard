@@ -63,11 +63,13 @@ import {
   getPtoHours,
   getRawDurationMinutes,
   isPtoEntry,
+  notesHaveAutoClockOut,
   scheduledStartFor,
   stripNoLunchMarker,
 } from '@/lib/time-rules';
 import {
-  getEntryAssetName,
+  managerEntryTitle,
+  entriesForManagerDisplay,
   getEntryJobNumber,
   getEntryEmployeeKey,
   getEntryEmployeeName,
@@ -79,7 +81,6 @@ import {
   getWeekRange,
   formatWeekRangeLabel,
   scheduledStartCaption,
-  jobEntriesForDisplay,
   dayClockCaption,
 } from '@/lib/entry-helpers';
 import {
@@ -915,7 +916,8 @@ export default function ManagerDashboardPage() {
             ) : null}
             {employeeSummaries.map((summary: EmployeeDailySummary) => {
               const isOpen = openEmployeeKeys.includes(summary.employeeKey);
-              const displayEntries = jobEntriesForDisplay(summary.entries);
+              const displayEntries = entriesForManagerDisplay(summary.entries);
+              const needsReview = summary.entries.some((entry: ShopTimeEntry) => notesHaveAutoClockOut(entry.notes));
               const dayClockLabel = dayClockCaption(summary.entries);
               return (
                 <Collapsible key={summary.employeeKey} open={isOpen} onOpenChange={() => handleToggleEmployee(summary.employeeKey)} asChild>
@@ -938,6 +940,7 @@ export default function ManagerDashboardPage() {
                           <Badge variant={summary.activeCount > 0 ? 'default' : 'outline'}>
                             {summary.activeCount > 0 ? 'Active now' : 'Complete'}
                           </Badge>
+                          {needsReview ? <Badge variant="secondary">Needs review</Badge> : null}
                           {summary.noLunch ? <Badge variant="secondary">No lunch</Badge> : null}
                           {summary.onCall ? (
                             <Badge variant="secondary">
@@ -1054,7 +1057,7 @@ export default function ManagerDashboardPage() {
                                   ) : (
                                     <div>
                                       <div className="flex flex-wrap items-center gap-2">
-                                        <p className="text-base font-semibold">{getEntryAssetName(entry, assets)}</p>
+                                        <p className="text-base font-semibold">{managerEntryTitle(entry, assets)}</p>
                                         {entry.pTOTypeKey ? (
                                           <Badge variant="outline">{ShopTimeEntryPTOTypeKeyToLabel[entry.pTOTypeKey]}</Badge>
                                         ) : null}
@@ -1113,6 +1116,7 @@ export default function ManagerDashboardPage() {
 
                                 <div className="flex flex-wrap gap-2 lg:justify-end">
                                   <Badge variant={entry.clockOut ? 'outline' : 'default'}>{entry.clockOut ? 'Complete' : 'Active'}</Badge>
+                                  {notesHaveAutoClockOut(entry.notes) ? <Badge variant="secondary">Needs review</Badge> : null}
                                   {isEditing ? (
                                     <>
                                       <Button
@@ -1150,7 +1154,7 @@ export default function ManagerDashboardPage() {
                                         <AlertDialogTitle>Delete this time entry?</AlertDialogTitle>
                                         <AlertDialogDescription>
                                           This removes {summary.employeeName}&apos;s {format(selectedDate, 'MMM d')} time entry for{' '}
-                                          {getEntryAssetName(entry, assets)} from Dataverse and the weekly timecard export.
+                                          {managerEntryTitle(entry, assets)} from Dataverse and the weekly timecard export.
                                         </AlertDialogDescription>
                                       </AlertDialogHeader>
                                       <AlertDialogFooter>
@@ -1408,7 +1412,8 @@ export default function ManagerDashboardPage() {
                 onCall: dayOnCall,
                 scheduledStartLabel,
               }) => {
-                const displayDayEntries = jobEntriesForDisplay(dayEntries);
+                const displayDayEntries = entriesForManagerDisplay(dayEntries);
+                const dayNeedsReview = dayEntries.some((entry: ShopTimeEntry) => notesHaveAutoClockOut(entry.notes));
                 const dayClockLabel = dayClockCaption(dayEntries);
                 return (
                 <Collapsible
@@ -1435,6 +1440,7 @@ export default function ManagerDashboardPage() {
                           ) : (
                             <Badge variant="secondary">{formatDuration(dayMinutes)}</Badge>
                           )}
+                          {dayNeedsReview ? <Badge variant="secondary">Needs review</Badge> : null}
                           {dayNoLunch ? <Badge variant="secondary">No lunch</Badge> : null}
                           {dayOnCall ? (
                             <Badge variant="secondary">
@@ -1587,7 +1593,7 @@ export default function ManagerDashboardPage() {
                                 <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
                                   <div>
                                     <div className="flex flex-wrap items-center gap-2">
-                                      <p className="font-medium text-sm">{getEntryAssetName(entry, assets)}</p>
+                                      <p className="font-medium text-sm">{managerEntryTitle(entry, assets)}</p>
                                       {isPtoEntry(entry) && entry.pTOTypeKey ? (
                                         <Badge variant="outline">{ShopTimeEntryPTOTypeKeyToLabel[entry.pTOTypeKey]}</Badge>
                                       ) : null}
@@ -1617,6 +1623,7 @@ export default function ManagerDashboardPage() {
                                       </Badge>
                                     ) : null}
                                     <Badge variant={entry.clockOut ? 'outline' : 'default'}>{entry.clockOut ? 'Complete' : 'Active'}</Badge>
+                                    {notesHaveAutoClockOut(entry.notes) ? <Badge variant="secondary">Needs review</Badge> : null}
                                     <Button type="button" variant="outline" size="sm" onClick={() => handleRangeStartEdit(entry)}>
                                       <Pencil className="mr-1 h-3 w-3" /> Edit
                                     </Button>
@@ -1631,7 +1638,7 @@ export default function ManagerDashboardPage() {
                                           <AlertDialogTitle>Delete this time entry?</AlertDialogTitle>
                                           <AlertDialogDescription>
                                             This removes {rangeViewEmployee?.employeeName ?? 'this employee'}&apos;s {format(day, 'MMM d')}{' '}
-                                            time entry for {getEntryAssetName(entry, assets)} from Dataverse and the weekly timecard export.
+                                            time entry for {managerEntryTitle(entry, assets)} from Dataverse and the weekly timecard export.
                                           </AlertDialogDescription>
                                         </AlertDialogHeader>
                                         <AlertDialogFooter>

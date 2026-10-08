@@ -33,6 +33,7 @@ import {
   useAllEquipmentAssets,
   useCreateShopTimeEntry,
   useShopEmployeeList,
+  useClockOutOpenPunches,
   useShopTimeEntryList,
   useSwitchShopTimeEntryJob,
   useUpdateShopTimeEntry,
@@ -47,6 +48,7 @@ import {
   getPtoHours,
   getRawDurationMinutes,
   AWAITING_ASSET_LABEL,
+  isAutoClockOutDue,
   isAwaitingAsset,
   isPtoEntry,
   scheduledStartFor,
@@ -54,6 +56,7 @@ import {
   stripNoLunchMarker,
 } from '@/lib/time-rules';
 import {
+  dayClockCaption,
   getAssetDisplayName,
   getEntryAssetName,
   getEntryDivision,
@@ -62,7 +65,7 @@ import {
   getPtoClockInIso,
   type PtoHours,
 } from '@/lib/entry-helpers';
-import { dayFirstClockIn, dayLastClockOut } from '@/lib/day-session';
+import { openLaborEntries, openPunchStartedBeforeToday } from '@/lib/open-punches';
 import { useReloadTables } from '@/hooks/use-reload-tables';
 import { ShopTimeEntryPTOTypeKeyToLabel, type ShopTimeEntry, type ShopTimeEntryPTOTypeKey } from '@/models/shop-time-entry';
 import { getCurrentPosition } from '@/lib/geolocation';
@@ -123,6 +126,7 @@ export default function TimecardPage() {
   const createTimeEntry = useCreateShopTimeEntry();
   const updateTimeEntry = useUpdateShopTimeEntry();
   const switchJob = useSwitchShopTimeEntryJob();
+  const clockOutPunches = useClockOutOpenPunches();
 
   const selectedEmployee = employees.find((employee: AppShopEmployee) => employee.id === selectedEmployeeId);
   const adminEmployee = isAdminEmployee(selectedEmployee, user);
@@ -145,14 +149,20 @@ export default function TimecardPage() {
       return !Number.isNaN(clockIn.getTime()) && format(clockIn, 'yyyy-MM-dd') === today;
     });
   }, [employeeEntries, selectedEmployee, selectedEmployeeId]);
-  const employeeActiveEntry = employeeTodayEntries.find((entry: ShopTimeEntry) => !entry.clockOut && !isPtoEntry(entry));
+  const openEntries = useMemo(() => openLaborEntries(employeeEntries), [employeeEntries]);
+  const liveOpenEntries = useMemo(() => openEntries.filter((entry) => !isAutoClockOutDue(entry)), [openEntries]);
+  const employeeActiveEntry = liveOpenEntries.length > 0 ? liveOpenEntries[liveOpenEntries.length - 1] : undefined;
+  const oldestOpen = liveOpenEntries[0];
+  const activePunchIsStale = Boolean(employeeActiveEntry && openPunchStartedBeforeToday(employeeActiveEntry));
+  const hasStaleOpen = liveOpenEntries.some((entry) => openPunchStartedBeforeToday(entry));
+  const displayedEntries = useMemo(() => {
+    const todayIds = new Set(employeeTodayEntries.map((entry) => entry.id));
+    const earlierOpenJobs = liveOpenEntries.filter((entry) => !todayIds.has(entry.id) && !isAwaitingAsset(entry));
+    const todayJobs = employeeTodayEntries.filter((entry) => !isAwaitingAsset(entry));
+    return [...earlierOpenJobs, ...todayJobs];
+  }, [employeeTodayEntries, liveOpenEntries]);
   const awaitingFirstJob = Boolean(employeeActiveEntry && isAwaitingAsset(employeeActiveEntry));
-  const displayedTodayEntries = useMemo(
-    () => employeeTodayEntries.filter((entry: ShopTimeEntry) => !isAwaitingAsset(entry)),
-    [employeeTodayEntries],
-  );
-  const dayFirstIn = dayFirstClockIn(employeeTodayEntries);
-  const dayLastOut = dayLastClockOut(employeeTodayEntries);
+  const todayClockLabel = dayClockCaption(employeeTodayEntries);
   // Road mechanics start whenever they punch in, so their early time is paid
   // rather than being pulled forward to the default start.
   const payStart = scheduledStartFor(selectedEmployee);
@@ -244,6 +254,7 @@ export default function TimecardPage() {
       toast.error(adminEmployee ? 'You are already clocked in. Clock out to end your day.' : 'You are already clocked in. Clock out or add a job.');
       return;
     }
+    const expiredOpen = openEntries.filter((entry) => isAutoClockOutDue(entry));
     const clockIn = getNowIso();
     setIsClockingIn(true);
     try {
@@ -271,7 +282,11 @@ export default function TimecardPage() {
             },
       );
       resetEntryForm();
-      toast.success(`Clocked in at ${format(new Date(clockIn), 'p')}.`);
+      toast.success(
+        expiredOpen.length > 0
+          ? `Clocked in at ${format(new Date(clockIn), 'p')}. The earlier punch was closed after 16 hours for a manager to review.`
+          : `Clocked in at ${format(new Date(clockIn), 'p')}.`,
+      );
     } catch (error: unknown) {
       toast.error(error instanceof Error ? error.message : 'Unable to clock in.');
     } finally {
@@ -370,27 +385,42 @@ export default function TimecardPage() {
     }
   };
 
-  const handleClockOut = async (entry: ShopTimeEntry) => {
+  const handleClockOut = async () => {
+    if (!selectedEmployee || liveOpenEntries.length === 0) {
+      toast.error('No open punch to clock out.');
+      return;
+    }
     const clockOut = getNowIso();
-    const updatedEntry = { ...entry, clockOut };
-    const dayEntries = employeeTodayEntries.map((row: ShopTimeEntry) => (row.id === entry.id ? updatedEntry : row));
-    const pos = await getCurrentPosition();
+    const openIds = new Set(liveOpenEntries.map((entry) => entry.id));
+    const pos = await getCurrentPosition(2_000);
+    const entries = liveOpenEntries.map((entry) => {
+      const dayKey = format(new Date(entry.clockIn ?? clockOut), 'yyyy-MM-dd');
+      const dayEntries = employeeEntries
+        .filter((row: ShopTimeEntry) => row.clockIn && format(new Date(row.clockIn), 'yyyy-MM-dd') === dayKey && !isPtoEntry(row))
+        .map((row: ShopTimeEntry) => (openIds.has(row.id) ? { ...row, clockOut: row.clockOut ?? clockOut } : row));
+      const minutes = getEntryPaidMinutes(dayEntries, { ...entry, clockOut }, new Date(), payStart, payProfile);
+      return { id: entry.id, hours: Number.isFinite(minutes) ? minutes / 60 : undefined };
+    });
     try {
-      await updateTimeEntry.mutateAsync({
-        id: entry.id,
-        changedFields: {
-          clockOut,
-          hours: getEntryPaidMinutes(dayEntries, updatedEntry, new Date(), payStart, payProfile) / 60,
-          clockOutLat: pos?.lat,
-          clockOutLon: pos?.lon,
-        },
+      const result = await clockOutPunches.mutateAsync({
+        employeeId: selectedEmployee.id,
+        clockOut,
+        lat: pos?.lat,
+        lon: pos?.lon,
+        entries,
       });
-      const firstIn = dayFirstClockIn(dayEntries) ?? entry.clockIn;
+      const started = oldestOpen?.clockIn;
+      const closedCount = result.closed.length;
       toast.success(
-        firstIn
-          ? `Clocked out at ${format(new Date(clockOut), 'p')}. Day is ${format(new Date(firstIn), 'p')} – ${format(new Date(clockOut), 'p')}.`
+        started
+          ? `Clocked out at ${format(new Date(clockOut), 'p')}. Closed ${closedCount} open punch${closedCount === 1 ? '' : 'es'} from ${format(new Date(started), 'EEE, MMM d, p')}.`
           : `Clocked out at ${format(new Date(clockOut), 'p')}.`,
       );
+      if (result.failures.length > 0) {
+        toast.error(
+          `${result.failures.length} punch${result.failures.length === 1 ? '' : 'es'} could not be closed. ${result.failures[0]}`,
+        );
+      }
     } catch (error: unknown) {
       toast.error(error instanceof Error ? error.message : 'Unable to clock out.');
     }
@@ -535,16 +565,7 @@ export default function TimecardPage() {
                         ? `Clock in and clock out for your day. Time is recorded to Division ${ADMIN_DIVISION} · Job ${ADMIN_JOB_NUMBER}.`
                         : 'Clock in when you arrive. Add a job when work begins, and again to change equipment. After clock-out, add forgotten jobs on Mechanic Log.'}
                     </p>
-                    {dayFirstIn ? (
-                      <p className="text-sm font-medium text-foreground">
-                        Day clock-in {format(new Date(dayFirstIn), 'p')}
-                        {dayLastOut
-                          ? ` · Day clock-out ${format(new Date(dayLastOut), 'p')}`
-                          : employeeActiveEntry
-                            ? ' · still clocked in'
-                            : ''}
-                      </p>
-                    ) : null}
+                    {todayClockLabel ? <p className="text-sm font-medium text-foreground">{todayClockLabel}</p> : null}
                   </div>
                 </CardHeader>
                 <CardContent className="space-y-3">
@@ -571,6 +592,12 @@ export default function TimecardPage() {
                     </Card>
                   ) : null}
                   {entriesLoading ? <p className="text-sm text-muted-foreground">Loading your timecard...</p> : null}
+                  {hasStaleOpen && oldestOpen?.clockIn ? (
+                    <p className="rounded-lg border border-amber-500/40 bg-amber-500/10 p-4 text-sm text-foreground">
+                      Still clocked in since {format(new Date(oldestOpen.clockIn), 'EEE, MMM d, p')}. Clock out closes every open punch. A
+                      manager can correct the time afterward.
+                    </p>
+                  ) : null}
                   {!canPunch && !employeeActiveEntry ? (
                     <p className="rounded-lg bg-muted p-4 text-sm text-muted-foreground">
                       Clock in at the shop kiosk when you arrive. Once you are clocked in, you can add jobs here from any device.
@@ -587,15 +614,49 @@ export default function TimecardPage() {
                         >
                           {isClockingIn ? 'Clocking in…' : 'Clock in'}
                         </Button>
-                      ) : adminEmployee ? null : (
-                        <Button
-                          type="button"
-                          size="lg"
-                          className="h-14 flex-1 justify-center bg-blue-700 text-base font-semibold text-white hover:bg-blue-800"
-                          onClick={() => setAssetFormMode('start-asset')}
-                        >
-                          <Plus className="mr-2 h-5 w-5" /> Add job
-                        </Button>
+                      ) : (
+                        <>
+                          {adminEmployee || activePunchIsStale ? null : (
+                            <Button
+                              type="button"
+                              size="lg"
+                              className="h-14 flex-1 justify-center bg-blue-700 text-base font-semibold text-white hover:bg-blue-800"
+                              onClick={() => setAssetFormMode('start-asset')}
+                            >
+                              <Plus className="mr-2 h-5 w-5" /> Add job
+                            </Button>
+                          )}
+                          <AlertDialog>
+                            <AlertDialogTrigger asChild>
+                              <Button
+                                type="button"
+                                size="lg"
+                                variant="destructive"
+                                className="h-14 flex-1 justify-center text-base font-semibold"
+                                disabled={clockOutPunches.isPending}
+                              >
+                                {clockOutPunches.isPending ? 'Clocking out…' : 'Clock out'}
+                              </Button>
+                            </AlertDialogTrigger>
+                            <AlertDialogContent>
+                              <AlertDialogHeader>
+                                <AlertDialogTitle>Confirm clock out?</AlertDialogTitle>
+                                <AlertDialogDescription>
+                                  Clock out closes {liveOpenEntries.length === 1 ? 'the open punch' : `all ${liveOpenEntries.length} open punches`} for{' '}
+                                  {selectedEmployee.employeeName}
+                                  {oldestOpen?.clockIn ? `, started ${format(new Date(oldestOpen.clockIn), 'EEE, MMM d, p')}` : ''}. A manager
+                                  can correct the time afterward.
+                                </AlertDialogDescription>
+                              </AlertDialogHeader>
+                              <AlertDialogFooter>
+                                <AlertDialogCancel>Stay clocked in</AlertDialogCancel>
+                                <AlertDialogAction onClick={() => void handleClockOut()} disabled={clockOutPunches.isPending}>
+                                  Clock out
+                                </AlertDialogAction>
+                              </AlertDialogFooter>
+                            </AlertDialogContent>
+                          </AlertDialog>
+                        </>
                       )}
                     </div>
                   )}
@@ -603,7 +664,9 @@ export default function TimecardPage() {
                     <div className="rounded-lg border border-border bg-background p-4">
                       <div className="flex flex-wrap items-center justify-between gap-3">
                         <div className="space-y-1">
-                          <p className="text-sm text-muted-foreground">Today</p>
+                          <p className="text-sm text-muted-foreground">
+                            {employeeActiveEntry.clockIn ? format(new Date(employeeActiveEntry.clockIn), 'EEE, MMM d') : 'Today'}
+                          </p>
                           <p className="text-lg font-semibold">
                             Division {ADMIN_DIVISION} · Job {ADMIN_JOB_NUMBER}
                           </p>
@@ -699,7 +762,7 @@ export default function TimecardPage() {
                     </p>
                   ) : null}
                   {!adminEmployee
-                    ? displayedTodayEntries.map((entry: ShopTimeEntry) => (
+                    ? displayedEntries.map((entry: ShopTimeEntry) => (
                     <div key={entry.id} className="rounded-lg border border-border bg-background p-4">
                       <div className="grid gap-4 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-start">
                         <div>
@@ -803,7 +866,11 @@ export default function TimecardPage() {
                           <div className="space-y-2 text-left sm:text-right">
                             <div>
                               <p className="text-sm text-muted-foreground">Clock in</p>
-                              <p className="text-lg font-semibold">{entry.clockIn ? format(new Date(entry.clockIn), 'p') : '—'}</p>
+                              <p className="text-lg font-semibold">
+                                {entry.clockIn
+                                  ? format(new Date(entry.clockIn), openPunchStartedBeforeToday(entry) ? 'EEE, MMM d, p' : 'p')
+                                  : '—'}
+                              </p>
                             </div>
                             <div>
                               <p className="text-sm text-muted-foreground">Clock out</p>
@@ -881,13 +948,15 @@ export default function TimecardPage() {
                   ))
                     : null}
                   {adminEmployee
-                    ? displayedTodayEntries
+                    ? displayedEntries
                         .filter((entry: ShopTimeEntry) => entry.clockOut)
                         .map((entry: ShopTimeEntry) => (
                           <div key={entry.id} className="rounded-lg border border-border bg-background p-4">
                             <div className="grid gap-4 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-start">
                               <div className="space-y-1">
-                                <p className="text-sm text-muted-foreground">Today</p>
+                                <p className="text-sm text-muted-foreground">
+                                  {entry.clockIn ? format(new Date(entry.clockIn), 'EEE, MMM d') : 'Today'}
+                                </p>
                                 <p className="text-lg font-semibold">
                                   Division {ADMIN_DIVISION} · Job {ADMIN_JOB_NUMBER}
                                 </p>
@@ -907,40 +976,6 @@ export default function TimecardPage() {
                           </div>
                         ))
                     : null}
-                  {canPunch && employeeActiveEntry ? (
-                    <AlertDialog>
-                      <AlertDialogTrigger asChild>
-                        <Button
-                          type="button"
-                          size="lg"
-                          variant="destructive"
-                          className="h-14 w-full justify-center text-base font-semibold"
-                          disabled={updateTimeEntry.isPending}
-                        >
-                          Clock out
-                        </Button>
-                      </AlertDialogTrigger>
-                      <AlertDialogContent>
-                        <AlertDialogHeader>
-                          <AlertDialogTitle>Confirm clock out for the day?</AlertDialogTitle>
-                          <AlertDialogDescription>
-                            Clock out ends the day for {selectedEmployee.employeeName}
-                            {dayFirstIn ? `, started at ${format(new Date(dayFirstIn), 'p')}` : ''}.
-                          </AlertDialogDescription>
-                        </AlertDialogHeader>
-                        <AlertDialogFooter>
-                          <AlertDialogCancel>Stay clocked in</AlertDialogCancel>
-                          <AlertDialogAction onClick={() => void handleClockOut(employeeActiveEntry)} disabled={updateTimeEntry.isPending}>
-                            Clock out
-                          </AlertDialogAction>
-                        </AlertDialogFooter>
-                      </AlertDialogContent>
-                    </AlertDialog>
-                  ) : employeeActiveEntry ? (
-                    <p className="rounded-lg bg-muted p-4 text-sm text-muted-foreground">
-                      Clock out at the shop kiosk at the end of the day.
-                    </p>
-                  ) : null}
                 </CardContent>
               </Card>
 

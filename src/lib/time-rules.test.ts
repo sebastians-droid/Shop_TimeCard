@@ -19,7 +19,10 @@ import {
   roundToNearestQuarterHour,
   scheduledStartFor,
   stripNoLunchMarker,
+  AUTO_CLOCK_OUT_MARKER,
   NO_LUNCH_MARKER,
+  autoClockOutTimestamp,
+  isAutoClockOutDue,
   NO_SCHEDULED_START,
 } from '@/lib/time-rules';
 
@@ -123,6 +126,24 @@ describe('no-lunch marker', () => {
   it('ignores the marker on PTO entries when scanning a day', () => {
     const pto = entry({ id: 'p', pTOTimeKey: 'PTOTimeKey18', notes: NO_LUNCH_MARKER });
     expect(dayHasNoLunch([pto])).toBe(false);
+  });
+});
+
+describe('16-hour auto clock-out', () => {
+  const clockIn = at(DAY, '07:00');
+
+  it('is due at 16 hours and not a minute before', () => {
+    const open = entry({ id: 'open', clockIn });
+    expect(isAutoClockOutDue(open, new Date(new Date(clockIn).getTime() + 16 * 60 * 60 * 1000 - 60_000))).toBe(false);
+    expect(isAutoClockOutDue(open, new Date(new Date(clockIn).getTime() + 16 * 60 * 60 * 1000))).toBe(true);
+  });
+
+  it('stamps clock-out exactly 16 hours after clock-in', () => {
+    expect(new Date(autoClockOutTimestamp(clockIn)).getTime() - new Date(clockIn).getTime()).toBe(16 * 60 * 60 * 1000);
+  });
+
+  it('hides the review marker from notes an employee reads', () => {
+    expect(stripNoLunchMarker(`${AUTO_CLOCK_OUT_MARKER} Waiting on parts`)).toBe('Waiting on parts');
   });
 });
 
@@ -268,6 +289,7 @@ describe('getDayPayMinutes', () => {
     const pay = getDayPayMinutes([waiting, asset]);
 
     expect(isAwaitingAsset(waiting)).toBe(true);
+    expect(isAwaitingAsset({ ...waiting, id: 'dashed', timeEntry: 'Smith - John - Waiting' })).toBe(true);
     expect(pay.minutesByEntryId.get('wait')).toBe(0);
     // Day pay runs 07:00–15:20 (8h 20m less lunch).
     expect(pay.minutesByEntryId.get('asset')).toBe(465);

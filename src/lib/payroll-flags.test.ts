@@ -4,6 +4,7 @@ import type { ShopTimeEntry } from '@/models/shop-time-entry';
 import {
   LONG_SHIFT_MINUTES,
   PAYROLL_FLAG_ACTIVE,
+  PAYROLL_FLAG_AUTO_CLOCK_OUT,
   PAYROLL_FLAG_LONG_SHIFT,
   collectPayrollExportIssues,
   countPayrollFlaggedRows,
@@ -58,6 +59,20 @@ describe('payrollEntryFlags', () => {
     );
     expect(flags).toContain(PAYROLL_FLAG_ACTIVE);
     expect(flags).toContain(PAYROLL_FLAG_LONG_SHIFT);
+  });
+
+  it('flags a system clock-out for manager review instead of as a long shift', () => {
+    expect(
+      payrollEntryFlags(
+        entry({
+          id: 'auto',
+          clockIn: '2026-03-10T06:00:00',
+          clockOut: '2026-03-10T22:00:00',
+          notes: '[AUTO_CLOCK_OUT]',
+        }),
+        now,
+      ),
+    ).toEqual([PAYROLL_FLAG_AUTO_CLOCK_OUT]);
   });
 
   it('ignores PTO rows', () => {

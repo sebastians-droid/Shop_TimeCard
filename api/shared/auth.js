@@ -213,6 +213,21 @@ async function assertTimesInsidePunchedDay(employeeId, times, workDate) {
 }
 
 /**
+ * Closing an open punch is always allowed for the employee who owns it.
+ * A row left open overnight must still be closable from the kiosk or that
+ * employee's phone. Changing clock-in, reopening a closed punch, or editing
+ * an already-written clock-out stays on the normal punch rules.
+ */
+function isClosingOpenPunch(existing, changedFields) {
+  return Boolean(changedFields.clockOut) && !existing.clockOut && changedFields.clockIn === undefined;
+}
+
+function assertCanClockOut(user, employeeId) {
+  if (hasFullTimecardAccess(user)) return;
+  assertOwnShopEmployee(user, employeeId);
+}
+
+/**
  * Employees on their own device may add or reshape jobs inside a day already
  * punched at the kiosk, but cannot start, end, or reopen that day themselves.
  */
@@ -230,6 +245,7 @@ async function assertTimeEntryAccess(user, entryId, changedFields = {}) {
   if (hasFullTimecardAccess(user)) return;
   const existing = await getTimeEntryPunch(entryId);
   assertOwnShopEmployee(user, existing.employeeId);
+  if (isClosingOpenPunch(existing, changedFields)) return;
   if (!recordTouchesPunch(changedFields) || user.canPunch) return;
   if (changedFields.clockOut !== undefined && (!existing.clockOut || !changedFields.clockOut)) {
     throw forbidden(PUNCH_DENIED_MESSAGE);
@@ -273,5 +289,6 @@ module.exports = {
   assertTimeEntryAccess,
   assertTimeEntryCreate,
   assertJobSwitch,
+  assertCanClockOut,
   recordTouchesPunch,
 };

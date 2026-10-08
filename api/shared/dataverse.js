@@ -391,7 +391,7 @@ async function getTimeEntryPunch(id) {
 
 async function listEmployeeTimeEntries(employeeId, { from, to }) {
   const rows = await listAll(
-    `/swank_shoptimeentries?$select=swank_shoptimeentryid,swank_timeentry,swank_clockin,swank_clockout,swank_jobnumber,swank_workdate,swank_ptotime&$filter=statecode eq 0 and _swank_employee_value eq ${employeeId} and swank_clockin ge ${from} and swank_clockin le ${to}`,
+    `/swank_shoptimeentries?$select=swank_shoptimeentryid,swank_timeentry,swank_clockin,swank_clockout,swank_jobnumber,swank_workdate,swank_ptotime,swank_notes&$filter=statecode eq 0 and _swank_employee_value eq ${employeeId} and swank_clockin ge ${from} and swank_clockin le ${to}`,
   );
   return rows.map(mapTimeEntry);
 }
@@ -508,6 +508,152 @@ async function updateTimeEntry(id, record) {
   return mapTimeEntry(updated);
 }
 
+const OPEN_PUNCH_LOOKBACK_MS = 120 * 24 * 60 * 60 * 1000;
+const AUTO_CLOCK_OUT_MS = 16 * 60 * 60 * 1000;
+const AUTO_CLOCK_OUT_MARKER = '[AUTO_CLOCK_OUT]';
+
+function isPtoRow(entry) {
+  return Boolean(entry?.pTOTimeKey) || entry?.jobNumber === 'PTO' || String(entry?.timeEntry || '').toLowerCase().includes(' - pto');
+}
+
+function autoClockOutDue(entry, now) {
+  if (!entry?.clockIn || entry.clockOut || isPtoRow(entry)) return false;
+  const start = new Date(entry.clockIn).getTime();
+  return Number.isFinite(start) && now >= start + AUTO_CLOCK_OUT_MS;
+}
+
+function withAutoClockOutMarker(notes) {
+  if (String(notes || '').includes(AUTO_CLOCK_OUT_MARKER)) return notes;
+  const trimmed = String(notes || '').trim();
+  return trimmed ? `${AUTO_CLOCK_OUT_MARKER} ${trimmed}` : AUTO_CLOCK_OUT_MARKER;
+}
+
+/**
+ * Closes every open punch that has run 16 hours. The clock-out is clock-in plus
+ * 16 hours, and the row is marked for a manager to replace that time.
+ */
+async function applyAutoClockOuts(entries) {
+  const now = Date.now();
+  const due = entries.filter((entry) => autoClockOutDue(entry, now));
+  if (due.length === 0) return entries;
+  const closedById = new Map();
+  for (const entry of due) {
+    const clockOut = new Date(new Date(entry.clockIn).getTime() + AUTO_CLOCK_OUT_MS).toISOString();
+    const notes = withAutoClockOutMarker(entry.notes);
+    const fields = { clockOut, hours: 16, notes };
+    try {
+      closedById.set(entry.id, await updateTimeEntry(entry.id, fields));
+    } catch {
+      try {
+        const withoutHours = { clockOut, notes };
+        closedById.set(entry.id, await updateTimeEntry(entry.id, withoutHours));
+      } catch {
+        // Leave the punch open when Dataverse rejects the close. It stays visible as active.
+      }
+    }
+  }
+  return entries.map((entry) => closedById.get(entry.id) || entry);
+}
+
+async function autoCloseExpiredPunches(employeeId) {
+  if (!employeeId) return [];
+  const now = Date.now();
+  const recent = await listEmployeeTimeEntries(employeeId, {
+    from: new Date(now - OPEN_PUNCH_LOOKBACK_MS).toISOString(),
+    to: new Date(now + 24 * 60 * 60 * 1000).toISOString(),
+  });
+  return applyAutoClockOuts(recent);
+}
+
+function isOpenLaborRow(entry) {
+  if (!entry?.clockIn || entry.clockOut) return false;
+  if (entry.jobNumber === 'PTO' || entry.pTOTimeKey) return false;
+  return true;
+}
+
+function elapsedHours(clockIn, clockOut) {
+  const start = new Date(clockIn).getTime();
+  const end = new Date(clockOut).getTime();
+  if (!Number.isFinite(start) || !Number.isFinite(end) || end <= start) return 0;
+  return Math.round(((end - start) / 3_600_000) * 100) / 100;
+}
+
+function requestedHours(entries, id) {
+  const match = (entries || []).find((row) => row && row.id === id);
+  const hours = Number(match?.hours);
+  return Number.isFinite(hours) && hours >= 0 ? hours : undefined;
+}
+
+/**
+ * Closes every open labor punch for an employee. Hours are best-effort: a
+ * rejected hours value is retried as a clock-out only so a bad duration cannot
+ * leave the punch open. A manager can correct the time afterward.
+ */
+async function closeOpenPunches(employeeId, { clockOut, lat, lon, ip, entries = [] } = {}) {
+  const now = Date.now();
+  const recent = await listEmployeeTimeEntries(employeeId, {
+    from: new Date(now - OPEN_PUNCH_LOOKBACK_MS).toISOString(),
+    to: new Date(now + 24 * 60 * 60 * 1000).toISOString(),
+  });
+  const open = recent.filter(isOpenLaborRow);
+  const seen = new Set(open.map((entry) => entry.id));
+  const failures = [];
+
+  for (const row of entries) {
+    const id = row?.id;
+    if (!id || seen.has(id)) continue;
+    try {
+      const punch = await getTimeEntryPunch(id);
+      if (punch.employeeId !== employeeId || !isOpenLaborRow(punch)) continue;
+      open.push(punch);
+      seen.add(id);
+    } catch (error) {
+      failures.push(error.message || `Could not read punch ${id}.`);
+    }
+  }
+
+  if (open.length === 0) {
+    const error = new Error(failures[0] || 'No open punch to clock out.');
+    error.status = failures.length ? 500 : 409;
+    throw error;
+  }
+
+  open.sort((entryA, entryB) => new Date(entryA.clockIn).getTime() - new Date(entryB.clockIn).getTime());
+  const now = Date.now();
+  const due = open.filter((entry) => autoClockOutDue(entry, now));
+  const live = open.filter((entry) => !autoClockOutDue(entry, now));
+  const at = clockOut && Number.isFinite(new Date(clockOut).getTime()) ? clockOut : new Date().toISOString();
+  const closed = (await applyAutoClockOuts(due)).filter((entry) => entry.clockOut);
+
+  for (const entry of live) {
+    const fields = { clockOut: at };
+    const hours = requestedHours(entries, entry.id);
+    fields.hours = hours !== undefined ? hours : elapsedHours(entry.clockIn, at);
+    if (typeof lat === 'number') fields.clockOutLat = lat;
+    if (typeof lon === 'number') fields.clockOutLon = lon;
+    if (ip) fields.clockOutIp = ip;
+    try {
+      closed.push(await updateTimeEntry(entry.id, fields));
+    } catch (error) {
+      try {
+        const withoutHours = { ...fields };
+        delete withoutHours.hours;
+        closed.push(await updateTimeEntry(entry.id, withoutHours));
+      } catch (retryError) {
+        failures.push(retryError.message || error.message || 'Unable to clock out.');
+      }
+    }
+  }
+
+  if (closed.length === 0) {
+    const error = new Error(failures[0] || 'Unable to clock out.');
+    error.status = 500;
+    throw error;
+  }
+
+  return { closed, failures };
+}
+
 async function deleteTimeEntry(id) {
   await dataverseFetch('DELETE', `/swank_shoptimeentries(${id})`);
 }
@@ -601,6 +747,9 @@ module.exports = {
   listTimeEntries,
   createTimeEntry,
   updateTimeEntry,
+  closeOpenPunches,
+  applyAutoClockOuts,
+  autoCloseExpiredPunches,
   deleteTimeEntry,
   listSchedules,
   upsertSchedule,

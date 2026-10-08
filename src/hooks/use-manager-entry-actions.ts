@@ -23,6 +23,7 @@ import {
   getEntryPaidMinutes,
   getPtoHours,
   isPtoEntry,
+  notesHaveAutoClockOut,
   notesHaveNoLunch,
   scheduledStartFor,
 } from '@/lib/time-rules';
@@ -203,7 +204,11 @@ export function useManagerEntryActions({ employees, assets, timeEntries }: Manag
           workDate: format(new Date(clockIn), 'yyyy-MM-dd'),
         },
       });
-      toast.success('Timecard row updated.');
+      toast.success(
+        notesHaveAutoClockOut(entry.notes)
+          ? 'Timecard row updated. The 16-hour auto clock-out is cleared.'
+          : 'Timecard row updated.',
+      );
       return true;
     } catch (error: unknown) {
       toast.error(toErrorMessage(error, 'Unable to update timecard row.'));

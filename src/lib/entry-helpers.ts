@@ -4,7 +4,7 @@ import type { EquipmentAsset } from '@/models/equipment-asset';
 import type { ShopTimeEntry, ShopTimeEntryPTOTimeKey } from '@/models/shop-time-entry';
 import { formatEmployeeDisplayName, type AppShopEmployee } from '@/lib/shop-employees';
 import { dayFirstClockIn, dayLastClockOut } from '@/lib/day-session';
-import { DEFAULT_SCHEDULED_START, isAwaitingAsset, isPtoEntry, stripNoLunchMarker } from '@/lib/time-rules';
+import { DEFAULT_SCHEDULED_START, isAwaitingAsset, isPtoEntry, notesHaveAutoClockOut, stripNoLunchMarker } from '@/lib/time-rules';
 
 export type PtoHours = 4 | 8;
 
@@ -26,14 +26,31 @@ export function jobEntriesForDisplay(entries: ShopTimeEntry[]): ShopTimeEntry[] 
   return entries.filter((entry) => !isAwaitingAsset(entry));
 }
 
+function byClockIn(entryA: ShopTimeEntry, entryB: ShopTimeEntry): number {
+  return new Date(entryA.clockIn ?? 0).getTime() - new Date(entryB.clockIn ?? 0).getTime();
+}
+
+/** Jobs plus a no-job punch the system closed at 16 hours, so a manager can correct it. */
+export function entriesForManagerDisplay(entries: ShopTimeEntry[]): ShopTimeEntry[] {
+  const jobs = jobEntriesForDisplay(entries);
+  const jobIds = new Set(jobs.map((entry) => entry.id));
+  const reviews = entries.filter((entry) => isAwaitingAsset(entry) && notesHaveAutoClockOut(entry.notes) && !jobIds.has(entry.id));
+  return [...reviews, ...jobs].sort(byClockIn);
+}
+
+export function managerEntryTitle(entry: ShopTimeEntry, assets: EquipmentAsset[]): string {
+  if (isAwaitingAsset(entry)) return 'No job started';
+  return getEntryAssetName(entry, assets);
+}
+
 /** Payroll export rows: job entries plus any open day punch still waiting for a job. */
 export function entriesForPayrollExport(entries: ShopTimeEntry[]): ShopTimeEntry[] {
   const jobs = jobEntriesForDisplay(entries);
   const jobIds = new Set(jobs.map((entry) => entry.id));
-  const openAwaiting = entries.filter((entry) => isAwaitingAsset(entry) && !entry.clockOut && !jobIds.has(entry.id));
-  return [...jobs, ...openAwaiting].sort(
-    (entryA, entryB) => new Date(entryA.clockIn ?? 0).getTime() - new Date(entryB.clockIn ?? 0).getTime(),
+  const openAwaiting = entries.filter(
+    (entry) => isAwaitingAsset(entry) && !jobIds.has(entry.id) && (!entry.clockOut || notesHaveAutoClockOut(entry.notes)),
   );
+  return [...jobs, ...openAwaiting].sort(byClockIn);
 }
 
 export const PAYROLL_AWAITING_LABEL = 'Clocked in — no job started';

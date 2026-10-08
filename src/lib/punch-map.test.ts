@@ -78,6 +78,28 @@ describe('buildDayPunches', () => {
     expect(result.missing).toHaveLength(0);
   });
 
+  it('omits a clock-in that has not started a job', () => {
+    const result = buildDayPunches(
+      [
+        entry({
+          id: 'waiting',
+          timeEntry: 'Alex Smith - Waiting',
+          employee: { id: 'emp-1', autoNumber: 'Alex Smith' },
+          clockIn: at(DAY, '06:45'),
+          clockInLat: SHOP_LOCATION.lat,
+          clockInLon: SHOP_LOCATION.lon,
+        }),
+      ],
+      employees,
+      assets,
+      DAY,
+    );
+
+    expect(result.pins).toEqual([]);
+    expect(result.missing).toEqual([]);
+    expect(result.segments).toEqual([]);
+  });
+
   it('skips PTO and other days, and lists punches that have no GPS', () => {
     const result = buildDayPunches(
       [

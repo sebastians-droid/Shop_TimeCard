@@ -252,6 +252,7 @@ export function PayrollExportCard({
 
   const activeIssues = pendingIssues.filter((issue) => issue.kinds.includes('active'));
   const longShiftIssues = pendingIssues.filter((issue) => issue.kinds.includes('long-shift'));
+  const autoClockOutIssues = pendingIssues.filter((issue) => issue.kinds.includes('auto-clock-out'));
 
   return (
     <>
@@ -340,6 +341,7 @@ export function PayrollExportCard({
           </AlertDialogHeader>
           <div className="max-h-72 space-y-4 overflow-y-auto text-sm">
             <IssueList title="Still open (no clock-out)" issues={activeIssues} />
+            <IssueList title="Closed automatically after 16 hours" issues={autoClockOutIssues} />
             <IssueList title={`Over ${LONG_SHIFT_HOURS} hours on one punch`} issues={longShiftIssues} />
           </div>
           <AlertDialogFooter>

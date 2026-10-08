@@ -3,7 +3,7 @@ import { format } from 'date-fns';
 import { entryDistanceMiles } from '@/lib/geolocation';
 import { getEntryAssetName, getEntryEmployeeKey, getEntryEmployeeName, getEntryEmployeeNumber } from '@/lib/entry-helpers';
 import type { AppShopEmployee } from '@/lib/shop-employees';
-import { isPtoEntry } from '@/lib/time-rules';
+import { isAwaitingAsset, isPtoEntry } from '@/lib/time-rules';
 import type { EquipmentAsset } from '@/models/equipment-asset';
 import type { ShopTimeEntry } from '@/models/shop-time-entry';
 
@@ -58,13 +58,13 @@ export function entryDayKey(entry: ShopTimeEntry): string | null {
 }
 
 export function laborEntriesForDay(entries: ShopTimeEntry[], dayKey: string): ShopTimeEntry[] {
-  return entries.filter((entry) => !isPtoEntry(entry) && entryDayKey(entry) === dayKey);
+  return entries.filter((entry) => !isPtoEntry(entry) && !isAwaitingAsset(entry) && entryDayKey(entry) === dayKey);
 }
 
 export function locatedPunchDates(entries: ShopTimeEntry[]): Date[] {
   const keys = new Set<string>();
   for (const entry of entries) {
-    if (isPtoEntry(entry)) continue;
+    if (isPtoEntry(entry) || isAwaitingAsset(entry)) continue;
     const dayKey = entryDayKey(entry);
     if (!dayKey) continue;
     const hasIn = entry.clockInLat != null && entry.clockInLon != null;

@@ -12,6 +12,9 @@ const {
   listTimeEntries,
   createTimeEntry,
   updateTimeEntry,
+  closeOpenPunches,
+  applyAutoClockOuts,
+  autoCloseExpiredPunches,
   deleteTimeEntry,
   getTimeEntryPunch,
   listSchedules,
@@ -25,6 +28,7 @@ const {
   assertTimeEntryAccess,
   assertTimeEntryCreate,
   assertJobSwitch,
+  assertCanClockOut,
 } = require('./auth');
 let runSync = async () => {
   throw new Error('Sync module not loaded');
@@ -162,16 +166,39 @@ async function handleRequest(request) {
       const url = new URL(request.url, 'https://timecard.local');
       const from = url.searchParams.get('from') || undefined;
       const to = url.searchParams.get('to') || undefined;
-      return json(200, { entries: await listTimeEntries({ from, to }) });
+      const entries = await applyAutoClockOuts(await listTimeEntries({ from, to }));
+      return json(200, { entries });
     }
 
     if (method === 'POST' && (pathname === '/api/time-entries' || pathname === '/api/timeEntries')) {
       const user = await requireAppUser(request);
       const record = await readJson(request);
       await assertTimeEntryCreate(user, record);
+      if (record.employee?.id) await autoCloseExpiredPunches(record.employee.id);
       const ip = clientIp(request);
       if (ip && record.clockIn) record.clockInIp = ip;
       return json(201, await createTimeEntry(record));
+    }
+
+    if (method === 'POST' && pathname === '/api/time-entries/clock-out') {
+      const user = await requireAppUser(request);
+      const body = await readJson(request);
+      const employeeId = body.employeeId;
+      if (!employeeId) {
+        const error = new Error('Choose an employee before clocking out.');
+        error.status = 400;
+        throw error;
+      }
+      assertCanClockOut(user, employeeId);
+      const ip = clientIp(request);
+      const result = await closeOpenPunches(employeeId, {
+        clockOut: body.clockOut,
+        lat: body.lat,
+        lon: body.lon,
+        ip,
+        entries: Array.isArray(body.entries) ? body.entries : [],
+      });
+      return json(200, result);
     }
 
     const switchMatch = pathname.match(/^\/api\/time-entries\/([0-9a-f-]{36})\/switch-job$/i);

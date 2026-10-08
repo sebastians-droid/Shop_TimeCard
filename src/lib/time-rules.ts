@@ -6,6 +6,11 @@ export const LUNCH_MINUTES = 30;
 export const DEFAULT_SCHEDULED_START = '07:00';
 export const NO_LUNCH_MARKER = '[NO_LUNCH]';
 
+/** An open punch is closed at this age and left for a manager to correct. */
+export const AUTO_CLOCK_OUT_HOURS = 16;
+export const AUTO_CLOCK_OUT_MS = AUTO_CLOCK_OUT_HOURS * 60 * 60 * 1000;
+export const AUTO_CLOCK_OUT_MARKER = '[AUTO_CLOCK_OUT]';
+
 /**
  * Pass as `scheduledStart` for road mechanics, whose paid day begins whenever
  * they clock in. Distinct from `undefined`, which means "no start on record"
@@ -71,16 +76,44 @@ export function isAwaitingAsset(entry: ShopTimeEntry): boolean {
   if (entry.asset?.id || entry.asset?.asset) return false;
   if (entry.jobNumber) return false;
   if (entry.division || entry.assetDivision) return false;
-  const saved = entry.timeEntry.split(' - ').slice(1).join(' - ').trim();
-  return saved === AWAITING_ASSET_LABEL;
+  const label = entry.timeEntry.trim();
+  return label === AWAITING_ASSET_LABEL || label.endsWith(` - ${AWAITING_ASSET_LABEL}`);
 }
 
 export function notesHaveNoLunch(notes?: string): boolean {
   return (notes ?? '').includes(NO_LUNCH_MARKER);
 }
 
+export function notesHaveAutoClockOut(notes?: string): boolean {
+  return (notes ?? '').includes(AUTO_CLOCK_OUT_MARKER);
+}
+
+export function stripAutoClockOutMarker(notes?: string): string {
+  return (notes ?? '').replaceAll(AUTO_CLOCK_OUT_MARKER, '').replace(/\s+/g, ' ').trim();
+}
+
+export function applyAutoClockOutMarker(notes?: string): string {
+  const cleaned = stripAutoClockOutMarker(notes);
+  return cleaned ? `${AUTO_CLOCK_OUT_MARKER} ${cleaned}` : AUTO_CLOCK_OUT_MARKER;
+}
+
+/** True once an open labor punch has been running for 16 hours. */
+export function isAutoClockOutDue(
+  entry: Pick<ShopTimeEntry, 'clockIn' | 'clockOut' | 'jobNumber' | 'pTOTimeKey' | 'timeEntry'>,
+  now = new Date(),
+): boolean {
+  if (!entry.clockIn || entry.clockOut || isPtoEntry(entry as ShopTimeEntry)) return false;
+  const start = new Date(entry.clockIn).getTime();
+  return Number.isFinite(start) && now.getTime() >= start + AUTO_CLOCK_OUT_MS;
+}
+
+/** Clock-out stamped when the system closes a punch: exactly 16 hours after clock-in. */
+export function autoClockOutTimestamp(clockIn: string): string {
+  return new Date(new Date(clockIn).getTime() + AUTO_CLOCK_OUT_MS).toISOString();
+}
+
 export function stripNoLunchMarker(notes?: string): string {
-  return (notes ?? '')
+  return stripAutoClockOutMarker(notes)
     .replaceAll(NO_LUNCH_MARKER, '')
     .replace(/\s*Auto-clocked out when starting next asset\.?/gi, '')
     .replace(/\s*Auto-clocked out\.?/gi, '')

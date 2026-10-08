@@ -37,11 +37,13 @@ import {
 import {
   combineSelectedDateAndTime,
   formatTimeForInput,
+  dayClockCaption,
   getAssetDisplayName,
   getEmployeeNotes,
   getEntryAssetName,
   getEntryDivision,
   getEntryJobNumber,
+  jobEntriesForDisplay,
 } from '@/lib/entry-helpers';
 import { dayFirstClockIn, dayLastClockOut, planForgottenJobInsert } from '@/lib/day-session';
 import { apiFetch } from '@/lib/api';
@@ -377,6 +379,8 @@ export default function MechanicLogPage() {
         day,
         dateKey,
         entries,
+        jobs: jobEntriesForDisplay(entries),
+        clockLabel: dayClockCaption(entries),
         totalHours,
         firstIn: dayFirstClockIn(entries),
         lastOut: dayLastClockOut(entries),
@@ -389,7 +393,7 @@ export default function MechanicLogPage() {
   const assetSummary = useMemo(() => {
     const map = new Map<string, number>();
     for (const d of dayData) {
-      for (const entry of d.entries) {
+      for (const entry of d.jobs) {
         const name = getEntryAssetName(entry, assets);
         map.set(name, (map.get(name) ?? 0) + getEntryPaidMinutes(d.entries, entry, new Date(), payStart, payProfile) / 60);
       }
@@ -526,10 +530,8 @@ export default function MechanicLogPage() {
                             <div className="min-w-0">
                               <CardTitle className="text-base">{format(d.day, 'EEEE, MMM d')}</CardTitle>
                               <p className="mt-0.5 text-sm text-muted-foreground">
-                                {d.entries.length} {d.entries.length === 1 ? 'entry' : 'entries'}
-                                {d.firstIn
-                                  ? ` · ${format(new Date(d.firstIn), 'p')}${d.lastOut ? ` – ${format(new Date(d.lastOut), 'p')}` : ' · still clocked in'}`
-                                  : ''}
+                                {d.jobs.length} {d.jobs.length === 1 ? 'entry' : 'entries'}
+                                {d.clockLabel ? ` · ${d.clockLabel}` : ''}
                               </p>
                             </div>
                             <div className="flex items-center gap-4">
@@ -652,7 +654,7 @@ export default function MechanicLogPage() {
                           ) : d.firstIn ? (
                             <p className="text-sm text-muted-foreground">Clock out on the timecard before adding a forgotten job.</p>
                           ) : null}
-                          {d.entries.map((entry: ShopTimeEntry) => {
+                          {d.jobs.map((entry: ShopTimeEntry) => {
                             const paidMinutes = getRawDurationMinutes(entry);
                             const assetName = getEntryAssetName(entry, assets);
                             const jobNum = getEntryJobNumber(entry);

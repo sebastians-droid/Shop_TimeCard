@@ -14,7 +14,9 @@ import {
   dayClockCaption,
   getEmployeeNotes,
   getEntryAssetName,
+  entriesForManagerDisplay,
   jobEntriesForDisplay,
+  managerEntryTitle,
   entriesForPayrollExport,
   PAYROLL_AWAITING_LABEL,
   getEntryDivision,
@@ -105,6 +107,19 @@ describe('asset name resolution', () => {
     const waiting = entry({ id: 'w', timeEntry: 'Smith - Waiting', clockIn: at('2026-03-10', '06:30') });
     const job = entry({ id: 'j', timeEntry: 'Smith - LOADER-7', clockIn: at('2026-03-10', '07:00'), clockOut: at('2026-03-10', '15:00') });
     expect(entriesForPayrollExport([waiting, job])).toEqual([waiting, job]);
+  });
+
+  it('shows a 16-hour auto clock-out with no job so a manager can correct it', () => {
+    const waiting = entry({
+      id: 'w',
+      timeEntry: 'Smith - Waiting',
+      clockIn: at('2026-03-10', '06:30'),
+      clockOut: at('2026-03-10', '22:30'),
+      notes: '[AUTO_CLOCK_OUT]',
+    });
+    expect(entriesForManagerDisplay([waiting]).map((row) => row.id)).toEqual(['w']);
+    expect(managerEntryTitle(waiting, assets)).toBe('No job started');
+    expect(entriesForPayrollExport([waiting])).toEqual([waiting]);
   });
 
   it('drops closed waiting punches from payroll export', () => {

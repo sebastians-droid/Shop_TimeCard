@@ -68,6 +68,29 @@ export function useCreateShopTimeEntry() {
   });
 }
 
+export type ClockOutOpenPunches = {
+  employeeId: string;
+  clockOut: string;
+  lat?: number;
+  lon?: number;
+  entries: { id: string; hours?: number }[];
+};
+
+/** Closes every open labor punch for an employee, including ones left open on an earlier day. */
+export function useClockOutOpenPunches() {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: (body: ClockOutOpenPunches) =>
+      apiFetch<{ closed: ShopTimeEntry[]; failures: string[] }>('/api/time-entries/clock-out', {
+        method: 'POST',
+        body: JSON.stringify(body),
+      }),
+    onSuccess: () => {
+      client.invalidateQueries({ queryKey: queryKeys.timeEntries() });
+    },
+  });
+}
+
 export function useUpdateShopTimeEntry() {
   const client = useQueryClient();
   return useMutation({

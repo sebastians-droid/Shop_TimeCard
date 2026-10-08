@@ -10,7 +10,7 @@ import {
   getEntryWorkDateKey,
   PAYROLL_AWAITING_LABEL,
 } from '@/lib/entry-helpers';
-import { formatDuration, getRawDurationMinutes, isAwaitingAsset, isPtoEntry } from '@/lib/time-rules';
+import { formatDuration, getRawDurationMinutes, isAwaitingAsset, isPtoEntry, notesHaveAutoClockOut } from '@/lib/time-rules';
 import type { ShopTimeEntry } from '@/models/shop-time-entry';
 
 /** Raw punch span above this is flagged on payroll export for manager review. */
@@ -19,8 +19,9 @@ export const LONG_SHIFT_MINUTES = LONG_SHIFT_HOURS * 60;
 
 export const PAYROLL_FLAG_ACTIVE = 'Active — no clock-out';
 export const PAYROLL_FLAG_LONG_SHIFT = `Shift over ${LONG_SHIFT_HOURS} hours`;
+export const PAYROLL_FLAG_AUTO_CLOCK_OUT = 'Auto clock-out — needs review';
 
-export type PayrollExportIssueKind = 'active' | 'long-shift';
+export type PayrollExportIssueKind = 'active' | 'long-shift' | 'auto-clock-out';
 
 export type PayrollExportIssue = {
   kinds: PayrollExportIssueKind[];
@@ -36,6 +37,10 @@ export type PayrollExportIssue = {
 export function payrollEntryFlags(entry: ShopTimeEntry, now = new Date()): string[] {
   if (isPtoEntry(entry)) return [];
   const flags: string[] = [];
+  if (notesHaveAutoClockOut(entry.notes)) {
+    flags.push(PAYROLL_FLAG_AUTO_CLOCK_OUT);
+    return flags;
+  }
   if (!entry.clockOut) flags.push(PAYROLL_FLAG_ACTIVE);
   if (getRawDurationMinutes(entry, now) > LONG_SHIFT_MINUTES) flags.push(PAYROLL_FLAG_LONG_SHIFT);
   return flags;
@@ -55,7 +60,9 @@ export function collectPayrollExportIssues(
 
     const awaiting = isAwaitingAsset(entry);
     issues.push({
-      kinds: flagLabels.map((flag) => (flag === PAYROLL_FLAG_ACTIVE ? 'active' : 'long-shift')),
+      kinds: flagLabels.map((flag) =>
+        flag === PAYROLL_FLAG_ACTIVE ? 'active' : flag === PAYROLL_FLAG_AUTO_CLOCK_OUT ? 'auto-clock-out' : 'long-shift',
+      ),
       employeeName: getEntryEmployeeName(entry, employees),
       employeeNumber: getEntryEmployeeNumber(entry, employees),
       workDate: getEntryWorkDateKey(entry),
@@ -88,14 +95,17 @@ export function formatPayrollFlags(flags: string[]): string {
 export function summarizeEmployeePayrollFlags(rows: { flags?: string }[]): string {
   let active = 0;
   let longShift = 0;
+  let autoClockOut = 0;
   for (const row of rows) {
     if (!row.flags) continue;
     if (row.flags.includes(PAYROLL_FLAG_ACTIVE)) active += 1;
     if (row.flags.includes(PAYROLL_FLAG_LONG_SHIFT)) longShift += 1;
+    if (row.flags.includes(PAYROLL_FLAG_AUTO_CLOCK_OUT)) autoClockOut += 1;
   }
   const parts: string[] = [];
   if (active > 0) parts.push(`${active} active`);
   if (longShift > 0) parts.push(`${longShift} over ${LONG_SHIFT_HOURS}h`);
+  if (autoClockOut > 0) parts.push(`${autoClockOut} auto clock-out`);
   return parts.join(', ');
 }
 
