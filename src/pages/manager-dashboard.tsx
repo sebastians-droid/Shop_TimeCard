@@ -1110,7 +1110,7 @@ export default function ManagerDashboardPage() {
                                   )}
                                 </div>
 
-                                <div className="grid gap-3 sm:grid-cols-3">
+                                <div className={`grid gap-3 ${isEditing ? 'sm:grid-cols-2' : 'sm:grid-cols-3'}`}>
                                   <div className="space-y-2">
                                     <Label htmlFor={`clock-in-${entry.id}`}>Clock in</Label>
                                     {isEditing && editValues ? (
