@@ -111,4 +111,26 @@ describe('planForgottenJobInsert', () => {
     );
     expect(plan.creates).toEqual([expect.objectContaining({ kind: 'new', clockIn: at(DAY, '10:00'), clockOut: at(DAY, '13:00') })]);
   });
+
+  describe('on a day with a clocked-out break', () => {
+    const morning = entry({ id: 'a', clockIn: at(DAY, '07:00'), clockOut: at(DAY, '11:30') });
+    const afternoon = entry({ id: 'b', clockIn: at(DAY, '12:30'), clockOut: at(DAY, '16:00') });
+
+    it('rejects a job that would stretch across the break', () => {
+      const plan = planForgottenJobInsert([morning, afternoon], at(DAY, '11:00'), at(DAY, '13:00'));
+      expect(plan).toEqual({ error: expect.stringMatching(/crosses a break/i) });
+    });
+
+    it('rejects a job placed entirely inside the break', () => {
+      const plan = planForgottenJobInsert([morning, afternoon], at(DAY, '11:45'), at(DAY, '12:15'));
+      expect('error' in plan).toBe(true);
+    });
+
+    it('inserts a job inside the second session without touching the first', () => {
+      const plan = planForgottenJobInsert([morning, afternoon], at(DAY, '14:00'), at(DAY, '16:00'));
+      expect('error' in plan).toBe(false);
+      if ('error' in plan) return;
+      expect(plan.patches).toEqual([expect.objectContaining({ id: 'b', clockOut: at(DAY, '14:00') })]);
+    });
+  });
 });

@@ -1,10 +1,18 @@
-import { format, startOfDay, startOfWeek, endOfWeek } from 'date-fns';
+import { addDays, format, startOfDay, startOfWeek, endOfWeek } from 'date-fns';
 
 import type { EquipmentAsset } from '@/models/equipment-asset';
 import type { ShopTimeEntry, ShopTimeEntryPTOTimeKey } from '@/models/shop-time-entry';
 import { formatEmployeeDisplayName, type AppShopEmployee } from '@/lib/shop-employees';
 import { dayFirstClockIn, dayLastClockOut } from '@/lib/day-session';
-import { DEFAULT_SCHEDULED_START, isAwaitingAsset, isPtoEntry, notesHaveAutoClockOut, stripNoLunchMarker } from '@/lib/time-rules';
+import {
+  DEFAULT_SCHEDULED_START,
+  dayPunchSessions,
+  entryWorkDateKey,
+  isAwaitingAsset,
+  isPtoEntry,
+  notesHaveAutoClockOut,
+  stripNoLunchMarker,
+} from '@/lib/time-rules';
 
 export type PtoHours = 4 | 8;
 
@@ -30,16 +38,26 @@ function byClockIn(entryA: ShopTimeEntry, entryB: ShopTimeEntry): number {
   return new Date(entryA.clockIn ?? 0).getTime() - new Date(entryB.clockIn ?? 0).getTime();
 }
 
-/** Jobs plus a no-job punch the system closed at 16 hours, so a manager can correct it. */
+/**
+ * Every row a manager can correct, including the no-job punch each clock-in
+ * creates. That punch holds the clock-in time, so hiding it would leave a
+ * clocked-in employee with nothing to edit until a job starts.
+ */
 export function entriesForManagerDisplay(entries: ShopTimeEntry[]): ShopTimeEntry[] {
-  const jobs = jobEntriesForDisplay(entries);
-  const jobIds = new Set(jobs.map((entry) => entry.id));
-  const reviews = entries.filter((entry) => isAwaitingAsset(entry) && notesHaveAutoClockOut(entry.notes) && !jobIds.has(entry.id));
-  return [...reviews, ...jobs].sort(byClockIn);
+  return [...entries].sort(byClockIn);
+}
+
+/**
+ * An arrival punch that only records a clock-in, shown to managers as a single
+ * line. One the system closed at 16 hours keeps its full card, because its
+ * clock-out needs correcting too.
+ */
+export function isClockInOnlyRow(entry: ShopTimeEntry): boolean {
+  return isAwaitingAsset(entry) && !notesHaveAutoClockOut(entry.notes);
 }
 
 export function managerEntryTitle(entry: ShopTimeEntry, assets: EquipmentAsset[]): string {
-  if (isAwaitingAsset(entry)) return 'No job started';
+  if (isAwaitingAsset(entry)) return entry.clockOut ? 'Clocked in — no job' : 'Clocked in — no job yet';
   return getEntryAssetName(entry, assets);
 }
 
@@ -58,6 +76,13 @@ export const PAYROLL_AWAITING_LABEL = 'Clocked in — no job started';
 export function dayClockCaption(entries: ShopTimeEntry[]): string {
   const firstIn = dayFirstClockIn(entries);
   if (!firstIn) return '';
+  const sessions = dayPunchSessions(entries);
+  if (sessions.length > 1) {
+    const spans = sessions.map(
+      (session) => `${format(new Date(session.start), 'p')}–${session.end ? format(new Date(session.end), 'p') : 'still clocked in'}`,
+    );
+    return `Clocked in ${spans.join(', ')}`;
+  }
   const lastOut = dayLastClockOut(entries);
   const stillIn = entries.some((entry) => !isPtoEntry(entry) && !entry.clockOut);
   const inLabel = format(new Date(firstIn), 'p');
@@ -106,6 +131,41 @@ export const combineSelectedDateAndTime = (day: Date, timeValue: string) => {
   return date.toISOString();
 };
 
+/** Places a typed time on whichever calendar day is closest to `nearIso`, so a small correction never jumps a day. */
+export function timeNear(nearIso: string, timeValue: string): string {
+  const near = new Date(nearIso).getTime();
+  const sameDay = new Date(mergeDateAndTime(nearIso, timeValue));
+  const candidates = [addDays(sameDay, -1), sameDay, addDays(sameDay, 1)];
+  return candidates.reduce((best, candidate) =>
+    Math.abs(candidate.getTime() - near) < Math.abs(best.getTime() - near) ? candidate : best,
+  ).toISOString();
+}
+
+/** Places a typed time at its next occurrence from `afterIso`, so a clock-out past midnight lands on the next morning. */
+export function timeAfter(afterIso: string, timeValue: string): string {
+  const candidate = new Date(mergeDateAndTime(afterIso, timeValue));
+  if (candidate.getTime() < new Date(afterIso).getTime()) return addDays(candidate, 1).toISOString();
+  return candidate.toISOString();
+}
+
+/**
+ * Places a typed time on a work day. A time that only fits the after-midnight
+ * part of that day's shift lands on the next calendar morning; anything else
+ * stays on the work day itself.
+ */
+export function timeOnWorkDay(day: Date, timeValue: string, dayEntries: ShopTimeEntry[], now = new Date()): string {
+  const sameDay = combineSelectedDateAndTime(day, timeValue);
+  const nextMorning = addDays(new Date(sameDay), 1).getTime();
+  const midnight = startOfDay(addDays(day, 1)).getTime();
+  const shiftEnd = Math.max(
+    0,
+    ...dayEntries
+      .filter((entry) => entry.clockIn && !isPtoEntry(entry))
+      .map((entry) => new Date(entry.clockOut ?? now).getTime()),
+  );
+  return shiftEnd > midnight && nextMorning <= shiftEnd ? new Date(nextMorning).toISOString() : sameDay;
+}
+
 export const EMPLOYEE_CODE_NOT_FOUND = 'Employee code not found. Enter your 4 digit employee number.';
 
 /** Matches a kiosk-entered employee number against the shop roster. */
@@ -148,8 +208,7 @@ export const getEntryDivision = (entry: ShopTimeEntry, assets: EquipmentAsset[])
   return String(entry.assetDivision ?? matchedAsset?.divisionCode ?? '');
 };
 
-export const getEntryWorkDateKey = (entry: ShopTimeEntry) =>
-  entry.clockIn ? format(new Date(entry.clockIn), 'yyyy-MM-dd') : 'No clock-in date';
+export const getEntryWorkDateKey = (entry: ShopTimeEntry) => entryWorkDateKey(entry) ?? 'No clock-in date';
 
 export const getEmployeeNotes = (notes?: string) => stripNoLunchMarker(notes);
 

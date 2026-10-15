@@ -27,15 +27,15 @@ import {
   dayHasNoLunch,
   formatDuration,
   getDayPayMinutes,
-  getEntryPaidMinutes,
   getPtoHours,
   getRawDurationMinutes,
   isPtoEntry,
+  keepAutoClockOutMarker,
   notesHaveNoLunch,
   scheduledStartFor,
+  waitBeforeFirstJob,
 } from '@/lib/time-rules';
 import {
-  combineSelectedDateAndTime,
   formatTimeForInput,
   dayClockCaption,
   getAssetDisplayName,
@@ -43,7 +43,10 @@ import {
   getEntryAssetName,
   getEntryDivision,
   getEntryJobNumber,
+  getEntryWorkDateKey,
   jobEntriesForDisplay,
+  timeAfter,
+  timeOnWorkDay,
 } from '@/lib/entry-helpers';
 import { dayFirstClockIn, dayLastClockOut, planForgottenJobInsert } from '@/lib/day-session';
 import { apiFetch } from '@/lib/api';
@@ -164,7 +167,10 @@ export default function MechanicLogPage() {
       [assetLabel, manualJobNumber ? `Job ${manualJobNumber}` : ''].filter((value: string) => value).join(' · ') ||
       (manualDivision ? `Division ${manualDivision}` : 'Time entry');
     const employeeName = selectedEmployee?.employeeName ?? entry.employee?.autoNumber ?? 'Employee';
-    const nextNotes = applyNoLunchMarker(editingNotes.trim() || undefined, notesHaveNoLunch(entry.notes) || dayHasNoLunch(dayEntries));
+    const nextNotes = keepAutoClockOutMarker(
+      entry.notes,
+      applyNoLunchMarker(editingNotes.trim() || undefined, notesHaveNoLunch(entry.notes) || dayHasNoLunch(dayEntries)),
+    );
     try {
       await updateTimeEntry.mutateAsync({
         id: entry.id,
@@ -206,7 +212,10 @@ export default function MechanicLogPage() {
   const saveNotes = (entry: ShopTimeEntry, day: Date, dayEntries: ShopTimeEntry[]) => {
     const when = format(day, 'MMM d');
     const assetName = getEntryAssetName(entry, assets);
-    const nextNotes = applyNoLunchMarker(editingNotes.trim() || undefined, notesHaveNoLunch(entry.notes) || dayHasNoLunch(dayEntries));
+    const nextNotes = keepAutoClockOutMarker(
+      entry.notes,
+      applyNoLunchMarker(editingNotes.trim() || undefined, notesHaveNoLunch(entry.notes) || dayHasNoLunch(dayEntries)),
+    );
     void queryClient.cancelQueries({ queryKey: queryKeys.timeEntries() });
     const previous = queryClient.getQueryData<ShopTimeEntry[]>(queryKeys.timeEntries());
     queryClient.setQueryData<ShopTimeEntry[]>(queryKeys.timeEntries(), (rows) =>
@@ -249,8 +258,8 @@ export default function MechanicLogPage() {
       toast.error('Enter the start and end time for this job.');
       return;
     }
-    const startedAt = combineSelectedDateAndTime(day, jobStartedAt);
-    const endedAt = combineSelectedDateAndTime(day, jobEndedAt);
+    const startedAt = timeOnWorkDay(day, jobStartedAt, dayEntries);
+    const endedAt = timeAfter(startedAt, jobEndedAt);
     const plan = planForgottenJobInsert(dayEntries, startedAt, endedAt, payStart, payProfile);
     if ('error' in plan) {
       toast.error(plan.error);
@@ -353,14 +362,14 @@ export default function MechanicLogPage() {
 
   const filteredEntries = useMemo(() => {
     if (!selectedEmployee || !dateRange?.from || !dateRange?.to) return [];
-    const from = dateRange.from.getTime();
-    const to = dateRange.to.getTime() + 86400000 - 1;
+    const fromKey = format(dateRange.from, 'yyyy-MM-dd');
+    const toKey = format(dateRange.to, 'yyyy-MM-dd');
     return timeEntries
       .filter((entry: ShopTimeEntry) => {
         if (entry.employee?.id !== selectedEmployee.id) return false;
         if (!entry.clockIn) return false;
-        const t = new Date(entry.clockIn).getTime();
-        return t >= from && t <= to;
+        const workDay = getEntryWorkDateKey(entry);
+        return workDay >= fromKey && workDay <= toKey;
       })
       .sort((a: ShopTimeEntry, b: ShopTimeEntry) => new Date(a.clockIn ?? '').getTime() - new Date(b.clockIn ?? '').getTime());
   }, [selectedEmployee, dateRange, timeEntries]);
@@ -373,7 +382,7 @@ export default function MechanicLogPage() {
   const dayData = useMemo(() => {
     return days.map((day) => {
       const dateKey = format(day, 'yyyy-MM-dd');
-      const entries = filteredEntries.filter((entry: ShopTimeEntry) => entry.clockIn?.startsWith(dateKey));
+      const entries = filteredEntries.filter((entry: ShopTimeEntry) => getEntryWorkDateKey(entry) === dateKey);
       const totalHours = getDayPayMinutes(entries, new Date(), payStart, payProfile).totalMinutes / 60;
       return {
         day,
@@ -381,6 +390,7 @@ export default function MechanicLogPage() {
         entries,
         jobs: jobEntriesForDisplay(entries),
         clockLabel: dayClockCaption(entries),
+        waitBeforeJob: waitBeforeFirstJob(entries, new Date(), payStart, payProfile),
         totalHours,
         firstIn: dayFirstClockIn(entries),
         lastOut: dayLastClockOut(entries),
@@ -395,7 +405,7 @@ export default function MechanicLogPage() {
     for (const d of dayData) {
       for (const entry of d.jobs) {
         const name = getEntryAssetName(entry, assets);
-        map.set(name, (map.get(name) ?? 0) + getEntryPaidMinutes(d.entries, entry, new Date(), payStart, payProfile) / 60);
+        map.set(name, (map.get(name) ?? 0) + getRawDurationMinutes(entry) / 60);
       }
     }
     return [...map.entries()].map(([name, total]) => ({ name, total: Math.round(total * 100) / 100 })).sort((a, b) => b.total - a.total);
@@ -701,9 +711,7 @@ export default function MechanicLogPage() {
                                           id={`edit-job-${entry.id}`}
                                           className="bg-background"
                                           value={editingJobNumber}
-                                          onChange={(event: React.ChangeEvent<HTMLInputElement>) =>
-                                            setEditingJobNumber(event.target.value)
-                                          }
+                                          onChange={(event: React.ChangeEvent<HTMLInputElement>) => setEditingJobNumber(event.target.value)}
                                           placeholder="Optional job number"
                                         />
                                       </div>

@@ -219,6 +219,8 @@ async function handleRequest(request) {
       });
       delete next.clockOut;
       next.clockIn = switchAt;
+      // A switch after midnight is still the same shift, so it stays on the day that shift started.
+      if (active.workDate) next.workDate = String(active.workDate).slice(0, 10);
       next.clockInLat = body.lat;
       next.clockInLon = body.lon;
       if (ip) next.clockInIp = ip;

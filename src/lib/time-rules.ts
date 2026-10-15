@@ -1,3 +1,5 @@
+import { format } from 'date-fns';
+
 import type { ShopTimeEntry } from '@/models/shop-time-entry';
 import { ShopTimeEntryPTOTypeKeyToLabel } from '@/models/shop-time-entry';
 
@@ -33,10 +35,8 @@ export function paysFromClockIn(employee: EmployeePayProfile | null | undefined)
 }
 
 /** Road and admin employees are paid from clock-in; shop uses a scheduled start. */
-export const scheduledStartFor = (
-  employee: EmployeePayProfile | null | undefined,
-  storedStart?: string,
-) => (paysFromClockIn(employee) ? NO_SCHEDULED_START : storedStart);
+export const scheduledStartFor = (employee: EmployeePayProfile | null | undefined, storedStart?: string) =>
+  paysFromClockIn(employee) ? NO_SCHEDULED_START : storedStart;
 
 export function roundToNearestQuarterHour(minutes: number): number {
   if (!Number.isFinite(minutes) || minutes <= 0) return 0;
@@ -51,6 +51,19 @@ export function roundClockInUpToQuarterHour(iso: string): string {
   }
   date.setMinutes(date.getMinutes() - remainder + QUARTER_HOUR_MINUTES, 0, 0);
   return date.toISOString();
+}
+
+/**
+ * The work day an entry belongs to. The stored work date wins over the
+ * clock-in timestamp, so a shift that runs past midnight stays on the day it
+ * started instead of splitting across two days.
+ */
+export function entryWorkDateKey(entry: Pick<ShopTimeEntry, 'workDate' | 'clockIn'>): string | undefined {
+  if (entry.workDate) return entry.workDate.slice(0, 10);
+  if (!entry.clockIn) return undefined;
+  const clockIn = new Date(entry.clockIn);
+  if (Number.isNaN(clockIn.getTime())) return undefined;
+  return format(clockIn, 'yyyy-MM-dd');
 }
 
 export function getPtoHours(entry: ShopTimeEntry): number {
@@ -95,6 +108,14 @@ export function stripAutoClockOutMarker(notes?: string): string {
 export function applyAutoClockOutMarker(notes?: string): string {
   const cleaned = stripAutoClockOutMarker(notes);
   return cleaned ? `${AUTO_CLOCK_OUT_MARKER} ${cleaned}` : AUTO_CLOCK_OUT_MARKER;
+}
+
+/**
+ * Carries the review marker onto rewritten notes. Only a manager correcting
+ * the row resolves an auto clock-out; a lunch toggle or note edit must not.
+ */
+export function keepAutoClockOutMarker(previousNotes: string | undefined, nextNotes: string): string {
+  return notesHaveAutoClockOut(previousNotes) ? applyAutoClockOutMarker(nextNotes) : nextNotes;
 }
 
 /** True once an open labor punch has been running for 16 hours. */
@@ -157,6 +178,54 @@ function dayLastClockOutFromLabor(labor: ShopTimeEntry[]): string | undefined {
   }, labor[0]?.clockOut ?? '');
 }
 
+export type PunchSession = {
+  start: string;
+  /** Undefined while the session is still clocked in. */
+  end?: string;
+};
+
+/**
+ * Gaps shorter than this between punches are seconds of drift, not a break.
+ * Stored punches do not line up exactly (a clock-in is saved on the minute
+ * while the first job starts seconds later), so only a real clock-out splits a day.
+ */
+export const BREAK_MIN_GAP_MS = 5 * 60 * 1000;
+
+/**
+ * Continuous on-the-clock spans for a day. Job switches stay inside one
+ * session; a clock-out followed by a later clock-in starts a new one, and the
+ * time between them is an unpaid break.
+ */
+export function dayPunchSessions(entries: ShopTimeEntry[]): PunchSession[] {
+  const sessions: { start: number; end: number }[] = [];
+  for (const entry of laborByClockIn(entries)) {
+    const start = new Date(entry.clockIn ?? 0).getTime();
+    const end = entry.clockOut ? new Date(entry.clockOut).getTime() : Number.POSITIVE_INFINITY;
+    if (!Number.isFinite(start)) continue;
+    const last = sessions[sessions.length - 1];
+    if (last && start - last.end < BREAK_MIN_GAP_MS) {
+      last.end = Math.max(last.end, end);
+    } else {
+      sessions.push({ start, end });
+    }
+  }
+  return sessions.map(({ start, end }) => ({
+    start: new Date(start).toISOString(),
+    end: Number.isFinite(end) ? new Date(end).toISOString() : undefined,
+  }));
+}
+
+/** On-the-clock minutes from `payStartMs` onward, skipping breaks between sessions. */
+function sessionMinutesFrom(entries: ShopTimeEntry[], payStartMs: number, now: Date): number {
+  let total = 0;
+  for (const session of dayPunchSessions(entries)) {
+    const start = Math.max(new Date(session.start).getTime(), payStartMs);
+    const end = session.end ? new Date(session.end).getTime() : now.getTime();
+    if (end > start) total += end - start;
+  }
+  return Math.max(0, Math.round(total / 60000));
+}
+
 /**
  * When paid time begins for the day.
  * - Road and admin: actual clock-in.
@@ -178,6 +247,41 @@ export function effectiveDayPayStart(
   return clockInDate.getTime() > scheduled.getTime() ? dayFirstClockInIso : scheduled.toISOString();
 }
 
+export type WaitBeforeFirstJob = {
+  minutes: number;
+  from: string;
+  to: string;
+  hasJob: boolean;
+};
+
+/**
+ * Paid time before the first job. Shop pay starts at the scheduled start, or at
+ * clock-in when that is later. Road and admin pay starts at clock-in.
+ * This gap stays in the day total and is not its own timecard row.
+ */
+export function waitBeforeFirstJob(
+  entries: ShopTimeEntry[],
+  now = new Date(),
+  scheduledStart?: string | null,
+  employee?: EmployeePayProfile | null,
+): WaitBeforeFirstJob | undefined {
+  const labor = laborByClockIn(entries);
+  const dayFirst = dayFirstClockInFromLabor(labor);
+  if (!dayFirst) return undefined;
+
+  const payStartMs = new Date(effectiveDayPayStart(dayFirst, scheduledStart, employee)).getTime();
+  const jobs = labor.filter((entry) => !isAwaitingAsset(entry));
+  const firstJobMs = jobs[0]?.clockIn ? new Date(jobs[0].clockIn).getTime() : undefined;
+  const stillOpen = labor.some((entry) => !entry.clockOut);
+  const dayLast = dayLastClockOutFromLabor(labor);
+  const endMs = firstJobMs ?? (dayLast ? new Date(dayLast).getTime() : stillOpen ? now.getTime() : undefined);
+  if (endMs === undefined || !Number.isFinite(payStartMs) || endMs <= payStartMs) return undefined;
+
+  const minutes = Math.round((endMs - payStartMs) / 60000);
+  if (minutes <= 0) return undefined;
+  return { minutes, from: new Date(payStartMs).toISOString(), to: new Date(endMs).toISOString(), hasJob: jobs.length > 0 };
+}
+
 export type DayPayMinutes = {
   noLunch: boolean;
   lunchDeducted: boolean;
@@ -188,11 +292,7 @@ export type DayPayMinutes = {
   minutesByEntryId: Map<string, number>;
 };
 
-function allocateDayPayAcrossJobs(
-  payable: ShopTimeEntry[],
-  paidLaborMinutes: number,
-  now: Date,
-): Map<string, number> {
+function allocateDayPayAcrossJobs(payable: ShopTimeEntry[], paidLaborMinutes: number, now: Date): Map<string, number> {
   const minutesByEntryId = new Map<string, number>();
   if (payable.length === 0 || paidLaborMinutes <= 0) return minutesByEntryId;
 
@@ -235,17 +335,15 @@ export function getDayPayMinutes(
   const noLunch = dayHasNoLunch(labor);
   const payable = labor.filter((entry) => !isAwaitingAsset(entry));
   const dayFirst = dayFirstClockInFromLabor(labor);
-  const dayLast = dayLastClockOutFromLabor(labor);
-  const stillOpen = labor.some((entry) => !entry.clockOut);
-  const payEndMs = dayLast ? new Date(dayLast).getTime() : stillOpen && dayFirst ? now.getTime() : null;
 
   const minutesByEntryId = new Map<string, number>();
   let paidLaborMinutes = 0;
   let lunchMinutes = 0;
 
-  if (dayFirst && payEndMs !== null) {
+  if (dayFirst) {
     const payStartIso = effectiveDayPayStart(dayFirst, scheduledStart, employee);
-    const rawDayMinutes = Math.max(0, Math.round((payEndMs - new Date(payStartIso).getTime()) / 60000));
+    const rawDayMinutes = sessionMinutesFrom(labor, new Date(payStartIso).getTime(), now);
+    // One lunch per day, separate from any clocked-out breaks.
     lunchMinutes = !noLunch && rawDayMinutes > 0 ? LUNCH_MINUTES : 0;
     paidLaborMinutes = roundToNearestQuarterHour(Math.max(0, rawDayMinutes - lunchMinutes));
 

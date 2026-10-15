@@ -1,4 +1,6 @@
-import { getEntryPaidMinutes, isPtoEntry, type EmployeePayProfile } from '@/lib/time-rules';
+import { format } from 'date-fns';
+
+import { dayPunchSessions, entryWorkDateKey, getEntryPaidMinutes, isPtoEntry, type EmployeePayProfile } from '@/lib/time-rules';
 import type { ShopTimeEntry } from '@/models/shop-time-entry';
 
 export function laborEntries(entries: ShopTimeEntry[]): ShopTimeEntry[] {
@@ -28,6 +30,23 @@ export function dayLastClockOut(entries: ShopTimeEntry[]): string | undefined {
     const out = entry.clockOut ?? '';
     return out > latest ? out : latest;
   }, labor[0]?.clockOut ?? '');
+}
+
+/** A clock-in this soon after the last clock-out is a return from break, not a new shift. */
+export const SHIFT_CONTINUES_MS = 4 * 60 * 60 * 1000;
+
+/**
+ * The work day a new clock-in belongs to: today, unless the employee is back
+ * from a break, in which case it continues that shift's day. Without this a
+ * break across midnight would split one shift into two days.
+ */
+export function workDateForClockIn(employeeEntries: ShopTimeEntry[], clockInIso: string): string {
+  const at = new Date(clockInIso).getTime();
+  const lastClosed = laborEntries(employeeEntries)
+    .filter((entry) => entry.clockOut && new Date(entry.clockOut).getTime() <= at)
+    .sort((left, right) => new Date(right.clockOut!).getTime() - new Date(left.clockOut!).getTime())[0];
+  const continuing = lastClosed && at - new Date(lastClosed.clockOut!).getTime() < SHIFT_CONTINUES_MS;
+  return (continuing && entryWorkDateKey(lastClosed)) || format(new Date(clockInIso), 'yyyy-MM-dd');
 }
 
 export function findLaborEntryCovering(entries: ShopTimeEntry[], atIso: string): ShopTimeEntry | undefined {
@@ -102,6 +121,12 @@ export function planForgottenJobInsert(
   if (!firstIn || !lastOut) return { error: 'Clock out on the timecard before adding a forgotten job.' };
   if (start <= new Date(firstIn).getTime()) return { error: "Job start must be after the day's clock-in." };
   if (end > new Date(lastOut).getTime()) return { error: "Job end must be at or before the day's clock-out." };
+  const insideOneSession = dayPunchSessions(dayEntries).some(
+    (session) => start >= new Date(session.start).getTime() && session.end && end <= new Date(session.end).getTime(),
+  );
+  if (!insideOneSession) {
+    return { error: 'That window crosses a break when you were clocked out. Add a separate job for each side of the break.' };
+  }
 
   const labor = laborEntries(dayEntries)
     .filter((entry) => entry.clockIn && entry.clockOut)

@@ -8,21 +8,27 @@ import { queryKeys } from '@/lib/query-keys';
 import { useCreateShopTimeEntry, useDeleteShopTimeEntry, useUpdateShopTimeEntry } from '@/hooks/use-shop-data';
 import {
   PTO_TIME_KEY_BY_HOURS,
-  combineSelectedDateAndTime,
+  formatTimeForInput,
   getAssetDisplayName,
   getEntryAssetName,
   getEntryEmployeeKey,
   getEntryEmployeeName,
+  getEntryWorkDateKey,
   getPtoClockInIso,
-  mergeDateAndTime,
+  isClockInOnlyRow,
+  timeAfter,
+  timeNear,
+  timeOnWorkDay,
   type PtoHours,
 } from '@/lib/entry-helpers';
 import {
   applyNoLunchMarker,
+  entryWorkDateKey,
   getDayPayMinutes,
   getEntryPaidMinutes,
   getPtoHours,
   isPtoEntry,
+  keepAutoClockOutMarker,
   notesHaveAutoClockOut,
   notesHaveNoLunch,
   scheduledStartFor,
@@ -43,6 +49,13 @@ type ManagerEntryActionsInput = {
 function resolveDraftAsset(draft: EditableEntry, assets: EquipmentAsset[]) {
   if (!draft.assetId) return undefined;
   return draft.assetRecord ?? assets.find((asset: EquipmentAsset) => asset.id === draft.assetId);
+}
+
+/** "9:00 PM–1:30 AM (next day)", so an overnight save reads as intended rather than backwards. */
+function formatSpan(clockIn: string, clockOut?: string) {
+  if (!clockOut) return `${format(new Date(clockIn), 'p')}–still clocked in`;
+  const nextDay = format(new Date(clockOut), 'yyyy-MM-dd') !== format(new Date(clockIn), 'yyyy-MM-dd');
+  return `${format(new Date(clockIn), 'p')}–${format(new Date(clockOut), 'p')}${nextDay ? ' (next day)' : ''}`;
 }
 
 function toErrorMessage(error: unknown, fallback: string) {
@@ -81,8 +94,12 @@ export function useManagerEntryActions({ employees, assets, timeEntries }: Manag
       return false;
     }
 
-    const clockIn = combineSelectedDateAndTime(day, draft.clockInTime);
-    const clockOut = combineSelectedDateAndTime(day, draft.clockOutTime);
+    const dayKey = format(day, 'yyyy-MM-dd');
+    const existingDayEntries = timeEntries.filter(
+      (entry: ShopTimeEntry) => entry.employee?.id === employee.id && entry.clockIn && getEntryWorkDateKey(entry) === dayKey,
+    );
+    const clockIn = timeOnWorkDay(day, draft.clockInTime, existingDayEntries);
+    const clockOut = timeAfter(clockIn, draft.clockOutTime);
     if (new Date(clockOut).getTime() <= new Date(clockIn).getTime()) {
       toast.error('Clock-out must be after clock-in.');
       return false;
@@ -99,10 +116,6 @@ export function useManagerEntryActions({ employees, assets, timeEntries }: Manag
     const label = selectedAsset
       ? getAssetDisplayName(selectedAsset)
       : manualJobNumber || (manualDivision ? `Division ${manualDivision}` : 'Time entry');
-    const dayKey = format(day, 'yyyy-MM-dd');
-    const existingDayEntries = timeEntries.filter(
-      (entry: ShopTimeEntry) => entry.employee?.id === employee.id && entry.clockIn?.startsWith(dayKey),
-    );
     const division = selectedAsset ? selectedAsset.divisionCode : manualDivision ? Number(manualDivision) : undefined;
     // A manager-added entry inherits the day's existing lunch override so the
     // day's pay total does not change shape when the row lands.
@@ -146,7 +159,7 @@ export function useManagerEntryActions({ employees, assets, timeEntries }: Manag
         workDate: dayKey,
         notes,
       });
-      toast.success(`Time entry added for ${employee.employeeName}.`);
+      toast.success(`Time entry added for ${employee.employeeName} on ${format(day, 'MMM d')} — ${formatSpan(clockIn, clockOut)}.`);
       return true;
     } catch (error: unknown) {
       toast.error(toErrorMessage(error, 'Unable to add time entry.'));
@@ -171,11 +184,27 @@ export function useManagerEntryActions({ employees, assets, timeEntries }: Manag
     const selectedAsset = resolveDraftAsset(editValues, assets);
     const manualDivision = editValues.division.trim();
     const manualJobNumber = editValues.jobNumber.trim();
-    const clockIn = mergeDateAndTime(entry.clockIn, editValues.clockInTime);
-    const clockOut = editValues.clockOutTime ? mergeDateAndTime(entry.clockIn, editValues.clockOutTime) : undefined;
+    const clockIn =
+      editValues.clockInTime === formatTimeForInput(entry.clockIn) ? entry.clockIn : timeNear(entry.clockIn, editValues.clockInTime);
+    const clockOut = !editValues.clockOutTime
+      ? undefined
+      : entry.clockOut && editValues.clockOutTime === formatTimeForInput(entry.clockOut)
+        ? entry.clockOut
+        : timeAfter(clockIn, editValues.clockOutTime);
+    const clockInOnly = isClockInOnlyRow(entry);
+    if (clockOut && clockInOnly && new Date(clockIn).getTime() > new Date(clockOut).getTime()) {
+      toast.error(`Clock-in must be at or before ${format(new Date(clockOut), 'p')}, when the first job started.`);
+      return false;
+    }
+    if (clockOut && !clockInOnly && new Date(clockOut).getTime() <= new Date(clockIn).getTime()) {
+      toast.error('Clock-out must be after clock-in.');
+      return false;
+    }
     const label = selectedAsset
       ? getAssetDisplayName(selectedAsset)
       : manualJobNumber || (manualDivision ? `Division ${manualDivision}` : getEntryAssetName(entry, assets));
+    // The row stays on its shift's work day even when its times now fall after midnight.
+    const workDate = entryWorkDateKey(entry) ?? format(new Date(clockIn), 'yyyy-MM-dd');
     const updatedEntry = { ...entry, clockIn, clockOut };
     const employeeDayEntries = dayEntries
       .filter((row: ShopTimeEntry) => getEntryEmployeeKey(row) === getEntryEmployeeKey(entry))
@@ -192,7 +221,8 @@ export function useManagerEntryActions({ employees, assets, timeEntries }: Manag
           timeEntry: `${getEntryEmployeeName(entry, employees)} - ${label}`,
           asset: selectedAsset ? { id: selectedAsset.id, asset: getAssetDisplayName(selectedAsset) } : entry.asset,
           assetDivision: selectedAsset ? selectedAsset.divisionCode : manualDivision ? Number(manualDivision) : entry.assetDivision,
-          notes: applyNoLunchMarker(editValues.notes.trim() || undefined, notesHaveNoLunch(entry.notes)) || undefined,
+          // Always sent, even when empty: an omitted field would leave the auto clock-out marker in place.
+          notes: applyNoLunchMarker(editValues.notes.trim() || undefined, notesHaveNoLunch(entry.notes)),
           clockIn,
           clockOut,
           division: !selectedAsset && manualDivision ? Number(manualDivision) : undefined,
@@ -201,14 +231,16 @@ export function useManagerEntryActions({ employees, assets, timeEntries }: Manag
           hours: clockOut ? getEntryPaidMinutes(employeeDayEntries, updatedEntry, new Date(), payStart, payProfile) / 60 : undefined,
           pTOTimeKey:
             isPtoEntry(entry) && (ptoHours === 4 || ptoHours === 8) ? PTO_TIME_KEY_BY_HOURS[ptoHours as PtoHours] : entry.pTOTimeKey,
-          workDate: format(new Date(clockIn), 'yyyy-MM-dd'),
+          workDate,
         },
       });
-      toast.success(
-        notesHaveAutoClockOut(entry.notes)
-          ? 'Timecard row updated. The 16-hour auto clock-out is cleared.'
-          : 'Timecard row updated.',
-      );
+      const employeeName = getEntryEmployeeName(entry, employees);
+      const day = format(new Date(`${workDate}T12:00:00`), 'MMM d');
+      const span = formatSpan(clockIn, clockOut);
+      const saved = clockInOnly
+        ? `Clock-in for ${employeeName} on ${day} saved — ${format(new Date(clockIn), 'p')}.`
+        : `${employeeName} · ${label} saved for ${day} — ${span}.`;
+      toast.success(notesHaveAutoClockOut(entry.notes) ? `${saved} Needs review cleared.` : saved);
       return true;
     } catch (error: unknown) {
       toast.error(toErrorMessage(error, 'Unable to update timecard row.'));
@@ -295,7 +327,7 @@ export function useManagerEntryActions({ employees, assets, timeEntries }: Manag
 
     queryClient.setQueryData<ShopTimeEntry[]>(queryKeys.timeEntries(), (current) =>
       (current ?? []).map((entry: ShopTimeEntry) =>
-        entryIds.has(entry.id) ? { ...entry, notes: applyNoLunchMarker(entry.notes, checked) } : entry,
+        entryIds.has(entry.id) ? { ...entry, notes: keepAutoClockOutMarker(entry.notes, applyNoLunchMarker(entry.notes, checked)) } : entry,
       ),
     );
 
@@ -304,7 +336,7 @@ export function useManagerEntryActions({ employees, assets, timeEntries }: Manag
       for (const entry of laborEntries) {
         await apiFetch<ShopTimeEntry>(`/api/time-entries/${entry.id}`, {
           method: 'PATCH',
-          body: JSON.stringify({ notes: applyNoLunchMarker(entry.notes, checked) }),
+          body: JSON.stringify({ notes: keepAutoClockOutMarker(entry.notes, applyNoLunchMarker(entry.notes, checked)) }),
         });
       }
       await queryClient.invalidateQueries({ queryKey: queryKeys.timeEntries() });

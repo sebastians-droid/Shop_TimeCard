@@ -15,6 +15,7 @@ import {
   getEmployeeNotes,
   getEntryAssetName,
   entriesForManagerDisplay,
+  isClockInOnlyRow,
   jobEntriesForDisplay,
   managerEntryTitle,
   entriesForPayrollExport,
@@ -118,8 +119,40 @@ describe('asset name resolution', () => {
       notes: '[AUTO_CLOCK_OUT]',
     });
     expect(entriesForManagerDisplay([waiting]).map((row) => row.id)).toEqual(['w']);
-    expect(managerEntryTitle(waiting, assets)).toBe('No job started');
+    expect(managerEntryTitle(waiting, assets)).toBe('Clocked in — no job');
     expect(entriesForPayrollExport([waiting])).toEqual([waiting]);
+  });
+
+  it('lets a manager reach the clock-in of someone still on the clock with no job yet', () => {
+    const waiting = entry({ id: 'w', timeEntry: 'Smith - Waiting', clockIn: at('2026-03-10', '06:30') });
+    expect(entriesForManagerDisplay([waiting]).map((row) => row.id)).toEqual(['w']);
+    expect(managerEntryTitle(waiting, assets)).toBe('Clocked in — no job yet');
+  });
+
+  it('shows arrival punches as a clock-in line unless the system auto-closed them', () => {
+    const waiting = entry({ id: 'w', timeEntry: 'Smith - Waiting', clockIn: at('2026-03-10', '06:30') });
+    const autoClosed = { ...waiting, id: 'a', clockOut: at('2026-03-10', '22:30'), notes: '[AUTO_CLOCK_OUT]' };
+    const job = entry({ id: 'j', timeEntry: 'Smith - LOADER-7', clockIn: at('2026-03-10', '07:00') });
+    expect(isClockInOnlyRow(waiting)).toBe(true);
+    expect(isClockInOnlyRow(autoClosed)).toBe(false);
+    expect(isClockInOnlyRow(job)).toBe(false);
+  });
+
+  it('lists every punch for a manager in clock-in order, including the arrival punch', () => {
+    const job = entry({ id: 'j', timeEntry: 'Smith - LOADER-7', clockIn: at('2026-03-10', '07:00') });
+    const waiting = entry({
+      id: 'w',
+      timeEntry: 'Smith - Waiting',
+      clockIn: at('2026-03-10', '06:30'),
+      clockOut: at('2026-03-10', '07:00'),
+    });
+    expect(entriesForManagerDisplay([job, waiting]).map((row) => row.id)).toEqual(['w', 'j']);
+  });
+
+  it('lists each session when the day has a clocked-out break', () => {
+    const morning = entry({ id: 'a', clockIn: at('2026-03-10', '07:00'), clockOut: at('2026-03-10', '11:30') });
+    const afternoon = entry({ id: 'b', clockIn: at('2026-03-10', '12:30') });
+    expect(dayClockCaption([afternoon, morning])).toMatch(/^Clocked in 7:00 AM–11:30 AM, 12:30 PM–still clocked in$/);
   });
 
   it('drops closed waiting punches from payroll export', () => {

@@ -1,9 +1,7 @@
-import { format } from 'date-fns';
-
 import { entryDistanceMiles } from '@/lib/geolocation';
 import { getEntryAssetName, getEntryEmployeeKey, getEntryEmployeeName, getEntryEmployeeNumber } from '@/lib/entry-helpers';
 import type { AppShopEmployee } from '@/lib/shop-employees';
-import { isAwaitingAsset, isPtoEntry } from '@/lib/time-rules';
+import { entryWorkDateKey, isAwaitingAsset, isPtoEntry } from '@/lib/time-rules';
 import type { EquipmentAsset } from '@/models/equipment-asset';
 import type { ShopTimeEntry } from '@/models/shop-time-entry';
 
@@ -54,7 +52,7 @@ const OVERLAP_OFFSET_DEG = 0.00012;
 
 export function entryDayKey(entry: ShopTimeEntry): string | null {
   if (!entry.clockIn) return null;
-  return format(new Date(entry.clockIn), 'yyyy-MM-dd');
+  return entryWorkDateKey(entry) ?? null;
 }
 
 export function laborEntriesForDay(entries: ShopTimeEntry[], dayKey: string): ShopTimeEntry[] {

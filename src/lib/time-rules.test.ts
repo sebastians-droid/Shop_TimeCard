@@ -6,7 +6,9 @@ import {
   dayHasNoLunch,
   formatDuration,
   AWAITING_ASSET_LABEL,
+  dayPunchSessions,
   effectiveDayPayStart,
+  keepAutoClockOutMarker,
   getDayPayMinutes,
   getEntryPaidMinutes,
   getPtoHours,
@@ -333,6 +335,129 @@ describe('getDayPayMinutes', () => {
     const first = entry({ id: 'first', clockIn: at(DAY, '07:00'), clockOut: at(DAY, '11:00') });
     const day = [first, entry({ id: 'second', clockIn: at(DAY, '11:00'), clockOut: at(DAY, '15:00') })];
     expect(getEntryPaidMinutes(day, first)).toBe(225);
+  });
+});
+
+describe('multiple clock-ins in one day', () => {
+  const waiting = (id: string, clockIn: string, clockOut?: string) =>
+    entry({ id, timeEntry: `Smith - ${AWAITING_ASSET_LABEL}`, clockIn, clockOut });
+  const job = (id: string, clockIn: string, clockOut?: string) =>
+    entry({ id, timeEntry: 'Smith - EX-140', asset: { id: 'a', asset: 'EX-140' }, clockIn, clockOut });
+
+  it('splits a day into sessions at each clock-out and later clock-in', () => {
+    const day = [
+      job('pm', at(DAY, '12:30')),
+      job('am2', at(DAY, '09:00'), at(DAY, '11:30')),
+      job('am1', at(DAY, '07:00'), at(DAY, '09:00')),
+    ];
+    expect(dayPunchSessions(day)).toEqual([
+      { start: at(DAY, '07:00'), end: at(DAY, '11:30') },
+      { start: at(DAY, '12:30'), end: undefined },
+    ]);
+  });
+
+  it('does not pay the break between a clock-out and the next clock-in', () => {
+    // 07:00–11:30 and 12:30–16:00 is 8h on the clock; the 1h break is unpaid.
+    const day = [job('am', at(DAY, '07:00'), at(DAY, '11:30')), job('pm', at(DAY, '12:30'), at(DAY, '16:00'))];
+    const pay = getDayPayMinutes(day);
+
+    expect(pay.lunchMinutes).toBe(30);
+    expect(pay.paidLaborMinutes).toBe(450);
+    expect([...pay.minutesByEntryId.values()].reduce((sum, value) => sum + value, 0)).toBe(450);
+  });
+
+  it('deducts lunch only once no matter how many times the employee clocks in', () => {
+    const day = [
+      job('a', at(DAY, '07:00'), at(DAY, '10:00')),
+      job('b', at(DAY, '10:15'), at(DAY, '12:00')),
+      job('c', at(DAY, '12:45'), at(DAY, '15:00')),
+      job('d', at(DAY, '15:10'), at(DAY, '16:10')),
+    ];
+    // 3h + 1h45m + 2h15m + 1h = 8h on the clock, less one 30-minute lunch.
+    const pay = getDayPayMinutes(day);
+    expect(pay.lunchMinutes).toBe(30);
+    expect(pay.paidLaborMinutes).toBe(450);
+  });
+
+  it('pays every session in full when the day is flagged no-lunch', () => {
+    const day = [
+      job('am', at(DAY, '07:00'), at(DAY, '11:30')),
+      { ...job('pm', at(DAY, '12:30'), at(DAY, '16:00')), notes: NO_LUNCH_MARKER },
+    ];
+    expect(getDayPayMinutes(day).paidLaborMinutes).toBe(480);
+  });
+
+  it('pays the real kiosk flow: arrival punch, job, clock out, clock back in, job', () => {
+    const day = [
+      waiting('w1', at(DAY, '06:45'), at(DAY, '07:10')),
+      job('j1', at(DAY, '07:10'), at(DAY, '11:30')),
+      waiting('w2', at(DAY, '12:15'), at(DAY, '12:20')),
+      job('j2', at(DAY, '12:20'), at(DAY, '15:45')),
+    ];
+    const pay = getDayPayMinutes(day);
+
+    // Pay starts at the 07:00 scheduled start: 07:00–11:30 (4h30m) + 12:15–15:45 (3h30m) = 8h, less lunch.
+    expect(pay.paidLaborMinutes).toBe(450);
+    expect(pay.minutesByEntryId.get('w1')).toBe(0);
+    expect(pay.minutesByEntryId.get('w2')).toBe(0);
+    expect((pay.minutesByEntryId.get('j1') ?? 0) + (pay.minutesByEntryId.get('j2') ?? 0)).toBe(450);
+  });
+
+  it('counts a second session that is still open up to now', () => {
+    const day = [job('am', at(DAY, '07:00'), at(DAY, '11:00')), waiting('back', at(DAY, '12:00'))];
+    // 4h in the morning + 1h since clocking back in at 12:00; the 11:00–12:00 break is unpaid.
+    expect(getDayPayMinutes(day, new Date(at(DAY, '13:00'))).paidLaborMinutes).toBe(270);
+  });
+
+  it('applies the scheduled start only to the first session', () => {
+    const day = [job('early', at(DAY, '06:00'), at(DAY, '06:40')), job('later', at(DAY, '08:00'), at(DAY, '12:00'))];
+    // 06:00–06:40 falls before the 07:00 start and is unpaid; the 08:00 session is paid in full.
+    expect(getDayPayMinutes(day).paidLaborMinutes).toBe(210);
+    // A road mechanic is paid from clock-in, so the early session counts too.
+    expect(getDayPayMinutes(day, new Date(), NO_SCHEDULED_START, { isRoadMech: true }).paidLaborMinutes).toBe(255);
+  });
+
+  it('treats a job switch as one continuous session, not a break', () => {
+    const day = [job('a', at(DAY, '07:00'), at(DAY, '11:00')), job('b', at(DAY, '11:00'), at(DAY, '15:30'))];
+    expect(dayPunchSessions(day)).toHaveLength(1);
+    expect(getDayPayMinutes(day).paidLaborMinutes).toBe(480);
+  });
+
+  it('treats seconds of drift between the clock-in and the first job as one session', () => {
+    // Stored punches from a real day: clock-in saved on the minute, the first job 34 seconds later.
+    const day = [
+      waiting('w', '2026-10-15T10:55:00Z', '2026-10-15T10:55:00Z'),
+      job('pt472', '2026-10-15T10:55:34Z', '2026-10-15T18:09:19Z'),
+      job('a094', '2026-10-15T18:09:19Z'),
+    ];
+    expect(dayPunchSessions(day)).toEqual([{ start: '2026-10-15T10:55:00.000Z', end: undefined }]);
+  });
+
+  it('splits on a real break even when it is short', () => {
+    const day = [job('am', at(DAY, '07:00'), at(DAY, '10:00')), job('pm', at(DAY, '10:05'), at(DAY, '12:00'))];
+    expect(dayPunchSessions(day)).toHaveLength(2);
+  });
+
+  it('ignores PTO when finding sessions', () => {
+    const day = [
+      job('am', at(DAY, '07:00'), at(DAY, '11:00')),
+      entry({ id: 'pto', pTOTimeKey: 'PTOTimeKey04', clockIn: at(DAY, '08:00') }),
+    ];
+    expect(dayPunchSessions(day)).toHaveLength(1);
+  });
+});
+
+describe('keepAutoClockOutMarker', () => {
+  it('keeps the review marker when other parts of the note are rewritten', () => {
+    const before = `${AUTO_CLOCK_OUT_MARKER} Left a light on`;
+    const after = keepAutoClockOutMarker(before, applyNoLunchMarker(before, true));
+    expect(after).toContain(AUTO_CLOCK_OUT_MARKER);
+    expect(after).toContain(NO_LUNCH_MARKER);
+    expect(stripNoLunchMarker(after)).toBe('Left a light on');
+  });
+
+  it('adds nothing when the row was never auto-closed', () => {
+    expect(keepAutoClockOutMarker('Fixed brakes', 'Fixed brakes, bled lines')).toBe('Fixed brakes, bled lines');
   });
 });
 

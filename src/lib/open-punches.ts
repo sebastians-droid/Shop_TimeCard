@@ -15,6 +15,19 @@ export function openLaborEntries(entries: ShopTimeEntry[]): ShopTimeEntry[] {
     .sort((entryA, entryB) => new Date(entryA.clockIn ?? 0).getTime() - new Date(entryB.clockIn ?? 0).getTime());
 }
 
+/** An overnight shift is still live this long after clock-in; past it, an open punch from yesterday was forgotten. */
+export const LEFT_OVER_OPEN_MS = 12 * 60 * 60 * 1000;
+
+/**
+ * True for a punch someone forgot to close on an earlier day. A shift that
+ * simply runs past midnight is not left over until it has been open 12 hours.
+ */
+export function openPunchIsLeftOver(entry: Pick<ShopTimeEntry, 'clockIn'>, now = new Date()): boolean {
+  const clockIn = new Date(entry.clockIn ?? '').getTime();
+  if (Number.isNaN(clockIn)) return false;
+  return openPunchStartedBeforeToday(entry, now) && now.getTime() - clockIn >= LEFT_OVER_OPEN_MS;
+}
+
 /** True when the punch started on a calendar day before `now`. */
 export function openPunchStartedBeforeToday(entry: Pick<ShopTimeEntry, 'clockIn'>, now = new Date()): boolean {
   const clockIn = new Date(entry.clockIn ?? '');

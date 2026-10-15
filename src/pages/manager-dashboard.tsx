@@ -41,6 +41,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Textarea } from '@/components/ui/textarea';
 import { AssetPicker } from '@/components/asset-picker';
 import { AccessCheckingCard, ManagerAccessDeniedCard } from '@/components/system/access-cards';
+import { ClockInLine } from '@/components/manager/clock-in-line';
 import { EntryDistanceBadges, EntryDistanceField } from '@/components/manager/entry-distance-badges';
 import { PtoApprovalPanel } from '@/components/manager/pto-approval-panel';
 import { PayrollExportCard } from '@/components/manager/payroll-export-card';
@@ -82,6 +83,7 @@ import {
   formatWeekRangeLabel,
   scheduledStartCaption,
   dayClockCaption,
+  isClockInOnlyRow,
 } from '@/lib/entry-helpers';
 import {
   ShopTimeEntryPayTypeKeyToLabel,
@@ -148,7 +150,7 @@ export default function ManagerDashboardPage() {
   const selectedDayKey = format(selectedDate, 'yyyy-MM-dd');
   const selectedDayEntries = useMemo(() => {
     return timeEntries
-      .filter((entry: ShopTimeEntry) => entry.clockIn?.startsWith(selectedDayKey))
+      .filter((entry: ShopTimeEntry) => entry.clockIn && getEntryWorkDateKey(entry) === selectedDayKey)
       .sort((a: ShopTimeEntry, b: ShopTimeEntry) => new Date(b.clockIn ?? '').getTime() - new Date(a.clockIn ?? '').getTime());
   }, [selectedDayKey, timeEntries]);
 
@@ -242,8 +244,9 @@ export default function ManagerDashboardPage() {
   const weeklyEntries = useMemo(() => {
     return timeEntries
       .filter((entry: ShopTimeEntry) => {
-        const clockInDate = entry.clockIn ? new Date(entry.clockIn) : null;
-        return clockInDate ? clockInDate >= exportWeekRange.start && clockInDate <= exportWeekRange.end : false;
+        if (!entry.clockIn) return false;
+        const workDay = getEntryWorkDateKey(entry);
+        return workDay >= format(exportWeekRange.start, 'yyyy-MM-dd') && workDay <= format(exportWeekRange.end, 'yyyy-MM-dd');
       })
       .sort((a: ShopTimeEntry, b: ShopTimeEntry) => new Date(a.clockIn ?? '').getTime() - new Date(b.clockIn ?? '').getTime());
   }, [exportWeekRange, timeEntries]);
@@ -279,7 +282,9 @@ export default function ManagerDashboardPage() {
     return days.map((day: Date) => {
       const dayKey = format(day, 'yyyy-MM-dd');
       const dayEntries = timeEntries
-        .filter((entry: ShopTimeEntry) => entry.employee?.id === rangeViewEmployeeId && entry.clockIn?.startsWith(dayKey))
+        .filter(
+          (entry: ShopTimeEntry) => entry.employee?.id === rangeViewEmployeeId && entry.clockIn && getEntryWorkDateKey(entry) === dayKey,
+        )
         .sort((a: ShopTimeEntry, b: ShopTimeEntry) => new Date(a.clockIn ?? '').getTime() - new Date(b.clockIn ?? '').getTime());
       const storedStart = scheduleByEmployeeDay.get(`${rangeViewEmployeeId}-${dayKey}`);
       const pay = getDayPayMinutes(dayEntries, new Date(), scheduledStartFor(rangeViewEmployee, storedStart), {
@@ -930,6 +935,7 @@ export default function ManagerDashboardPage() {
             {employeeSummaries.map((summary: EmployeeDailySummary) => {
               const isOpen = openEmployeeKeys.includes(summary.employeeKey);
               const displayEntries = entriesForManagerDisplay(summary.entries);
+              const jobCount = displayEntries.filter((entry: ShopTimeEntry) => !isClockInOnlyRow(entry)).length;
               const needsReview = summary.entries.some((entry: ShopTimeEntry) => notesHaveAutoClockOut(entry.notes));
               const dayClockLabel = dayClockCaption(summary.entries);
               return (
@@ -944,8 +950,8 @@ export default function ManagerDashboardPage() {
                           <h2 className="text-lg font-semibold">{summary.employeeName}</h2>
                           <p className="text-sm text-muted-foreground">
                             Employee {summary.employeeNumber} · {summary.scheduledStartLabel}
-                            {dayClockLabel ? ` · ${dayClockLabel}` : ''} · {displayEntries.length}{' '}
-                            {displayEntries.length === 1 ? 'entry' : 'entries'} · {formatDuration(summary.totalMinutes)}
+                            {dayClockLabel ? ` · ${dayClockLabel}` : ''} · {jobCount} {jobCount === 1 ? 'entry' : 'entries'} ·{' '}
+                            {formatDuration(summary.totalMinutes)}
                             {summary.noLunch ? ' · No lunch' : summary.lunchDeducted ? ' · Lunch 0.5h' : ''}
                           </p>
                         </div>
@@ -988,6 +994,21 @@ export default function ManagerDashboardPage() {
                       <div className="space-y-3 border-t border-border p-4">
                         {displayEntries.map((entry: ShopTimeEntry) => {
                           const isEditing = editingEntryId === entry.id;
+                          if (isClockInOnlyRow(entry)) {
+                            return (
+                              <ClockInLine
+                                key={entry.id}
+                                entry={entry}
+                                isEditing={isEditing && Boolean(editValues)}
+                                value={editValues?.clockInTime ?? ''}
+                                isSaving={isUpdating}
+                                onChange={(clockInTime: string) => editValues && setEditValues({ ...editValues, clockInTime })}
+                                onStartEdit={() => handleStartEdit(entry)}
+                                onSave={() => void handleSaveEdit(entry)}
+                                onCancel={handleCancelEdit}
+                              />
+                            );
+                          }
                           return (
                             <div key={entry.id} className="rounded-lg border border-border bg-card p-4 text-card-foreground">
                               <div className="grid gap-4 lg:grid-cols-[minmax(0,1.5fr)_minmax(0,1fr)_auto] lg:items-start">
@@ -1426,6 +1447,7 @@ export default function ManagerDashboardPage() {
                 scheduledStartLabel,
               }) => {
                 const displayDayEntries = entriesForManagerDisplay(dayEntries);
+                const dayJobCount = displayDayEntries.filter((entry: ShopTimeEntry) => !isClockInOnlyRow(entry)).length;
                 const dayNeedsReview = dayEntries.some((entry: ShopTimeEntry) => notesHaveAutoClockOut(entry.notes));
                 const dayClockLabel = dayClockCaption(dayEntries);
                 return (
@@ -1442,13 +1464,13 @@ export default function ManagerDashboardPage() {
                           <p className="font-semibold text-sm">{format(day, 'EEEE, MMM d')}</p>
                           <p className="text-xs text-muted-foreground">
                             {scheduledStartLabel}
-                            {dayClockLabel ? ` · ${dayClockLabel}` : ''} · {displayDayEntries.length}{' '}
-                            {displayDayEntries.length === 1 ? 'entry' : 'entries'} · {formatDuration(dayMinutes)}
+                            {dayClockLabel ? ` · ${dayClockLabel}` : ''} · {dayJobCount} {dayJobCount === 1 ? 'entry' : 'entries'} ·{' '}
+                            {formatDuration(dayMinutes)}
                             {dayNoLunch ? ' · No lunch' : ''}
                           </p>
                         </div>
                         <div className="flex items-center gap-2">
-                          {displayDayEntries.length === 0 ? (
+                          {dayJobCount === 0 ? (
                             <Badge variant="outline">{dayClockLabel ? 'Clocked in' : 'No entries'}</Badge>
                           ) : (
                             <Badge variant="secondary">{formatDuration(dayMinutes)}</Badge>
@@ -1481,6 +1503,21 @@ export default function ManagerDashboardPage() {
                         ) : null}
                         {displayDayEntries.map((entry: ShopTimeEntry) => {
                           const isRangeEditing = editingEntryId === entry.id;
+                          if (isClockInOnlyRow(entry)) {
+                            return (
+                              <ClockInLine
+                                key={entry.id}
+                                entry={entry}
+                                isEditing={isRangeEditing && Boolean(editValues)}
+                                value={editValues?.clockInTime ?? ''}
+                                isSaving={isUpdating}
+                                onChange={(clockInTime: string) => editValues && setEditValues({ ...editValues, clockInTime })}
+                                onStartEdit={() => handleRangeStartEdit(entry)}
+                                onSave={() => void handleRangeSaveEdit(entry, dayEntries)}
+                                onCancel={handleCancelEdit}
+                              />
+                            );
+                          }
                           return (
                             <div key={entry.id} className="rounded-lg border border-border bg-card p-3 text-card-foreground">
                               {isRangeEditing && editValues ? (

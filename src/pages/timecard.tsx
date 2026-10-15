@@ -51,6 +51,7 @@ import {
   isAutoClockOutDue,
   isAwaitingAsset,
   isPtoEntry,
+  keepAutoClockOutMarker,
   scheduledStartFor,
   notesHaveNoLunch,
   stripNoLunchMarker,
@@ -61,11 +62,13 @@ import {
   getEntryAssetName,
   getEntryDivision,
   getEntryJobNumber,
+  getEntryWorkDateKey,
   PTO_TIME_KEY_BY_HOURS,
   getPtoClockInIso,
   type PtoHours,
 } from '@/lib/entry-helpers';
-import { openLaborEntries, openPunchStartedBeforeToday } from '@/lib/open-punches';
+import { openLaborEntries, openPunchIsLeftOver, openPunchStartedBeforeToday } from '@/lib/open-punches';
+import { workDateForClockIn } from '@/lib/day-session';
 import { useReloadTables } from '@/hooks/use-reload-tables';
 import { ShopTimeEntryPTOTypeKeyToLabel, type ShopTimeEntry, type ShopTimeEntryPTOTypeKey } from '@/models/shop-time-entry';
 import { getCurrentPosition } from '@/lib/geolocation';
@@ -140,21 +143,21 @@ export default function TimecardPage() {
       );
   }, [selectedEmployee, selectedEmployeeId, timeEntries]);
   const selectedAsset = selectedAssetRecord ?? assets.find((asset: EquipmentAsset) => asset.id === selectedAssetId);
-  const employeeTodayEntries = useMemo(() => {
-    if (!selectedEmployeeId || !selectedEmployee) return [];
-    const today = format(new Date(), 'yyyy-MM-dd');
-    return employeeEntries.filter((entry: ShopTimeEntry) => {
-      if (!entry.clockIn) return false;
-      const clockIn = new Date(entry.clockIn);
-      return !Number.isNaN(clockIn.getTime()) && format(clockIn, 'yyyy-MM-dd') === today;
-    });
-  }, [employeeEntries, selectedEmployee, selectedEmployeeId]);
   const openEntries = useMemo(() => openLaborEntries(employeeEntries), [employeeEntries]);
   const liveOpenEntries = useMemo(() => openEntries.filter((entry) => !isAutoClockOutDue(entry)), [openEntries]);
   const employeeActiveEntry = liveOpenEntries.length > 0 ? liveOpenEntries[liveOpenEntries.length - 1] : undefined;
   const oldestOpen = liveOpenEntries[0];
-  const activePunchIsStale = Boolean(employeeActiveEntry && openPunchStartedBeforeToday(employeeActiveEntry));
-  const hasStaleOpen = liveOpenEntries.some((entry) => openPunchStartedBeforeToday(entry));
+  const activePunchIsStale = Boolean(employeeActiveEntry && openPunchIsLeftOver(employeeActiveEntry));
+  const hasStaleOpen = liveOpenEntries.some((entry) => openPunchIsLeftOver(entry));
+  // A shift that runs past midnight keeps showing the day it started on.
+  const currentWorkDay =
+    employeeActiveEntry && !activePunchIsStale
+      ? getEntryWorkDateKey(employeeActiveEntry)
+      : workDateForClockIn(employeeEntries, getNowIso());
+  const employeeTodayEntries = useMemo(
+    () => employeeEntries.filter((entry: ShopTimeEntry) => entry.clockIn && getEntryWorkDateKey(entry) === currentWorkDay),
+    [currentWorkDay, employeeEntries],
+  );
   const displayedEntries = useMemo(() => {
     const todayIds = new Set(employeeTodayEntries.map((entry) => entry.id));
     const earlierOpenJobs = liveOpenEntries.filter((entry) => !todayIds.has(entry.id) && !isAwaitingAsset(entry));
@@ -256,6 +259,7 @@ export default function TimecardPage() {
     }
     const expiredOpen = openEntries.filter((entry) => isAutoClockOutDue(entry));
     const clockIn = getNowIso();
+    const clockInWorkDate = workDateForClockIn(employeeEntries, clockIn);
     setIsClockingIn(true);
     try {
       const pos = await getCurrentPosition();
@@ -267,7 +271,7 @@ export default function TimecardPage() {
               clockIn,
               clockInLat: pos?.lat,
               clockInLon: pos?.lon,
-              workDate: getWorkDate(clockIn),
+              workDate: clockInWorkDate,
               division: ADMIN_DIVISION,
               assetDivision: ADMIN_DIVISION,
               jobNumber: ADMIN_JOB_NUMBER,
@@ -278,7 +282,7 @@ export default function TimecardPage() {
               clockIn,
               clockInLat: pos?.lat,
               clockInLon: pos?.lon,
-              workDate: getWorkDate(clockIn),
+              workDate: clockInWorkDate,
             },
       );
       resetEntryForm();
@@ -327,7 +331,7 @@ export default function TimecardPage() {
           division: divisionNumber,
           jobNumber: manualJobNumber || undefined,
           clockIn: switchAt,
-          workDate: getWorkDate(switchAt),
+          workDate: getEntryWorkDateKey(employeeActiveEntry),
           notes: applyNoLunchMarker(notes.trim() || undefined, todayPay.noLunch),
         },
       });
@@ -394,9 +398,9 @@ export default function TimecardPage() {
     const openIds = new Set(liveOpenEntries.map((entry) => entry.id));
     const pos = await getCurrentPosition(2_000);
     const entries = liveOpenEntries.map((entry) => {
-      const dayKey = format(new Date(entry.clockIn ?? clockOut), 'yyyy-MM-dd');
+      const dayKey = getEntryWorkDateKey(entry);
       const dayEntries = employeeEntries
-        .filter((row: ShopTimeEntry) => row.clockIn && format(new Date(row.clockIn), 'yyyy-MM-dd') === dayKey && !isPtoEntry(row))
+        .filter((row: ShopTimeEntry) => row.clockIn && getEntryWorkDateKey(row) === dayKey && !isPtoEntry(row))
         .map((row: ShopTimeEntry) => (openIds.has(row.id) ? { ...row, clockOut: row.clockOut ?? clockOut } : row));
       const minutes = getEntryPaidMinutes(dayEntries, { ...entry, clockOut }, new Date(), payStart, payProfile);
       return { id: entry.id, hours: Number.isFinite(minutes) ? minutes / 60 : undefined };
@@ -467,7 +471,10 @@ export default function TimecardPage() {
           assetDivision: newAsset ? newAsset.divisionCode : manualDivision ? Number(manualDivision) : undefined,
           division: newAsset ? newAsset.divisionCode : manualDivision ? Number(manualDivision) : undefined,
           jobNumber: manualJobNumber || undefined,
-          notes: applyNoLunchMarker(editingNotes.trim() || undefined, notesHaveNoLunch(entry.notes) || todayPay.noLunch),
+          notes: keepAutoClockOutMarker(
+            entry.notes,
+            applyNoLunchMarker(editingNotes.trim() || undefined, notesHaveNoLunch(entry.notes) || todayPay.noLunch),
+          ),
         },
       });
       handleCancelEditAsset();
@@ -481,7 +488,12 @@ export default function TimecardPage() {
     try {
       await updateTimeEntry.mutateAsync({
         id: entry.id,
-        changedFields: { notes: applyNoLunchMarker(editingNotes.trim() || undefined, notesHaveNoLunch(entry.notes) || todayPay.noLunch) },
+        changedFields: {
+          notes: keepAutoClockOutMarker(
+            entry.notes,
+            applyNoLunchMarker(editingNotes.trim() || undefined, notesHaveNoLunch(entry.notes) || todayPay.noLunch),
+          ),
+        },
       });
       setEditingNotesEntryId('');
       setEditingNotes('');

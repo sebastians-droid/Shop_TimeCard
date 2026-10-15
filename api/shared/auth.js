@@ -1,14 +1,15 @@
 const { loadConfig, findShopEmployeeBySignInEmail, getTimeEntryPunch, listEmployeeTimeEntries } = require('./dataverse');
 const { collectSignInEmails, firstAllowlistedEmail } = require('./sign-in-identity');
 
-const PUNCH_DENIED_MESSAGE =
-  'Clock in and clock out happen at the shop kiosk. Once you are clocked in, you can add jobs from any device.';
+const PUNCH_DENIED_MESSAGE = 'Clock in and clock out happen at the shop kiosk. Once you are clocked in, you can add jobs from any device.';
 const OUTSIDE_DAY_MESSAGE =
-  "Job times must fall inside a day you clocked in for at the shop kiosk. Ask a manager to change the day's clock-in or clock-out.";
+  "Job times must fall inside a time you were clocked in at the shop kiosk, not across a break. Ask a manager to change the day's clock-in or clock-out.";
 // A job switch is stamped by the client; this bounds how far that stamp may drift from the server clock.
 const SWITCH_CLOCK_SKEW_MS = 5 * 60 * 1000;
 const DAY_LOOKAROUND_MS = 36 * 60 * 60 * 1000;
 const SAME_DAY_FALLBACK_MS = 14 * 60 * 60 * 1000;
+// Matches BREAK_MIN_GAP_MS in src/lib/time-rules.ts: shorter gaps between punches are drift, not a break.
+const BREAK_MIN_GAP_MS = 5 * 60 * 1000;
 
 function decodePrincipal(headerValue) {
   if (!headerValue) return null;
@@ -203,12 +204,13 @@ function sameWorkDate(a, b) {
 }
 
 /**
- * The span an employee actually punched on a work day: first clock-in to last
- * clock-out, or to now while still clocked in. Null when nothing was punched.
+ * The spans an employee was actually on the clock on a work day, with breaks
+ * between clock-out and the next clock-in left out. An open punch runs to now.
+ * Empty when nothing was punched.
  */
-async function punchedDayWindow(employeeId, anchorIso, workDate) {
+async function punchedDaySessions(employeeId, anchorIso, workDate) {
   const anchor = new Date(anchorIso).getTime();
-  if (!Number.isFinite(anchor)) return null;
+  if (!Number.isFinite(anchor)) return [];
   const entries = await listEmployeeTimeEntries(employeeId, {
     from: new Date(anchor - DAY_LOOKAROUND_MS).toISOString(),
     to: new Date(anchor + DAY_LOOKAROUND_MS).toISOString(),
@@ -218,23 +220,27 @@ async function punchedDayWindow(employeeId, anchorIso, workDate) {
     if (workDate && entry.workDate) return sameWorkDate(entry.workDate, workDate);
     return Math.abs(new Date(entry.clockIn).getTime() - anchor) <= SAME_DAY_FALLBACK_MS;
   });
-  if (day.length === 0) return null;
   const now = Date.now();
-  return {
-    start: Math.min(...day.map((entry) => new Date(entry.clockIn).getTime())),
-    end: Math.max(...day.map((entry) => (entry.clockOut ? new Date(entry.clockOut).getTime() : now))),
-  };
+  const sessions = [];
+  const spans = day
+    .map((entry) => ({ start: new Date(entry.clockIn).getTime(), end: entry.clockOut ? new Date(entry.clockOut).getTime() : now }))
+    .sort((a, b) => a.start - b.start);
+  for (const span of spans) {
+    const last = sessions[sessions.length - 1];
+    if (last && span.start - last.end < BREAK_MIN_GAP_MS) last.end = Math.max(last.end, span.end);
+    else sessions.push({ ...span });
+  }
+  return sessions;
 }
 
 async function assertTimesInsidePunchedDay(employeeId, times, workDate) {
   const values = times.filter(Boolean);
   if (values.length === 0) return;
-  const window = await punchedDayWindow(employeeId, values[0], workDate);
-  if (!window) throw forbidden(PUNCH_DENIED_MESSAGE);
-  for (const value of values) {
-    const time = new Date(value).getTime();
-    if (!Number.isFinite(time) || time < window.start || time > window.end) throw forbidden(OUTSIDE_DAY_MESSAGE);
-  }
+  const sessions = await punchedDaySessions(employeeId, values[0], workDate);
+  if (sessions.length === 0) throw forbidden(PUNCH_DENIED_MESSAGE);
+  const stamps = values.map((value) => new Date(value).getTime());
+  const inside = sessions.some((session) => stamps.every((time) => Number.isFinite(time) && time >= session.start && time <= session.end));
+  if (!inside) throw forbidden(OUTSIDE_DAY_MESSAGE);
 }
 
 /**
