@@ -1,6 +1,14 @@
-import { format } from 'date-fns';
+import { format, subDays } from 'date-fns';
 
-import { dayPunchSessions, entryWorkDateKey, getEntryPaidMinutes, isPtoEntry, type EmployeePayProfile } from '@/lib/time-rules';
+import {
+  dayPunchSessions,
+  entryWorkDateKey,
+  getEntryPaidMinutes,
+  isAwaitingAsset,
+  isPtoEntry,
+  type EmployeePayProfile,
+  type PunchSession,
+} from '@/lib/time-rules';
 import type { ShopTimeEntry } from '@/models/shop-time-entry';
 
 export function laborEntries(entries: ShopTimeEntry[]): ShopTimeEntry[] {
@@ -220,4 +228,231 @@ export function planForgottenJobInsert(
   }
 
   return { patches, creates, firstIn, lastOut };
+}
+
+/** Road mechanics may reshape jobs on today and the seven days before it. Matches ROAD_MECH_EDIT_DAYS in api/shared/auth.js. */
+export const ROAD_MECH_EDIT_DAYS = 7;
+
+export function isWithinRoadMechEditWindow(dateKey: string, now = new Date()): boolean {
+  return dateKey >= format(subDays(now, ROAD_MECH_EDIT_DAYS), 'yyyy-MM-dd');
+}
+
+function toMs(iso: string | undefined): number {
+  return iso ? new Date(iso).getTime() : Number.NaN;
+}
+
+function sessionHolding(labor: ShopTimeEntry[], entry: ShopTimeEntry): PunchSession | undefined {
+  const at = toMs(entry.clockIn);
+  return dayPunchSessions(labor).find((session) => at >= toMs(session.start) && (!session.end || at <= toMs(session.end)));
+}
+
+export type JobTimeLocks = {
+  /** The job starts at a clock-in punch, so its start cannot move. */
+  startLocked: boolean;
+  /** The job ends at a clock-out punch, or is still running. */
+  endLocked: boolean;
+  session?: PunchSession;
+};
+
+export function jobTimeLocks(dayEntries: ShopTimeEntry[], entry: ShopTimeEntry): JobTimeLocks {
+  const session = sessionHolding(laborEntries(dayEntries), entry);
+  if (!session) return { startLocked: true, endLocked: true };
+  return {
+    startLocked: toMs(entry.clockIn) === toMs(session.start),
+    endLocked: !entry.clockOut || (session.end !== undefined && toMs(entry.clockOut) === toMs(session.end)),
+    session,
+  };
+}
+
+export type JobTimeWrite =
+  { kind: 'patch'; id: string; clockIn?: string; clockOut?: string; hours?: number } | { kind: 'delete'; id: string };
+
+export type JobTimeEdit = {
+  /**
+   * Ordered so every step leaves the day's punched spans untouched: rows grow
+   * first, then shrink, then fully covered unassigned rows are removed. The
+   * server rejects a road mechanic's write that would move a clock-in or clock-out.
+   */
+  writes: JobTimeWrite[];
+  dayAfter: ShopTimeEntry[];
+  /** Other jobs whose times moved to make room. */
+  shiftedIds: string[];
+  /** Unassigned rows the edited job now covers completely. */
+  removedIds: string[];
+};
+
+/** Hours patches for closed labor rows whose stored hours no longer match the day as it now stands. */
+export function planHoursRefresh(
+  dayAfter: ShopTimeEntry[],
+  payStart?: string | null,
+  employee?: EmployeePayProfile | null,
+  now = new Date(),
+): JobTimeWrite[] {
+  return laborEntries(dayAfter).flatMap((row): JobTimeWrite[] => {
+    if (!row.clockIn || !row.clockOut) return [];
+    const hours = getEntryPaidMinutes(dayAfter, row, now, payStart, employee) / 60;
+    return Math.abs(hours - (row.hours ?? 0)) > 0.001 ? [{ kind: 'patch', id: row.id, hours }] : [];
+  });
+}
+
+type Span = { clockIn: string; clockOut?: string };
+
+function coveredJobError(row: ShopTimeEntry): { error: string } {
+  const range = `${format(new Date(row.clockIn!), 'p')} – ${row.clockOut ? format(new Date(row.clockOut), 'p') : 'now'}`;
+  return { error: `That would cover the whole ${range} job. Change or cancel that job first.` };
+}
+
+/**
+ * Moves a job's start and end inside the session it already belongs to. The
+ * neighbor on each side gives up or takes the difference, so the day stays
+ * gap-free and its clock-in, clock-out, and breaks never change. An
+ * unassigned row swallowed entirely is removed; swallowing a real job is refused.
+ */
+export function planJobTimeEdit(
+  dayEntries: ShopTimeEntry[],
+  entryId: string,
+  startedAt: string,
+  endedAt: string | undefined,
+  payStart?: string | null,
+  employee?: EmployeePayProfile | null,
+  now = new Date(),
+): JobTimeEdit | { error: string } {
+  const labor = laborEntries(dayEntries)
+    .filter((entry) => entry.clockIn)
+    .sort(byClockIn);
+  const target = labor.find((entry) => entry.id === entryId);
+  if (!target?.clockIn) return { error: 'That job is no longer on this day. Reload and try again.' };
+
+  const start = toMs(startedAt);
+  const end = endedAt ? toMs(endedAt) : undefined;
+  if (!Number.isFinite(start) || (end !== undefined && !Number.isFinite(end))) {
+    return { error: 'Enter the start and end time for this job.' };
+  }
+  if (target.clockOut && end === undefined) return { error: 'Enter the end time for this job.' };
+  if (!target.clockOut && end !== undefined) {
+    return { error: 'This job is still running. Its end is set when you switch jobs or clock out.' };
+  }
+  if (end !== undefined && end <= start) return { error: 'End time must be after start time.' };
+
+  const locks = jobTimeLocks(dayEntries, target);
+  const session = locks.session;
+  if (!session) return { error: 'That job is no longer on this day. Reload and try again.' };
+  const oldStart = toMs(target.clockIn);
+  const oldEnd = target.clockOut ? toMs(target.clockOut) : undefined;
+  if (locks.startLocked && start !== oldStart) {
+    return { error: `This job starts at your clock-in (${format(new Date(oldStart), 'p')}). Ask a manager to change a clock-in.` };
+  }
+  if (locks.endLocked && oldEnd !== undefined && end !== oldEnd) {
+    return { error: `This job ends at your clock-out (${format(new Date(oldEnd), 'p')}). Ask a manager to change a clock-out.` };
+  }
+  const sessionStart = toMs(session.start);
+  const sessionEnd = session.end ? toMs(session.end) : now.getTime();
+  if (start < sessionStart || (end ?? start) > sessionEnd) {
+    const span = `${format(new Date(sessionStart), 'p')} – ${session.end ? format(new Date(sessionEnd), 'p') : 'now'}`;
+    return { error: `Job times must stay inside the time you were clocked in (${span}).` };
+  }
+
+  const others = labor.filter((row) => row.id !== target.id && toMs(row.clockIn) >= sessionStart && toMs(row.clockIn) <= sessionEnd);
+  const before = others.filter((row) => toMs(row.clockIn) < oldStart);
+  const after = others.filter((row) => toMs(row.clockIn) >= oldStart);
+  const finalSpans = new Map<string, Span>([[target.id, { clockIn: startedAt, clockOut: endedAt }]]);
+  const removed = new Set<string>();
+
+  if (start < oldStart) {
+    for (const row of [...before].reverse()) {
+      const rowEnd = toMs(row.clockOut);
+      if (rowEnd <= start) break;
+      if (toMs(row.clockIn) >= start) {
+        if (!isAwaitingAsset(row)) return coveredJobError(row);
+        removed.add(row.id);
+        continue;
+      }
+      finalSpans.set(row.id, { clockIn: row.clockIn!, clockOut: startedAt });
+      break;
+    }
+  } else if (start > oldStart) {
+    const previous = before[before.length - 1];
+    if (!previous?.clockOut) return { error: 'There is no earlier job to take over that time.' };
+    finalSpans.set(previous.id, { clockIn: previous.clockIn!, clockOut: startedAt });
+  }
+
+  if (end !== undefined && oldEnd !== undefined && end > oldEnd) {
+    for (const row of after) {
+      if (toMs(row.clockIn) >= end) break;
+      const rowEnd = row.clockOut ? toMs(row.clockOut) : Number.POSITIVE_INFINITY;
+      if (rowEnd <= end) {
+        if (!isAwaitingAsset(row)) return coveredJobError(row);
+        removed.add(row.id);
+        continue;
+      }
+      finalSpans.set(row.id, { clockIn: endedAt!, clockOut: row.clockOut });
+      break;
+    }
+  } else if (end !== undefined && oldEnd !== undefined && end < oldEnd) {
+    const following = after.find((row) => !removed.has(row.id));
+    if (!following) return { error: 'There is no later job to take over that time.' };
+    finalSpans.set(following.id, { clockIn: endedAt!, clockOut: following.clockOut });
+  }
+
+  const dayAfter = dayEntries
+    .filter((entry) => !removed.has(entry.id))
+    .map((entry) => {
+      const span = finalSpans.get(entry.id);
+      return span ? { ...entry, clockIn: span.clockIn, clockOut: span.clockOut } : entry;
+    });
+
+  const grow: JobTimeWrite[] = [];
+  const shrink: JobTimeWrite[] = [];
+  const hoursOnly: JobTimeWrite[] = [];
+  for (const row of labor) {
+    if (removed.has(row.id)) continue;
+    const span = finalSpans.get(row.id);
+    const closedAfter = span ? span.clockOut : row.clockOut;
+    const hours = closedAfter
+      ? getEntryPaidMinutes(
+          dayAfter,
+          dayAfter.find((entry) => entry.id === row.id)!,
+          now,
+          payStart,
+          employee,
+        ) / 60
+      : undefined;
+    const hoursChanged = hours !== undefined && Math.abs(hours - (row.hours ?? 0)) > 0.001;
+    const spanChanged = span && (toMs(span.clockIn) !== toMs(row.clockIn) || toMs(span.clockOut) !== toMs(row.clockOut));
+    if (!span || !spanChanged) {
+      if (hoursChanged) hoursOnly.push({ kind: 'patch', id: row.id, hours });
+      continue;
+    }
+    const unionIn = toMs(span.clockIn) < toMs(row.clockIn) ? span.clockIn : row.clockIn!;
+    const unionOut = row.clockOut && span.clockOut && toMs(span.clockOut) > toMs(row.clockOut) ? span.clockOut : row.clockOut;
+    const grows = toMs(unionIn) !== toMs(row.clockIn) || toMs(unionOut) !== toMs(row.clockOut);
+    const shrinks = toMs(unionIn) !== toMs(span.clockIn) || toMs(unionOut) !== toMs(span.clockOut);
+    const finalWrite = (from: Span): JobTimeWrite => ({
+      kind: 'patch',
+      id: row.id,
+      clockIn: toMs(span.clockIn) !== toMs(from.clockIn) ? span.clockIn : undefined,
+      clockOut: span.clockOut && toMs(span.clockOut) !== toMs(from.clockOut) ? span.clockOut : undefined,
+      hours,
+    });
+    if (grows && shrinks) {
+      grow.push({
+        kind: 'patch',
+        id: row.id,
+        clockIn: unionIn !== row.clockIn ? unionIn : undefined,
+        clockOut: unionOut !== row.clockOut ? unionOut : undefined,
+      });
+      shrink.push(finalWrite({ clockIn: unionIn, clockOut: unionOut }));
+    } else if (grows) {
+      grow.push(finalWrite({ clockIn: row.clockIn!, clockOut: row.clockOut }));
+    } else {
+      shrink.push(finalWrite({ clockIn: row.clockIn!, clockOut: row.clockOut }));
+    }
+  }
+
+  return {
+    writes: [...grow, ...shrink, ...[...removed].map((id): JobTimeWrite => ({ kind: 'delete', id })), ...hoursOnly],
+    dayAfter,
+    shiftedIds: [...finalSpans.keys()].filter((id) => id !== target.id),
+    removedIds: [...removed],
+  };
 }

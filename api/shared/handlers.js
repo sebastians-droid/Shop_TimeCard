@@ -27,6 +27,7 @@ const {
   requireManager,
   assertTimeEntryAccess,
   assertTimeEntryCreate,
+  assertTimeEntryDelete,
   assertJobSwitch,
   assertCanClockOut,
 } = require('./auth');
@@ -245,7 +246,8 @@ async function handleRequest(request) {
     }
 
     if (entryMatch && method === 'DELETE') {
-      requireManager(request);
+      const user = await requireAppUser(request);
+      await assertTimeEntryDelete(user, entryMatch[1]);
       await deleteTimeEntry(entryMatch[1]);
       return json(204, {});
     }

@@ -10,6 +10,12 @@ const DAY_LOOKAROUND_MS = 36 * 60 * 60 * 1000;
 const SAME_DAY_FALLBACK_MS = 14 * 60 * 60 * 1000;
 // Matches BREAK_MIN_GAP_MS in src/lib/time-rules.ts: shorter gaps between punches are drift, not a break.
 const BREAK_MIN_GAP_MS = 5 * 60 * 1000;
+// Matches ROAD_MECH_EDIT_DAYS in src/lib/day-session.ts.
+const ROAD_MECH_EDIT_DAYS = 7;
+const DAY_MS = 24 * 60 * 60 * 1000;
+const ROAD_MECH_WINDOW_MESSAGE = `Job times can be changed for the last ${ROAD_MECH_EDIT_DAYS} days. Ask a manager to change an older day.`;
+const CLOCK_TIMES_LOCKED_MESSAGE =
+  'That change would move a clock-in, clock-out, or break. Jobs can move inside the day, but the punched times stay as they are. Ask a manager to change them.';
 
 function decodePrincipal(headerValue) {
   if (!headerValue) return null;
@@ -203,26 +209,30 @@ function sameWorkDate(a, b) {
   return Boolean(a && b) && String(a).slice(0, 10) === String(b).slice(0, 10);
 }
 
-/**
- * The spans an employee was actually on the clock on a work day, with breaks
- * between clock-out and the next clock-in left out. An open punch runs to now.
- * Empty when nothing was punched.
- */
-async function punchedDaySessions(employeeId, anchorIso, workDate) {
+/** The labor punches recorded for an employee's work day, PTO excluded. */
+async function punchedDayEntries(employeeId, anchorIso, workDate) {
   const anchor = new Date(anchorIso).getTime();
   if (!Number.isFinite(anchor)) return [];
   const entries = await listEmployeeTimeEntries(employeeId, {
     from: new Date(anchor - DAY_LOOKAROUND_MS).toISOString(),
     to: new Date(anchor + DAY_LOOKAROUND_MS).toISOString(),
   });
-  const day = entries.filter((entry) => {
+  return entries.filter((entry) => {
     if (!entry.clockIn || isPtoRecord(entry)) return false;
     if (workDate && entry.workDate) return sameWorkDate(entry.workDate, workDate);
     return Math.abs(new Date(entry.clockIn).getTime() - anchor) <= SAME_DAY_FALLBACK_MS;
   });
-  const now = Date.now();
+}
+
+/**
+ * The spans an employee was actually on the clock on a work day, with breaks
+ * between clock-out and the next clock-in left out. An open punch runs to now.
+ * Empty when nothing was punched.
+ */
+function sessionsOf(entries, now) {
   const sessions = [];
-  const spans = day
+  const spans = entries
+    .filter((entry) => entry.clockIn && !isPtoRecord(entry))
     .map((entry) => ({ start: new Date(entry.clockIn).getTime(), end: entry.clockOut ? new Date(entry.clockOut).getTime() : now }))
     .sort((a, b) => a.start - b.start);
   for (const span of spans) {
@@ -231,6 +241,42 @@ async function punchedDaySessions(employeeId, anchorIso, workDate) {
     else sessions.push({ ...span });
   }
   return sessions;
+}
+
+async function punchedDaySessions(employeeId, anchorIso, workDate) {
+  return sessionsOf(await punchedDayEntries(employeeId, anchorIso, workDate), Date.now());
+}
+
+function sameSessions(left, right) {
+  return (
+    left.length === right.length && left.every((session, index) => session.start === right[index].start && session.end === right[index].end)
+  );
+}
+
+/** Road mechanics without manager or admin rights, whose job-time edits are held to the punched day. */
+function isRoadMechOnly(user) {
+  return Boolean(user.isRoadMech && !user.isManager && !user.isAdmin && !user.isKioskAccount);
+}
+
+/** True when a work day is recent enough to reshape. One extra day absorbs the server running on UTC. */
+function withinRoadMechWindow(workDate, clockIn, now = Date.now()) {
+  const key = String(workDate || clockIn || '').slice(0, 10);
+  if (!key) return false;
+  return key >= new Date(now - (ROAD_MECH_EDIT_DAYS + 1) * DAY_MS).toISOString().slice(0, 10);
+}
+
+/**
+ * Applies a write to the day's punches and refuses it unless every clock-in,
+ * clock-out, and break comes out exactly as it was.
+ */
+async function assertPunchedDayUnchanged(employeeId, { anchor, workDate }, apply) {
+  if (!withinRoadMechWindow(workDate, anchor)) throw forbidden(ROAD_MECH_WINDOW_MESSAGE);
+  const day = await punchedDayEntries(employeeId, anchor, workDate);
+  const now = Date.now();
+  const before = sessionsOf(day, now);
+  if (before.length === 0) throw forbidden(PUNCH_DENIED_MESSAGE);
+  if (!sameSessions(before, sessionsOf(apply(day), now))) throw forbidden(CLOCK_TIMES_LOCKED_MESSAGE);
+  return day;
 }
 
 async function assertTimesInsidePunchedDay(employeeId, times, workDate) {
@@ -266,7 +312,16 @@ async function assertTimeEntryCreate(user, record) {
   assertPtoApproval(user, record);
   if (hasFullTimecardAccess(user)) return;
   assertOwnShopEmployee(user, record.employee?.id);
-  if (!recordTouchesPunch(record) || isPtoRecord(record) || user.canPunch) return;
+  if (!recordTouchesPunch(record) || isPtoRecord(record)) return;
+  // A road mechanic's clock-in arrives with no clock-out; a closed row is a job added to an earlier punch.
+  if (isRoadMechOnly(user) && record.clockOut) {
+    await assertPunchedDayUnchanged(record.employee.id, { anchor: record.clockIn, workDate: record.workDate }, (day) => [
+      ...day,
+      { id: 'new', clockIn: record.clockIn, clockOut: record.clockOut },
+    ]);
+    return;
+  }
+  if (user.canPunch) return;
   if (!record.clockIn || !record.clockOut) throw forbidden(PUNCH_DENIED_MESSAGE);
   await assertTimesInsidePunchedDay(record.employee.id, [record.clockIn, record.clockOut], record.workDate);
 }
@@ -277,12 +332,44 @@ async function assertTimeEntryAccess(user, entryId, changedFields = {}) {
   const existing = await getTimeEntryPunch(entryId);
   assertOwnShopEmployee(user, existing.employeeId);
   if (isClosingOpenPunch(existing, changedFields)) return;
-  if (!recordTouchesPunch(changedFields) || user.canPunch) return;
+  if (!recordTouchesPunch(changedFields)) return;
+  if (isRoadMechOnly(user)) {
+    await assertPunchedDayUnchanged(existing.employeeId, { anchor: existing.clockIn, workDate: existing.workDate }, (day) =>
+      day.map((entry) =>
+        entry.id === entryId
+          ? {
+              ...entry,
+              clockIn: changedFields.clockIn !== undefined ? changedFields.clockIn || undefined : entry.clockIn,
+              clockOut: changedFields.clockOut !== undefined ? changedFields.clockOut || undefined : entry.clockOut,
+            }
+          : entry,
+      ),
+    );
+    return;
+  }
+  if (user.canPunch) return;
   if (changedFields.clockOut !== undefined && (!existing.clockOut || !changedFields.clockOut)) {
     throw forbidden(PUNCH_DENIED_MESSAGE);
   }
   if (changedFields.clockIn !== undefined && !changedFields.clockIn) throw forbidden(PUNCH_DENIED_MESSAGE);
   await assertTimesInsidePunchedDay(existing.employeeId, [changedFields.clockIn, changedFields.clockOut], existing.workDate);
+}
+
+/**
+ * Managers delete anything. A road mechanic, or the kiosk acting for one,
+ * may only remove a closed row other jobs already cover, so the day's
+ * punched times and paid hours stay the same.
+ */
+async function assertTimeEntryDelete(user, entryId) {
+  if (user.isManager) return;
+  if (!user.isKioskAccount && !isRoadMechOnly(user)) throw forbidden('Manager access is required for this action.');
+  const existing = await getTimeEntryPunch(entryId);
+  assertOwnShopEmployee(user, existing.employeeId);
+  if (!existing.clockIn || !existing.clockOut) throw forbidden('Only a finished job can be removed.');
+  const day = await assertPunchedDayUnchanged(existing.employeeId, { anchor: existing.clockIn, workDate: existing.workDate }, (rows) =>
+    rows.filter((entry) => entry.id !== entryId),
+  );
+  if (!day.some((entry) => entry.id === entryId)) throw forbidden('Only a job on a punched day can be removed.');
 }
 
 /**
@@ -319,6 +406,7 @@ module.exports = {
   requireManager,
   assertTimeEntryAccess,
   assertTimeEntryCreate,
+  assertTimeEntryDelete,
   assertJobSwitch,
   assertCanClockOut,
   recordTouchesPunch,

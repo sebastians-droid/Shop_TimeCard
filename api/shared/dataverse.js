@@ -338,7 +338,7 @@ function timeEntryPayload(record, { isCreate }) {
   if (record.asset?.id) {
     payload['swank_Asset@odata.bind'] = `/swank_equipmentassets(${record.asset.id})`;
   } else if (record.asset === null) {
-    payload.swank_asset = null;
+    payload['swank_Asset@odata.bind'] = null;
   }
   return payload;
 }
