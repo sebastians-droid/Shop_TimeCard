@@ -42,7 +42,7 @@ const COLUMNS: Record<MechanicColumn, { title: string; icon: typeof Wrench; blur
   partsRunner: {
     title: 'Parts Runners',
     icon: Package,
-    blurb: 'No scheduled start — clock-in/out only on Division 200 · Job 113.',
+    blurb: 'Work a scheduled start time — clock-in/out only on Division 200 · Job 113.',
     empty: 'No parts runners. Drag someone here for parts-runner timecard rules.',
   },
   admin: {
@@ -80,9 +80,8 @@ const COLUMN_SHORT_LABEL: Record<MechanicColumn, string> = {
   admin: 'Admin',
 };
 
-function scheduleCaption(emp: Pick<AppShopEmployee, 'isRoadMech' | 'isAdmin' | 'isPartsRunner'>, startTime: string): string {
+function scheduleCaption(emp: Pick<AppShopEmployee, 'isRoadMech' | 'isAdmin'>, startTime: string): string {
   if (emp.isAdmin) return 'Admin — starts at clock-in';
-  if (emp.isPartsRunner) return 'Parts runner — starts at clock-in';
   if (emp.isRoadMech) return 'Starts at clock-in';
   return `Start ${startTime}`;
 }
@@ -92,7 +91,7 @@ function moveSuccessMessage(emp: AppShopEmployee, target: MechanicColumn, startT
     case 'admin':
       return `${emp.employeeName} is now admin — paid from clock-in on Division 200 · Job 112.`;
     case 'partsRunner':
-      return `${emp.employeeName} is now a parts runner — paid from clock-in on Division 200 · Job 113.`;
+      return `${emp.employeeName} is now a parts runner — scheduled start ${startTime} on Division 200 · Job 113.`;
     case 'road':
       return `${emp.employeeName} is now a road mechanic — paid from clock-in.`;
     case 'shop':
@@ -107,8 +106,8 @@ function employeeTypeSuffix(emp: Pick<AppShopEmployee, 'isAdmin' | 'isRoadMech' 
   return '';
 }
 
-function paysFromClockInNotShop(emp: Pick<AppShopEmployee, 'isRoadMech' | 'isAdmin' | 'isPartsRunner'> | null | undefined): boolean {
-  return Boolean(emp?.isRoadMech || emp?.isAdmin || emp?.isPartsRunner);
+function paysFromClockInNotShop(emp: Pick<AppShopEmployee, 'isRoadMech' | 'isAdmin'> | null | undefined): boolean {
+  return Boolean(emp?.isRoadMech || emp?.isAdmin);
 }
 
 type MechanicScheduleProps = {
@@ -393,7 +392,7 @@ export function MechanicSchedule({ employees, timeEntries }: MechanicSchedulePro
                 {rangeEmployee?.isAdmin
                   ? 'Admin — set on-call for a date range.'
                   : rangeEmployee?.isPartsRunner
-                    ? 'Parts runner — set on-call for a date range.'
+                    ? 'Parts runner — set start times and on-call for a date range.'
                     : rangeEmployee?.isRoadMech
                       ? 'Road mechanic — set on-call for a date range.'
                       : 'Set start times and on-call for a date range.'}
@@ -579,7 +578,7 @@ export function MechanicSchedule({ employees, timeEntries }: MechanicSchedulePro
         <div className="grid grid-cols-1 gap-4 xl:grid-cols-2 2xl:grid-cols-4">
           {COLUMN_ORDER.map((column) => {
             const { title, icon: ColumnIcon, blurb, empty } = COLUMNS[column];
-            const showScheduledStart = column === 'shop';
+            const showScheduledStart = column === 'shop' || column === 'partsRunner';
             const list = byColumn[column];
 
             return (

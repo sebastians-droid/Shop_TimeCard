@@ -32,10 +32,10 @@ export function payProfileFor(employee: EmployeePayProfile | null | undefined): 
 }
 
 export function paysFromClockIn(employee: EmployeePayProfile | null | undefined): boolean {
-  return Boolean(employee?.isRoadMech || employee?.isAdmin || employee?.isPartsRunner);
+  return Boolean(employee?.isRoadMech || employee?.isAdmin);
 }
 
-/** Road and admin employees are paid from clock-in; shop uses a scheduled start. */
+/** Road and admin employees are paid from clock-in; shop mechanics and parts runners use a scheduled start. */
 export const scheduledStartFor = (employee: EmployeePayProfile | null | undefined, storedStart?: string) =>
   paysFromClockIn(employee) ? NO_SCHEDULED_START : storedStart;
 

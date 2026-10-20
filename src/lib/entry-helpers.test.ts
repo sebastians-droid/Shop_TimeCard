@@ -288,7 +288,8 @@ describe('scheduled start labels', () => {
 
   it('notes an admin employee is paid from clock-in', () => {
     expect(scheduledStartCaption({ isAdmin: true }, '06:00')).toBe('Admin — starts at clock-in');
-    expect(scheduledStartCaption({ isPartsRunner: true }, '06:00')).toBe('Parts runner — starts at clock-in');
+    const partsRunner = { isRoadMech: false, isPartsRunner: true };
+    expect(scheduledStartCaption(partsRunner, '06:00')).toBe('Scheduled start 6:00 AM');
   });
 
   it('uses the stored shop start, then the 7:00 default', () => {

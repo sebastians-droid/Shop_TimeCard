@@ -183,11 +183,9 @@ export function PayrollExportCard({
             notes: getEmployeeNotes(entry.notes),
             scheduledStart: employee?.isAdmin
               ? 'Admin'
-              : employee?.isPartsRunner
-                ? 'Parts runner'
-                : employee?.isRoadMech
-                  ? 'Road mechanic'
-                  : (dayScheduled ?? DEFAULT_SCHEDULED_START),
+              : employee?.isRoadMech
+                ? 'Road mechanic'
+                : (dayScheduled ?? DEFAULT_SCHEDULED_START),
             clockInDistance: entryDistanceMiles(entry.clockInLat, entry.clockInLon),
             clockOutDistance: entryDistanceMiles(entry.clockOutLat, entry.clockOutLon),
           };

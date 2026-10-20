@@ -488,7 +488,7 @@ describe('scheduledStartFor', () => {
 
   it('suppresses the scheduled start for admin employees', () => {
     expect(scheduledStartFor({ isAdmin: true }, '06:00')).toBe(NO_SCHEDULED_START);
-    expect(scheduledStartFor({ isPartsRunner: true }, '06:00')).toBe(NO_SCHEDULED_START);
+    expect(scheduledStartFor({ isPartsRunner: true }, '06:00')).toBe('06:00');
   });
 
   it('leaves an unknown employee on the default-start path', () => {
