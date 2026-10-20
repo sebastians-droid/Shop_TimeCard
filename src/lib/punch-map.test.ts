@@ -101,6 +101,90 @@ describe('buildDayPunches', () => {
     expect(result.segments).toEqual([]);
   });
 
+  it('pins only the day clock-in and clock-out, not job switches', () => {
+    const shop = { lat: SHOP_LOCATION.lat, lon: SHOP_LOCATION.lon };
+    const jobSite = { lat: 40.54, lon: -79.61 };
+    const result = buildDayPunches(
+      [
+        entry({
+          id: 'waiting',
+          timeEntry: 'Alex Smith - Waiting',
+          employee: { id: 'emp-1', autoNumber: 'Alex Smith' },
+          clockIn: at(DAY, '06:45'),
+          clockOut: at(DAY, '07:10'),
+          clockInLat: shop.lat,
+          clockInLon: shop.lon,
+          clockOutLat: shop.lat,
+          clockOutLon: shop.lon,
+        }),
+        entry({
+          id: 'job-1',
+          employee: { id: 'emp-1', autoNumber: 'Alex Smith' },
+          asset: { id: 'asset-1', asset: 'EX-140' },
+          clockIn: at(DAY, '07:10'),
+          clockOut: at(DAY, '11:00'),
+          clockInLat: shop.lat,
+          clockInLon: shop.lon,
+          clockOutLat: jobSite.lat,
+          clockOutLon: jobSite.lon,
+        }),
+        entry({
+          id: 'job-2',
+          employee: { id: 'emp-1', autoNumber: 'Alex Smith' },
+          jobNumber: '4410',
+          clockIn: at(DAY, '11:00'),
+          clockOut: at(DAY, '15:30'),
+          clockInLat: jobSite.lat,
+          clockInLon: jobSite.lon,
+          clockOutLat: shop.lat,
+          clockOutLon: shop.lon,
+        }),
+      ],
+      employees,
+      assets,
+      DAY,
+    );
+
+    expect(result.pins.map((p) => p.id)).toEqual(['waiting-in', 'job-2-out']);
+    expect(result.pins[0]?.at).toBe(at(DAY, '06:45'));
+    expect(result.pins[0]?.assetName).toBe('EX-140');
+    expect(result.pins[1]?.at).toBe(at(DAY, '15:30'));
+    expect(result.segments).toHaveLength(1);
+    expect(result.missing).toEqual([]);
+  });
+
+  it('keeps separate shifts when there is a gap between clock-out and clock-in', () => {
+    const gps = {
+      clockInLat: SHOP_LOCATION.lat,
+      clockInLon: SHOP_LOCATION.lon,
+      clockOutLat: SHOP_LOCATION.lat,
+      clockOutLon: SHOP_LOCATION.lon,
+    };
+    const result = buildDayPunches(
+      [
+        entry({
+          id: 'am',
+          employee: { id: 'emp-1', autoNumber: 'Alex Smith' },
+          clockIn: at(DAY, '07:00'),
+          clockOut: at(DAY, '11:00'),
+          ...gps,
+        }),
+        entry({
+          id: 'pm',
+          employee: { id: 'emp-1', autoNumber: 'Alex Smith' },
+          clockIn: at(DAY, '12:00'),
+          clockOut: at(DAY, '15:00'),
+          ...gps,
+        }),
+      ],
+      employees,
+      assets,
+      DAY,
+    );
+
+    expect(result.pins.map((p) => p.id)).toEqual(['am-in', 'am-out', 'pm-in', 'pm-out']);
+  });
+
   it('skips PTO and other days, and lists punches that have no GPS', () => {
     const result = buildDayPunches(
       [

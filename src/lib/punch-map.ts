@@ -49,20 +49,58 @@ export type DayPunches = {
 
 const OVERLAP_PRECISION = 4;
 const OVERLAP_OFFSET_DEG = 0.00012;
+/** A job switch closes one entry and opens the next at the same instant; allow for second-level rounding. */
+const JOB_SWITCH_TOLERANCE_MS = 60 * 1000;
 
 export function entryDayKey(entry: ShopTimeEntry): string | null {
   if (!entry.clockIn) return null;
   return entryWorkDateKey(entry) ?? null;
 }
 
-export function laborEntriesForDay(entries: ShopTimeEntry[], dayKey: string): ShopTimeEntry[] {
-  return entries.filter((entry) => !isPtoEntry(entry) && !isAwaitingAsset(entry) && entryDayKey(entry) === dayKey);
+function punchEntriesForDay(entries: ShopTimeEntry[], dayKey: string): ShopTimeEntry[] {
+  return entries.filter((entry) => !isPtoEntry(entry) && entryDayKey(entry) === dayKey);
+}
+
+function isJobSwitch(previous: ShopTimeEntry, next: ShopTimeEntry): boolean {
+  if (!previous.clockOut || !next.clockIn) return false;
+  return Math.abs(new Date(next.clockIn).getTime() - new Date(previous.clockOut).getTime()) <= JOB_SWITCH_TOLERANCE_MS;
+}
+
+/**
+ * Groups one day's entries into shifts: runs of entries joined by job switches.
+ * Only a shift's first clock-in and last clock-out are real punches.
+ */
+export function shiftsForDay(entries: ShopTimeEntry[], dayKey: string): ShopTimeEntry[][] {
+  const byEmployee = new Map<string, ShopTimeEntry[]>();
+  for (const entry of punchEntriesForDay(entries, dayKey)) {
+    const key = getEntryEmployeeKey(entry);
+    const list = byEmployee.get(key) ?? [];
+    list.push(entry);
+    byEmployee.set(key, list);
+  }
+
+  const shifts: ShopTimeEntry[][] = [];
+  for (const list of byEmployee.values()) {
+    list.sort((a, b) => new Date(a.clockIn ?? '').getTime() - new Date(b.clockIn ?? '').getTime());
+    let current: ShopTimeEntry[] = [];
+    for (const entry of list) {
+      const previous = current[current.length - 1];
+      if (previous && !isJobSwitch(previous, entry)) {
+        shifts.push(current);
+        current = [];
+      }
+      current.push(entry);
+    }
+    if (current.length > 0) shifts.push(current);
+  }
+  // A clock-in that never started a job is left off, as before.
+  return shifts.filter((shift) => shift.some((entry) => !isAwaitingAsset(entry)));
 }
 
 export function locatedPunchDates(entries: ShopTimeEntry[]): Date[] {
   const keys = new Set<string>();
   for (const entry of entries) {
-    if (isPtoEntry(entry) || isAwaitingAsset(entry)) continue;
+    if (isPtoEntry(entry)) continue;
     const dayKey = entryDayKey(entry);
     if (!dayKey) continue;
     const hasIn = entry.clockInLat != null && entry.clockInLon != null;
@@ -117,69 +155,73 @@ export function buildDayPunches(
   const missing: MissingPunch[] = [];
   const segments: PunchSegment[] = [];
 
-  for (const entry of laborEntriesForDay(entries, dayKey)) {
-    const employeeName = getEntryEmployeeName(entry, employees);
-    const employeeNumber = getEntryEmployeeNumber(entry, employees);
-    const employeeKey = getEntryEmployeeKey(entry);
-    const assetName = getEntryAssetName(entry, assets);
-    const inPos = asPosition(entry.clockInLat, entry.clockInLon);
-    const outPos = asPosition(entry.clockOutLat, entry.clockOutLon);
+  for (const shift of shiftsForDay(entries, dayKey)) {
+    const first = shift[0];
+    const last = shift[shift.length - 1];
+    const jobs = shift.filter((entry) => !isAwaitingAsset(entry));
+    const employeeName = getEntryEmployeeName(first, employees);
+    const employeeNumber = getEntryEmployeeNumber(first, employees);
+    const employeeKey = getEntryEmployeeKey(first);
+    const inAssetName = getEntryAssetName(jobs[0] ?? first, assets);
+    const outAssetName = getEntryAssetName(jobs[jobs.length - 1] ?? last, assets);
+    const inPos = asPosition(first.clockInLat, first.clockInLon);
+    const outPos = asPosition(last.clockOutLat, last.clockOutLon);
 
-    if (inPos && entry.clockIn) {
+    if (inPos && first.clockIn) {
       pins.push({
-        id: `${entry.id}-in`,
-        entryId: entry.id,
+        id: `${first.id}-in`,
+        entryId: first.id,
         kind: 'in',
         lat: inPos.lat,
         lon: inPos.lon,
         displayLat: inPos.lat,
         displayLon: inPos.lon,
-        at: entry.clockIn,
+        at: first.clockIn,
         employeeName,
         employeeNumber,
         employeeKey,
-        assetName,
+        assetName: inAssetName,
         distanceMiles: entryDistanceMiles(inPos.lat, inPos.lon),
       });
     }
 
-    if (outPos && entry.clockOut) {
+    if (outPos && last.clockOut) {
       pins.push({
-        id: `${entry.id}-out`,
-        entryId: entry.id,
+        id: `${last.id}-out`,
+        entryId: last.id,
         kind: 'out',
         lat: outPos.lat,
         lon: outPos.lon,
         displayLat: outPos.lat,
         displayLon: outPos.lon,
-        at: entry.clockOut,
+        at: last.clockOut,
         employeeName,
         employeeNumber,
         employeeKey,
-        assetName,
+        assetName: outAssetName,
         distanceMiles: entryDistanceMiles(outPos.lat, outPos.lon),
       });
     }
 
     if (inPos && outPos) {
       segments.push({
-        entryId: entry.id,
+        entryId: first.id,
         from: inPos,
         to: outPos,
       });
     }
 
-    const missingIn = Boolean(entry.clockIn) && !inPos;
-    const missingOut = Boolean(entry.clockOut) && !outPos;
+    const missingIn = Boolean(first.clockIn) && !inPos;
+    const missingOut = Boolean(last.clockOut) && !outPos;
     if (missingIn || missingOut) {
       missing.push({
-        entryId: entry.id,
+        entryId: first.id,
         employeeName,
         employeeNumber,
         employeeKey,
-        assetName,
-        clockIn: entry.clockIn,
-        clockOut: entry.clockOut,
+        assetName: inAssetName,
+        clockIn: first.clockIn,
+        clockOut: last.clockOut,
         missingIn,
         missingOut,
       });
