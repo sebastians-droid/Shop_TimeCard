@@ -199,21 +199,21 @@ export function useCreateShopEmployee() {
 
 export type RoadMechanicUpdate = { id: string; isRoadMech: boolean };
 
-export type EmployeeMechanicTypeUpdate = { id: string; isRoadMech: boolean; isAdmin: boolean };
+export type EmployeeMechanicTypeUpdate = { id: string; isRoadMech: boolean; isAdmin: boolean; isPartsRunner: boolean };
 
 export function useSetEmployeeMechanicType() {
   const client = useQueryClient();
   return useMutation({
-    mutationFn: ({ id, isRoadMech, isAdmin }: EmployeeMechanicTypeUpdate) =>
+    mutationFn: ({ id, isRoadMech, isAdmin, isPartsRunner }: EmployeeMechanicTypeUpdate) =>
       apiFetch<ShopEmployee>(`/api/employees/${id}`, {
         method: 'PATCH',
-        body: JSON.stringify({ isRoadMech, isAdmin }),
+        body: JSON.stringify({ isRoadMech, isAdmin, isPartsRunner }),
       }),
-    onMutate: async ({ id, isRoadMech, isAdmin }) => {
+    onMutate: async ({ id, isRoadMech, isAdmin, isPartsRunner }) => {
       await client.cancelQueries({ queryKey: queryKeys.shopEmployees() });
       const previous = client.getQueryData<ShopEmployee[]>(queryKeys.shopEmployees());
       client.setQueryData<ShopEmployee[]>(queryKeys.shopEmployees(), (rows) =>
-        rows?.map((row) => (row.id === id ? { ...row, isRoadMech, isAdmin } : row)),
+        rows?.map((row) => (row.id === id ? { ...row, isRoadMech, isAdmin, isPartsRunner } : row)),
       );
       return { previous };
     },
@@ -233,13 +233,13 @@ export function useSetRoadMechanic() {
     mutationFn: ({ id, isRoadMech }: RoadMechanicUpdate) =>
       apiFetch<ShopEmployee>(`/api/employees/${id}`, {
         method: 'PATCH',
-        body: JSON.stringify({ isRoadMech, isAdmin: false }),
+        body: JSON.stringify({ isRoadMech, isAdmin: false, isPartsRunner: false }),
       }),
     onMutate: async ({ id, isRoadMech }) => {
       await client.cancelQueries({ queryKey: queryKeys.shopEmployees() });
       const previous = client.getQueryData<ShopEmployee[]>(queryKeys.shopEmployees());
       client.setQueryData<ShopEmployee[]>(queryKeys.shopEmployees(), (rows) =>
-        rows?.map((row) => (row.id === id ? { ...row, isRoadMech, isAdmin: false } : row)),
+        rows?.map((row) => (row.id === id ? { ...row, isRoadMech, isAdmin: false, isPartsRunner: false } : row)),
       );
       return { previous };
     },

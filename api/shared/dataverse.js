@@ -230,6 +230,7 @@ function mapShopEmployee(row) {
     // shop mechanic. Only an explicit true is a road mechanic.
     isRoadMech: row.swank_isroadmech === true,
     isAdmin: row.swank_isadmin === true,
+    isPartsRunner: row.swank_ispartsrunner === true,
     signInEmail: normalizeSignInEmail(related.swank_companyemail ?? row.swank_signinemail),
     employee: name
       ? {
@@ -344,7 +345,7 @@ function timeEntryPayload(record, { isCreate }) {
 }
 
 const SHOP_EMPLOYEE_SELECT =
-  'swank_shopemployeeid,swank_autonumber,swank_empnum,swank_isroadmech,swank_isadmin,_swank_employee_value';
+  'swank_shopemployeeid,swank_autonumber,swank_empnum,swank_isroadmech,swank_isadmin,swank_ispartsrunner,_swank_employee_value';
 const SHOP_EMPLOYEE_EXPAND =
   '&$expand=swank_Employee($select=swank_employeeid,swank_name,swank_empnum,swank_companyemail)';
 
@@ -454,6 +455,7 @@ async function createShopEmployee(record) {
   if (record.empNum !== undefined) payload.swank_empnum = record.empNum;
   if (record.isRoadMech !== undefined) payload.swank_isroadmech = Boolean(record.isRoadMech);
   if (record.isAdmin !== undefined) payload.swank_isadmin = Boolean(record.isAdmin);
+  if (record.isPartsRunner !== undefined) payload.swank_ispartsrunner = Boolean(record.isPartsRunner);
   if (record.employeeId) {
     payload['swank_Employee@odata.bind'] = `/swank_employees(${record.employeeId})`;
   }
@@ -467,6 +469,7 @@ async function updateShopEmployee(id, record) {
   if (record.empNum !== undefined) payload.swank_empnum = record.empNum;
   if (record.isRoadMech !== undefined) payload.swank_isroadmech = Boolean(record.isRoadMech);
   if (record.isAdmin !== undefined) payload.swank_isadmin = Boolean(record.isAdmin);
+  if (record.isPartsRunner !== undefined) payload.swank_ispartsrunner = Boolean(record.isPartsRunner);
   if (record.employeeId !== undefined) {
     payload['swank_Employee@odata.bind'] = record.employeeId ? `/swank_employees(${record.employeeId})` : null;
   }

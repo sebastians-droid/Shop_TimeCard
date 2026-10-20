@@ -218,6 +218,7 @@ export default function ManagerDashboardPage() {
         const pay = getDayPayMinutes(summary.entries, new Date(), scheduledStartFor(employee, storedStart), {
           isRoadMech: employee?.isRoadMech,
           isAdmin: employee?.isAdmin,
+          isPartsRunner: employee?.isPartsRunner,
         });
         return {
           ...summary,
@@ -266,6 +267,7 @@ export default function ManagerDashboardPage() {
         getDayPayMinutes(dayEntries, new Date(), scheduledStartFor(employee), {
           isRoadMech: employee?.isRoadMech,
           isAdmin: employee?.isAdmin,
+          isPartsRunner: employee?.isPartsRunner,
         }).totalMinutes
       );
     }, 0);
@@ -290,6 +292,7 @@ export default function ManagerDashboardPage() {
       const pay = getDayPayMinutes(dayEntries, new Date(), scheduledStartFor(rangeViewEmployee, storedStart), {
         isRoadMech: rangeViewEmployee?.isRoadMech,
         isAdmin: rangeViewEmployee?.isAdmin,
+        isPartsRunner: rangeViewEmployee?.isPartsRunner,
       });
       return {
         day,
@@ -1378,7 +1381,7 @@ export default function ManagerDashboardPage() {
                     {employees.map((emp: AppShopEmployee) => (
                       <SelectItem key={emp.id} value={emp.id}>
                         {emp.employeeName}
-                        {emp.isAdmin ? ' (Admin)' : emp.isRoadMech ? ' (Road)' : ''}
+                        {emp.isAdmin ? ' (Admin)' : emp.isPartsRunner ? ' (Parts)' : emp.isRoadMech ? ' (Road)' : ''}
                       </SelectItem>
                     ))}
                   </SelectContent>

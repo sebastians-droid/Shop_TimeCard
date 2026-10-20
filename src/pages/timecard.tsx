@@ -73,7 +73,15 @@ import { useReloadTables } from '@/hooks/use-reload-tables';
 import { ShopTimeEntryPTOTypeKeyToLabel, type ShopTimeEntry, type ShopTimeEntryPTOTypeKey } from '@/models/shop-time-entry';
 import { getCurrentPosition } from '@/lib/geolocation';
 import { isLinkedPersonalLogin, shouldShowEmployeeAccessGate, shouldShowEmployeeCodeSignIn } from '@/lib/app-access';
-import { ADMIN_DIVISION, ADMIN_JOB_NUMBER, adminTimeEntryLabel, isAdminEmployee } from '@/lib/admin-timecard';
+import {
+  ADMIN_DIVISION,
+  clockInOnlyDivisionJobCaption,
+  clockInOnlyJobNumber,
+  clockInOnlyTimeEntryLabel,
+  isAdminEmployee,
+  isPartsRunnerEmployee,
+  usesClockInOnlyTimecard,
+} from '@/lib/admin-timecard';
 type ClockInConfirmation = {
   employeeName: string;
   asset: string;
@@ -132,7 +140,11 @@ export default function TimecardPage() {
   const clockOutPunches = useClockOutOpenPunches();
 
   const selectedEmployee = employees.find((employee: AppShopEmployee) => employee.id === selectedEmployeeId);
-  const adminEmployee = isAdminEmployee(selectedEmployee, user);
+  const clockInOnlyTimecard = usesClockInOnlyTimecard(selectedEmployee, user);
+  const adminStaff = isAdminEmployee(selectedEmployee, user);
+  const partsRunnerStaff = isPartsRunnerEmployee(selectedEmployee, user);
+  const clockInOnlyJob = clockInOnlyJobNumber(selectedEmployee, user);
+  const clockInOnlyCaption = clockInOnlyDivisionJobCaption(selectedEmployee, user);
   const employeeEntries = useMemo(() => {
     if (!selectedEmployeeId || !selectedEmployee) return [];
     return timeEntries
@@ -170,8 +182,12 @@ export default function TimecardPage() {
   // rather than being pulled forward to the default start.
   const payStart = scheduledStartFor(selectedEmployee);
   const payProfile = useMemo(
-    () => ({ isRoadMech: selectedEmployee?.isRoadMech, isAdmin: adminEmployee }),
-    [adminEmployee, selectedEmployee?.isRoadMech],
+    () => ({
+      isRoadMech: selectedEmployee?.isRoadMech,
+      isAdmin: adminStaff,
+      isPartsRunner: partsRunnerStaff,
+    }),
+    [adminStaff, partsRunnerStaff, selectedEmployee?.isRoadMech],
   );
   const todayPay = useMemo(
     () => getDayPayMinutes(employeeTodayEntries, new Date(), payStart, payProfile),
@@ -254,7 +270,11 @@ export default function TimecardPage() {
       return;
     }
     if (employeeActiveEntry) {
-      toast.error(adminEmployee ? 'You are already clocked in. Clock out to end your day.' : 'You are already clocked in. Clock out or add a job.');
+      toast.error(
+        clockInOnlyTimecard
+          ? 'You are already clocked in. Clock out to end your day.'
+          : 'You are already clocked in. Clock out or add a job.',
+      );
       return;
     }
     const expiredOpen = openEntries.filter((entry) => isAutoClockOutDue(entry));
@@ -264,9 +284,9 @@ export default function TimecardPage() {
     try {
       const pos = await getCurrentPosition();
       await createTimeEntry.mutateAsync(
-        adminEmployee
+        clockInOnlyTimecard
           ? {
-              timeEntry: adminTimeEntryLabel(selectedEmployee.employeeName),
+              timeEntry: clockInOnlyTimeEntryLabel(selectedEmployee.employeeName, selectedEmployee, user),
               employee: { id: selectedEmployee.id, autoNumber: selectedEmployee.autoNumber },
               clockIn,
               clockInLat: pos?.lat,
@@ -274,7 +294,7 @@ export default function TimecardPage() {
               workDate: clockInWorkDate,
               division: ADMIN_DIVISION,
               assetDivision: ADMIN_DIVISION,
-              jobNumber: ADMIN_JOB_NUMBER,
+              jobNumber: clockInOnlyJob,
             }
           : {
               timeEntry: `${selectedEmployee.employeeName} - ${AWAITING_ASSET_LABEL}`,
@@ -570,11 +590,11 @@ export default function TimecardPage() {
                 <CardHeader>
                   <div className="flex flex-col gap-1">
                     <CardTitle className="flex items-center gap-2 text-xl">
-                      <TimerReset className="h-5 w-5" /> {adminEmployee ? 'Today’s timecard' : 'Today’s asset timecard'}
+                      <TimerReset className="h-5 w-5" /> {clockInOnlyTimecard ? 'Today’s timecard' : 'Today’s asset timecard'}
                     </CardTitle>
                     <p className="text-sm text-muted-foreground">
-                      {adminEmployee
-                        ? `Clock in and clock out for your day. Time is recorded to Division ${ADMIN_DIVISION} · Job ${ADMIN_JOB_NUMBER}.`
+                      {clockInOnlyTimecard
+                        ? `Clock in and clock out for your day. Time is recorded to ${clockInOnlyCaption}.`
                         : 'Clock in when you arrive. Add a job when work begins, and again to change equipment. After clock-out, add forgotten jobs on Mechanic Log.'}
                     </p>
                     {todayClockLabel ? <p className="text-sm font-medium text-foreground">{todayClockLabel}</p> : null}
@@ -628,7 +648,7 @@ export default function TimecardPage() {
                         </Button>
                       ) : (
                         <>
-                          {adminEmployee || activePunchIsStale ? null : (
+                          {clockInOnlyTimecard || activePunchIsStale ? null : (
                             <Button
                               type="button"
                               size="lg"
@@ -672,7 +692,7 @@ export default function TimecardPage() {
                       )}
                     </div>
                   )}
-                  {adminEmployee && employeeActiveEntry ? (
+                  {clockInOnlyTimecard && employeeActiveEntry ? (
                     <div className="rounded-lg border border-border bg-background p-4">
                       <div className="flex flex-wrap items-center justify-between gap-3">
                         <div className="space-y-1">
@@ -680,14 +700,14 @@ export default function TimecardPage() {
                             {employeeActiveEntry.clockIn ? format(new Date(employeeActiveEntry.clockIn), 'EEE, MMM d') : 'Today'}
                           </p>
                           <p className="text-lg font-semibold">
-                            Division {ADMIN_DIVISION} · Job {ADMIN_JOB_NUMBER}
+                            {clockInOnlyCaption}
                           </p>
                         </div>
                         <Badge variant="secondary">Clocked in</Badge>
                       </div>
                     </div>
                   ) : null}
-                  {!adminEmployee && assetFormMode && employeeActiveEntry ? (
+                  {!clockInOnlyTimecard && assetFormMode && employeeActiveEntry ? (
                     <div className="grid gap-4 rounded-lg border border-dashed border-border bg-muted p-4 text-muted-foreground">
                       <div className="flex items-center justify-between gap-3">
                         <p className="font-medium text-foreground">{awaitingFirstJob ? 'Start first job' : 'Add job'}</p>
@@ -768,12 +788,12 @@ export default function TimecardPage() {
                   ) : null}
                   {!employeeActiveEntry && !entriesLoading && !assetFormMode ? (
                     <p className="rounded-lg bg-muted p-4 text-sm text-muted-foreground">
-                      {adminEmployee
+                      {clockInOnlyTimecard
                         ? 'Clock in when you arrive to start your day.'
                         : 'Clock in when you arrive, even if the job has not started. Use Add job when you begin work.'}
                     </p>
                   ) : null}
-                  {!adminEmployee
+                  {!clockInOnlyTimecard
                     ? displayedEntries.map((entry: ShopTimeEntry) => (
                     <div key={entry.id} className="rounded-lg border border-border bg-background p-4">
                       <div className="grid gap-4 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-start">
@@ -959,7 +979,7 @@ export default function TimecardPage() {
                     </div>
                   ))
                     : null}
-                  {adminEmployee
+                  {clockInOnlyTimecard
                     ? displayedEntries
                         .filter((entry: ShopTimeEntry) => entry.clockOut)
                         .map((entry: ShopTimeEntry) => (
@@ -969,9 +989,7 @@ export default function TimecardPage() {
                                 <p className="text-sm text-muted-foreground">
                                   {entry.clockIn ? format(new Date(entry.clockIn), 'EEE, MMM d') : 'Today'}
                                 </p>
-                                <p className="text-lg font-semibold">
-                                  Division {ADMIN_DIVISION} · Job {ADMIN_JOB_NUMBER}
-                                </p>
+                                <p className="text-lg font-semibold">{clockInOnlyCaption}</p>
                               </div>
                               <div className="space-y-2 text-left sm:text-right">
                                 <div>
@@ -991,7 +1009,7 @@ export default function TimecardPage() {
                 </CardContent>
               </Card>
 
-              {!adminEmployee ? (
+              {!clockInOnlyTimecard ? (
               <Card className="bg-card text-card-foreground shadow-sm">
                 <CardHeader>
                   <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">

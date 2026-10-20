@@ -5,6 +5,7 @@ export type AppShopEmployee = ShopEmployee & {
   employeeCode: number;
   isRoadMech: boolean;
   isAdmin: boolean;
+  isPartsRunner: boolean;
 };
 
 const NAME_SUFFIXES = new Set(['JR', 'SR', 'II', 'III', 'IV', 'V']);
@@ -82,20 +83,31 @@ export function shopEmployeeDisplayName(employee: Pick<ShopEmployee, 'autoNumber
   return formatEmployeeDisplayName(employee.employee?.name1) || employee.autoNumber || '—';
 }
 
-export type EmployeeMechanicType = 'admin' | 'road' | 'shop';
+export type EmployeeMechanicType = 'admin' | 'partsRunner' | 'road' | 'shop';
 
-export const MECHANIC_TYPE_ORDER: EmployeeMechanicType[] = ['shop', 'road', 'admin'];
+export const MECHANIC_TYPE_ORDER: EmployeeMechanicType[] = ['shop', 'road', 'partsRunner', 'admin'];
 
-export function employeeMechanicType(employee: { isRoadMech?: boolean; isAdmin?: boolean }): EmployeeMechanicType {
+export function employeeMechanicType(employee: {
+  isRoadMech?: boolean;
+  isAdmin?: boolean;
+  isPartsRunner?: boolean;
+}): EmployeeMechanicType {
   if (employee.isAdmin) return 'admin';
+  if (employee.isPartsRunner) return 'partsRunner';
   if (employee.isRoadMech) return 'road';
   return 'shop';
 }
 
-export function employeeMechanicTypeLabel(employee: { isRoadMech?: boolean; isAdmin?: boolean }): string {
+export function employeeMechanicTypeLabel(employee: {
+  isRoadMech?: boolean;
+  isAdmin?: boolean;
+  isPartsRunner?: boolean;
+}): string {
   switch (employeeMechanicType(employee)) {
     case 'admin':
       return 'Admin';
+    case 'partsRunner':
+      return 'Parts runner';
     case 'road':
       return 'Road mechanic';
     case 'shop':
@@ -104,8 +116,8 @@ export function employeeMechanicTypeLabel(employee: { isRoadMech?: boolean; isAd
 }
 
 export function compareEmployeesByTypeThenName(
-  employeeA: { isRoadMech?: boolean; isAdmin?: boolean },
-  employeeB: { isRoadMech?: boolean; isAdmin?: boolean },
+  employeeA: { isRoadMech?: boolean; isAdmin?: boolean; isPartsRunner?: boolean },
+  employeeB: { isRoadMech?: boolean; isAdmin?: boolean; isPartsRunner?: boolean },
   nameA: string,
   nameB: string,
 ): number {
@@ -126,5 +138,6 @@ export const mapShopEmployees = (employees: ShopEmployee[]): AppShopEmployee[] =
       employeeCode: employee.empNum as number,
       isRoadMech: employee.isRoadMech === true,
       isAdmin: employee.isAdmin === true,
+      isPartsRunner: employee.isPartsRunner === true,
     }))
     .sort((employeeA: AppShopEmployee, employeeB: AppShopEmployee) => employeeA.employeeName.localeCompare(employeeB.employeeName));

@@ -1,6 +1,6 @@
 import { useMemo, useState, type DragEvent } from 'react';
 import { eachDayOfInterval, format, startOfDay } from 'date-fns';
-import { CalendarIcon, CalendarRange, ChevronDown, Copy, GripVertical, Phone, Shield, Truck, Wrench, X } from 'lucide-react';
+import { CalendarIcon, CalendarRange, ChevronDown, Copy, GripVertical, Package, Phone, Shield, Truck, Wrench, X } from 'lucide-react';
 import type { DateRange } from 'react-day-picker';
 import { toast } from '@/lib/toast';
 
@@ -22,9 +22,9 @@ import { ShopTimeEntryPTOTypeKeyToLabel } from '@/models/shop-time-entry';
 
 const DEFAULT_START = '07:00';
 
-type MechanicColumn = 'shop' | 'road' | 'admin';
+type MechanicColumn = 'shop' | 'road' | 'partsRunner' | 'admin';
 
-const COLUMN_ORDER: MechanicColumn[] = ['shop', 'road', 'admin'];
+const COLUMN_ORDER: MechanicColumn[] = ['shop', 'road', 'partsRunner', 'admin'];
 
 const COLUMNS: Record<MechanicColumn, { title: string; icon: typeof Wrench; blurb: string; empty: string }> = {
   shop: {
@@ -39,6 +39,12 @@ const COLUMNS: Record<MechanicColumn, { title: string; icon: typeof Wrench; blur
     blurb: 'No scheduled start — the day begins at clock-in.',
     empty: 'No road mechanics. Drag someone here to pay them from their clock-in.',
   },
+  partsRunner: {
+    title: 'Parts Runners',
+    icon: Package,
+    blurb: 'No scheduled start — clock-in/out only on Division 200 · Job 113.',
+    empty: 'No parts runners. Drag someone here for parts-runner timecard rules.',
+  },
   admin: {
     title: 'Admin',
     icon: Shield,
@@ -48,30 +54,35 @@ const COLUMNS: Record<MechanicColumn, { title: string; icon: typeof Wrench; blur
 };
 
 const OTHER_COLUMNS: Record<MechanicColumn, MechanicColumn[]> = {
-  shop: ['road', 'admin'],
-  road: ['shop', 'admin'],
-  admin: ['shop', 'road'],
+  shop: ['road', 'partsRunner', 'admin'],
+  road: ['shop', 'partsRunner', 'admin'],
+  partsRunner: ['shop', 'road', 'admin'],
+  admin: ['shop', 'road', 'partsRunner'],
 };
 
-function columnFlags(column: MechanicColumn): Pick<AppShopEmployee, 'isRoadMech' | 'isAdmin'> {
+function columnFlags(column: MechanicColumn): Pick<AppShopEmployee, 'isRoadMech' | 'isAdmin' | 'isPartsRunner'> {
   switch (column) {
     case 'shop':
-      return { isRoadMech: false, isAdmin: false };
+      return { isRoadMech: false, isAdmin: false, isPartsRunner: false };
     case 'road':
-      return { isRoadMech: true, isAdmin: false };
+      return { isRoadMech: true, isAdmin: false, isPartsRunner: false };
+    case 'partsRunner':
+      return { isRoadMech: false, isAdmin: false, isPartsRunner: true };
     case 'admin':
-      return { isRoadMech: false, isAdmin: true };
+      return { isRoadMech: false, isAdmin: true, isPartsRunner: false };
   }
 }
 
 const COLUMN_SHORT_LABEL: Record<MechanicColumn, string> = {
   shop: 'Shop',
   road: 'Road',
+  partsRunner: 'Parts',
   admin: 'Admin',
 };
 
-function scheduleCaption(emp: Pick<AppShopEmployee, 'isRoadMech' | 'isAdmin'>, startTime: string): string {
+function scheduleCaption(emp: Pick<AppShopEmployee, 'isRoadMech' | 'isAdmin' | 'isPartsRunner'>, startTime: string): string {
   if (emp.isAdmin) return 'Admin — starts at clock-in';
+  if (emp.isPartsRunner) return 'Parts runner — starts at clock-in';
   if (emp.isRoadMech) return 'Starts at clock-in';
   return `Start ${startTime}`;
 }
@@ -80,11 +91,24 @@ function moveSuccessMessage(emp: AppShopEmployee, target: MechanicColumn, startT
   switch (target) {
     case 'admin':
       return `${emp.employeeName} is now admin — paid from clock-in on Division 200 · Job 112.`;
+    case 'partsRunner':
+      return `${emp.employeeName} is now a parts runner — paid from clock-in on Division 200 · Job 113.`;
     case 'road':
       return `${emp.employeeName} is now a road mechanic — paid from clock-in.`;
     case 'shop':
       return `${emp.employeeName} is now a shop mechanic — scheduled start ${startTime}.`;
   }
+}
+
+function employeeTypeSuffix(emp: Pick<AppShopEmployee, 'isAdmin' | 'isRoadMech' | 'isPartsRunner'>): string {
+  if (emp.isAdmin) return ' (Admin)';
+  if (emp.isPartsRunner) return ' (Parts)';
+  if (emp.isRoadMech) return ' (Road)';
+  return '';
+}
+
+function paysFromClockInNotShop(emp: Pick<AppShopEmployee, 'isRoadMech' | 'isAdmin' | 'isPartsRunner'> | null | undefined): boolean {
+  return Boolean(emp?.isRoadMech || emp?.isAdmin || emp?.isPartsRunner);
 }
 
 type MechanicScheduleProps = {
@@ -255,8 +279,9 @@ export function MechanicSchedule({ employees, timeEntries }: MechanicSchedulePro
 
   const byColumn = useMemo(
     () => ({
-      shop: sortedEmployees.filter((emp) => !emp.isRoadMech && !emp.isAdmin),
-      road: sortedEmployees.filter((emp) => emp.isRoadMech && !emp.isAdmin),
+      shop: sortedEmployees.filter((emp) => !emp.isRoadMech && !emp.isAdmin && !emp.isPartsRunner),
+      road: sortedEmployees.filter((emp) => emp.isRoadMech && !emp.isAdmin && !emp.isPartsRunner),
+      partsRunner: sortedEmployees.filter((emp) => emp.isPartsRunner && !emp.isAdmin),
       admin: sortedEmployees.filter((emp) => emp.isAdmin),
     }),
     [sortedEmployees],
@@ -330,7 +355,7 @@ export function MechanicSchedule({ employees, timeEntries }: MechanicSchedulePro
 
   const handleMoveColumn = (emp: AppShopEmployee, target: MechanicColumn) => {
     const flags = columnFlags(target);
-    if (emp.isRoadMech === flags.isRoadMech && emp.isAdmin === flags.isAdmin) return;
+    if (emp.isRoadMech === flags.isRoadMech && emp.isAdmin === flags.isAdmin && emp.isPartsRunner === flags.isPartsRunner) return;
     setEmployeeMechanicType.mutate(
       { id: emp.id, ...flags },
       {
@@ -367,9 +392,11 @@ export function MechanicSchedule({ employees, timeEntries }: MechanicSchedulePro
                 Employee {rangeEmployee?.employeeCode} &middot;{' '}
                 {rangeEmployee?.isAdmin
                   ? 'Admin — set on-call for a date range.'
-                  : rangeEmployee?.isRoadMech
-                    ? 'Road mechanic — set on-call for a date range.'
-                    : 'Set start times and on-call for a date range.'}
+                  : rangeEmployee?.isPartsRunner
+                    ? 'Parts runner — set on-call for a date range.'
+                    : rangeEmployee?.isRoadMech
+                      ? 'Road mechanic — set on-call for a date range.'
+                      : 'Set start times and on-call for a date range.'}
               </p>
             </div>
             <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
@@ -387,7 +414,7 @@ export function MechanicSchedule({ employees, timeEntries }: MechanicSchedulePro
                   {sortedEmployees.map((emp) => (
                     <SelectItem key={emp.id} value={emp.id}>
                       {emp.employeeName}
-                      {emp.isAdmin ? ' (Admin)' : emp.isRoadMech ? ' (Road)' : ''}
+                      {employeeTypeSuffix(emp)}
                     </SelectItem>
                   ))}
                 </SelectContent>
@@ -488,7 +515,7 @@ export function MechanicSchedule({ employees, timeEntries }: MechanicSchedulePro
                         startTime={startTime}
                         onCall={onCall}
                         showApplyAll={showApplyAll}
-                        showScheduledStart={!rangeEmployee?.isRoadMech && !rangeEmployee?.isAdmin}
+                        showScheduledStart={!paysFromClockInNotShop(rangeEmployee)}
                         onSave={handleSave}
                         onApplyAll={handleApplyAllDays}
                       />
@@ -549,7 +576,7 @@ export function MechanicSchedule({ employees, timeEntries }: MechanicSchedulePro
             {schedulesError instanceof Error ? ` (${schedulesError.message})` : null}
           </p>
         ) : null}
-        <div className="grid grid-cols-1 gap-4 xl:grid-cols-3">
+        <div className="grid grid-cols-1 gap-4 xl:grid-cols-2 2xl:grid-cols-4">
           {COLUMN_ORDER.map((column) => {
             const { title, icon: ColumnIcon, blurb, empty } = COLUMNS[column];
             const showScheduledStart = column === 'shop';

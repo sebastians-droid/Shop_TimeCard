@@ -26,6 +26,7 @@ function employee(id: string, name: string, code: number): AppShopEmployee {
     employeeCode: code,
     isRoadMech: false,
     isAdmin: false,
+    isPartsRunner: false,
   };
 }
 

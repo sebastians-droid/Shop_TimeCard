@@ -16,6 +16,7 @@ export type AppUser = {
   shopEmployeeId?: string;
   isRoadMech?: boolean;
   isAdmin?: boolean;
+  isPartsRunner?: boolean;
 };
 
 export const useUser = () => {

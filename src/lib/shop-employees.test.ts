@@ -53,20 +53,23 @@ describe('shopEmployeeDisplayName', () => {
 });
 
 describe('employeeMechanicType', () => {
-  it('labels shop, road, and admin employees', () => {
+  it('labels shop, road, parts runner, and admin employees', () => {
     expect(employeeMechanicTypeLabel({ isRoadMech: false, isAdmin: false })).toBe('Shop mechanic');
     expect(employeeMechanicTypeLabel({ isRoadMech: true, isAdmin: false })).toBe('Road mechanic');
+    expect(employeeMechanicTypeLabel({ isRoadMech: false, isPartsRunner: true })).toBe('Parts runner');
     expect(employeeMechanicTypeLabel({ isRoadMech: false, isAdmin: true })).toBe('Admin');
     expect(employeeMechanicType({ isRoadMech: true, isAdmin: true })).toBe('admin');
   });
 
-  it('sorts by type shop → road → admin, then by name within each type', () => {
+  it('sorts by type shop → road → parts runner → admin, then by name within each type', () => {
     const shopA = { isRoadMech: false, isAdmin: false };
     const shopB = { isRoadMech: false, isAdmin: false };
     const road = { isRoadMech: true, isAdmin: false };
+    const parts = { isPartsRunner: true };
     const admin = { isRoadMech: false, isAdmin: true };
     expect(compareEmployeesByTypeThenName(shopA, road, 'Zulu', 'Alpha')).toBeLessThan(0);
-    expect(compareEmployeesByTypeThenName(road, admin, 'Alpha', 'Zulu')).toBeLessThan(0);
+    expect(compareEmployeesByTypeThenName(road, parts, 'Alpha', 'Zulu')).toBeLessThan(0);
+    expect(compareEmployeesByTypeThenName(parts, admin, 'Alpha', 'Zulu')).toBeLessThan(0);
     expect(compareEmployeesByTypeThenName(shopA, shopB, 'Adams', 'Baker')).toBeLessThan(0);
   });
 });

@@ -124,6 +124,7 @@ export function useManagerEntryActions({ employees, assets, timeEntries }: Manag
       getDayPayMinutes(existingDayEntries, new Date(), scheduledStartFor(employee), {
         isRoadMech: employee.isRoadMech,
         isAdmin: employee.isAdmin,
+        isPartsRunner: employee.isPartsRunner,
       }).noLunch,
     );
     const provisionalEntry: ShopTimeEntry = {
@@ -142,6 +143,7 @@ export function useManagerEntryActions({ employees, assets, timeEntries }: Manag
       getEntryPaidMinutes([...existingDayEntries, provisionalEntry], provisionalEntry, new Date(), scheduledStartFor(employee), {
         isRoadMech: employee.isRoadMech,
         isAdmin: employee.isAdmin,
+        isPartsRunner: employee.isPartsRunner,
       }) / 60;
 
     try {
@@ -212,7 +214,11 @@ export function useManagerEntryActions({ employees, assets, timeEntries }: Manag
     const ptoHours = getPtoHours(entry);
     const employee = employees.find((candidate) => candidate.id === entry.employee?.id);
     const payStart = scheduledStartFor(employee);
-    const payProfile = { isRoadMech: employee?.isRoadMech, isAdmin: employee?.isAdmin };
+    const payProfile = {
+      isRoadMech: employee?.isRoadMech,
+      isAdmin: employee?.isAdmin,
+      isPartsRunner: employee?.isPartsRunner,
+    };
 
     try {
       await updateTimeEntry.mutateAsync({

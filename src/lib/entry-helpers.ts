@@ -230,8 +230,12 @@ export const formatScheduledStartTime = (time: string) => {
   return format(date, 'p');
 };
 
-export const scheduledStartCaption = (employee: { isRoadMech?: boolean; isAdmin?: boolean } | null | undefined, storedStart?: string) => {
+export const scheduledStartCaption = (
+  employee: { isRoadMech?: boolean; isAdmin?: boolean; isPartsRunner?: boolean } | null | undefined,
+  storedStart?: string,
+) => {
   if (employee?.isAdmin) return 'Admin — starts at clock-in';
+  if (employee?.isPartsRunner) return 'Parts runner — starts at clock-in';
   if (employee?.isRoadMech) return 'Starts at clock-in';
   return `Scheduled start ${formatScheduledStartTime(storedStart || DEFAULT_SCHEDULED_START)}`;
 };

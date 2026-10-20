@@ -23,15 +23,16 @@ export const NO_SCHEDULED_START = null;
 export type EmployeePayProfile = {
   isRoadMech?: boolean;
   isAdmin?: boolean;
+  isPartsRunner?: boolean;
 };
 
 export function payProfileFor(employee: EmployeePayProfile | null | undefined): EmployeePayProfile | undefined {
   if (!employee) return undefined;
-  return { isRoadMech: employee.isRoadMech, isAdmin: employee.isAdmin };
+  return { isRoadMech: employee.isRoadMech, isAdmin: employee.isAdmin, isPartsRunner: employee.isPartsRunner };
 }
 
 export function paysFromClockIn(employee: EmployeePayProfile | null | undefined): boolean {
-  return Boolean(employee?.isRoadMech || employee?.isAdmin);
+  return Boolean(employee?.isRoadMech || employee?.isAdmin || employee?.isPartsRunner);
 }
 
 /** Road and admin employees are paid from clock-in; shop uses a scheduled start. */

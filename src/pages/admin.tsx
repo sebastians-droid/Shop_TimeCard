@@ -533,7 +533,9 @@ const EmployeeTableRow = memo(function EmployeeTableRow({
       <td className="px-3 py-2 font-medium">{shopEmployeeDisplayName(employee)}</td>
       <td className="px-3 py-2">{employee.empNum ?? '—'}</td>
       <td className="px-3 py-2">
-        <Badge variant={type === 'admin' ? 'default' : type === 'road' ? 'secondary' : 'outline'}>
+        <Badge
+          variant={type === 'admin' || type === 'partsRunner' ? 'default' : type === 'road' ? 'secondary' : 'outline'}
+        >
           {employeeMechanicTypeLabel(employee)}
         </Badge>
       </td>

@@ -12,4 +12,6 @@ export interface ShopEmployee {
   isRoadMech?: boolean;
   /** Admin staff have no scheduled start; they clock in/out on Division 200 · Job 112. */
   isAdmin?: boolean;
+  /** Parts runners clock in/out on Division 200 · Job 113. */
+  isPartsRunner?: boolean;
 }

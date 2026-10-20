@@ -125,8 +125,12 @@ export default function MechanicLogPage() {
   // Road mechanics are paid from their actual clock-in rather than a default start.
   const payStart = scheduledStartFor(selectedEmployee);
   const payProfile = useMemo(
-    () => ({ isRoadMech: selectedEmployee?.isRoadMech, isAdmin: selectedEmployee?.isAdmin }),
-    [selectedEmployee?.isAdmin, selectedEmployee?.isRoadMech],
+    () => ({
+      isRoadMech: selectedEmployee?.isRoadMech,
+      isAdmin: selectedEmployee?.isAdmin,
+      isPartsRunner: selectedEmployee?.isPartsRunner,
+    }),
+    [selectedEmployee?.isAdmin, selectedEmployee?.isPartsRunner, selectedEmployee?.isRoadMech],
   );
   const isRoadMech = selectedEmployee?.isRoadMech === true;
   const canReshapeDay = (dateKey: string) => isRoadMech && isWithinRoadMechEditWindow(dateKey);
