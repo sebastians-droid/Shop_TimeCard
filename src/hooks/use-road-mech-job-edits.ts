@@ -30,7 +30,7 @@ async function runWrites(writes: JobTimeWrite[]) {
  * cancelling a job into unassigned time. Both update the cached day at once,
  * restore it if the server refuses, and reload once at the end.
  */
-export function useRoadMechJobEdits(payStart: string | null | undefined, payProfile: EmployeePayProfile) {
+export function useRoadMechJobEdits(payStartFor: (dateKey: string) => string | null | undefined, payProfile: EmployeePayProfile) {
   const queryClient = useQueryClient();
   const [saving, setSaving] = useState(false);
 
@@ -80,7 +80,7 @@ export function useRoadMechJobEdits(payStart: string | null | undefined, payProf
     const endChanged = Boolean(entry.clockOut) && endValue !== formatTimeForInput(entry.clockOut!);
     const startedAt = startChanged ? timeOnWorkDay(day, startValue, dayEntries) : entry.clockIn!;
     const endedAt = entry.clockOut ? (endChanged ? timeAfter(startedAt, endValue) : entry.clockOut) : undefined;
-    const plan = planJobTimeEdit(dayEntries, entry.id, startedAt, endedAt, payStart, payProfile);
+    const plan = planJobTimeEdit(dayEntries, entry.id, startedAt, endedAt, payStartFor(format(day, 'yyyy-MM-dd')), payProfile);
     if ('error' in plan) {
       toast.error(plan.error);
       return false;
@@ -143,7 +143,7 @@ export function useRoadMechJobEdits(payStart: string | null | undefined, payProf
         method: 'PATCH',
         body: JSON.stringify({ timeEntry: unassigned.timeEntry, asset: null, assetDivision: null, division: null, jobNumber: '' }),
       });
-      await runWrites(planHoursRefresh(dayAfter, payStart, payProfile));
+      await runWrites(planHoursRefresh(dayAfter, payStartFor(format(day, 'yyyy-MM-dd')), payProfile));
       toast.success(
         `Cancelled ${label} on ${format(day, 'MMM d')} (${span}). That time is now unassigned — assign it a job or stretch a neighboring job over it.`,
       );

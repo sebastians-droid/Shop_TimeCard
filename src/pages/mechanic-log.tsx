@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useMemo, useState } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import { eachDayOfInterval, endOfWeek, format, startOfWeek, subWeeks } from 'date-fns';
 import type { DateRange } from 'react-day-picker';
@@ -31,13 +31,8 @@ import { EmployeeCodeSignIn, KioskSessionBar } from '@/components/kiosk-session'
 import { useUser } from '@/hooks/use-user';
 import { useKioskSession } from '@/hooks/use-kiosk-session';
 import { VoiceNoteButton } from '@/components/voice-note-button';
-import {
-  useAllEquipmentAssets,
-  useScheduleList,
-  useShopEmployeeList,
-  useShopTimeEntryList,
-  useUpdateShopTimeEntry,
-} from '@/hooks/use-shop-data';
+import { useAllEquipmentAssets, useShopEmployeeList, useShopTimeEntryList, useUpdateShopTimeEntry } from '@/hooks/use-shop-data';
+import { useEmployeeScheduledStarts } from '@/hooks/use-employee-scheduled-starts';
 import { mapShopEmployees, type AppShopEmployee } from '@/lib/shop-employees';
 import {
   applyNoLunchMarker,
@@ -50,8 +45,6 @@ import {
   isPtoEntry,
   keepAutoClockOutMarker,
   notesHaveNoLunch,
-  paysFromClockIn,
-  scheduledStartFor,
   waitBeforeFirstJob,
 } from '@/lib/time-rules';
 import {
@@ -129,8 +122,6 @@ export default function MechanicLogPage() {
   const updateTimeEntry = useUpdateShopTimeEntry();
 
   const selectedEmployee = employees.find((e: AppShopEmployee) => e.id === selectedEmployeeId);
-  // Road mechanics are paid from their actual clock-in rather than a default start.
-  const payStart = scheduledStartFor(selectedEmployee);
   const payProfile = useMemo(
     () => ({
       isRoadMech: selectedEmployee?.isRoadMech,
@@ -140,38 +131,22 @@ export default function MechanicLogPage() {
     [selectedEmployee?.isAdmin, selectedEmployee?.isPartsRunner, selectedEmployee?.isRoadMech],
   );
   const isRoadMech = selectedEmployee?.isRoadMech === true;
-
-  // Shop mechanics are paid from the start the manager set for each day in the
-  // Mechanic Schedule. Without it the log fell back to 7:00 and disagreed with
-  // the manager dashboard on any day with a different start.
-  const needsScheduledStarts = Boolean(selectedEmployee) && !paysFromClockIn(selectedEmployee);
+  // Each day pays from that day's scheduled start (or clock-in, if later).
+  // Road mechanics and admins are paid from clock-in.
   const {
-    data: employeeSchedules = [],
-    isError: schedulesFailed,
+    payStartFor,
+    failed: schedulesFailed,
     error: schedulesError,
     refetch: refetchSchedules,
-  } = useScheduleList(
-    dateRange?.from ? format(dateRange.from, "yyyy-MM-dd'T'00:00:00'Z'") : undefined,
-    dateRange?.to ? format(dateRange.to, "yyyy-MM-dd'T'23:59:59'Z'") : undefined,
-    { employeeId: selectedEmployee?.id, enabled: needsScheduledStarts },
+  } = useEmployeeScheduledStarts(
+    selectedEmployee?.id,
+    selectedEmployee ? payProfile : undefined,
+    dateRange?.from ? format(dateRange.from, 'yyyy-MM-dd') : undefined,
+    dateRange?.to ? format(dateRange.to, 'yyyy-MM-dd') : undefined,
   );
-  const scheduledStartByDay = useMemo(() => {
-    const map = new Map<string, string | undefined>();
-    for (const row of employeeSchedules) {
-      if (row.employeeId === selectedEmployee?.id && row.scheduleDate) map.set(row.scheduleDate.slice(0, 10), row.scheduledStart);
-    }
-    return map;
-  }, [employeeSchedules, selectedEmployee?.id]);
-  const payStartFor = (dateKey: string) => scheduledStartFor(selectedEmployee, scheduledStartByDay.get(dateKey));
-
-  useEffect(() => {
-    if (!schedulesFailed) return;
-    const message = schedulesError instanceof Error ? schedulesError.message : 'Schedule list failed to load.';
-    toast.error(`Could not load scheduled starts. ${message}`);
-  }, [schedulesFailed, schedulesError]);
 
   const canReshapeDay = (dateKey: string) => isRoadMech && isWithinRoadMechEditWindow(dateKey);
-  const roadMechEdits = useRoadMechJobEdits(payStart, payProfile);
+  const roadMechEdits = useRoadMechJobEdits(payStartFor, payProfile);
 
   const resetJobForm = () => {
     setAddingJobDateKey('');
@@ -478,7 +453,7 @@ export default function MechanicLogPage() {
     return days.map((day) => {
       const dateKey = format(day, 'yyyy-MM-dd');
       const entries = filteredEntries.filter((entry: ShopTimeEntry) => getEntryWorkDateKey(entry) === dateKey);
-      const dayPayStart = scheduledStartFor(selectedEmployee, scheduledStartByDay.get(dateKey));
+      const dayPayStart = payStartFor(dateKey);
       const totalHours = getDayPayMinutes(entries, new Date(), dayPayStart, payProfile).totalMinutes / 60;
       // Road mechanics also see unassigned time so they can assign it or stretch a neighbor over it.
       const rows = isRoadMech
@@ -498,7 +473,7 @@ export default function MechanicLogPage() {
         lastOut: dayLastClockOut(entries),
       };
     });
-  }, [days, filteredEntries, isRoadMech, payProfile, scheduledStartByDay, selectedEmployee]);
+  }, [days, filteredEntries, isRoadMech, payProfile, payStartFor]);
 
   const rangeTotalHours = useMemo(() => Math.round(dayData.reduce((sum, d) => sum + d.totalHours, 0) * 100) / 100, [dayData]);
 
@@ -511,7 +486,7 @@ export default function MechanicLogPage() {
       }
     }
     return [...map.entries()].map(([name, total]) => ({ name, total: Math.round(total * 100) / 100 })).sort((a, b) => b.total - a.total);
-  }, [dayData, assets, payProfile, payStart]);
+  }, [dayData, assets]);
 
   return (
     <main className="mx-auto flex w-full max-w-5xl flex-1 flex-col gap-6 p-4 sm:p-6 lg:p-8">
