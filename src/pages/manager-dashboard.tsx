@@ -155,10 +155,14 @@ export default function ManagerDashboardPage() {
   }, [selectedDayKey, timeEntries]);
 
   const scheduleQueryRange = useMemo(() => {
+    // Cover the selected day as well as an open range view, so the daily totals
+    // keep their scheduled starts while a range is on screen.
     if (rangeViewEmployeeId && rangeViewRange?.from && rangeViewRange?.to) {
+      const from = rangeViewRange.from < selectedDate ? rangeViewRange.from : selectedDate;
+      const to = rangeViewRange.to > selectedDate ? rangeViewRange.to : selectedDate;
       return {
-        from: format(rangeViewRange.from, "yyyy-MM-dd'T'00:00:00'Z'"),
-        to: format(rangeViewRange.to, "yyyy-MM-dd'T'23:59:59'Z'"),
+        from: format(from, "yyyy-MM-dd'T'00:00:00'Z'"),
+        to: format(to, "yyyy-MM-dd'T'23:59:59'Z'"),
       };
     }
     return {
@@ -252,6 +256,14 @@ export default function ManagerDashboardPage() {
       .sort((a: ShopTimeEntry, b: ShopTimeEntry) => new Date(a.clockIn ?? '').getTime() - new Date(b.clockIn ?? '').getTime());
   }, [exportWeekRange, timeEntries]);
 
+  const exportScheduleByEmployeeDay = useMemo(() => {
+    const map = new Map<string, string | undefined>();
+    for (const row of exportSchedules) {
+      if (row.employeeId && row.scheduleDate) map.set(`${row.employeeId}-${row.scheduleDate.slice(0, 10)}`, row.scheduledStart);
+    }
+    return map;
+  }, [exportSchedules]);
+
   const weeklyPayrollMinutes = useMemo(() => {
     const groups = new Map<string, ShopTimeEntry[]>();
     weeklyEntries.forEach((entry: ShopTimeEntry) => {
@@ -261,17 +273,19 @@ export default function ManagerDashboardPage() {
       groups.set(key, current);
     });
     return [...groups.values()].reduce((total: number, dayEntries: ShopTimeEntry[]) => {
-      const employee = employees.find((candidate: AppShopEmployee) => candidate.id === dayEntries[0]?.employee?.id);
+      const employeeId = dayEntries[0]?.employee?.id;
+      const employee = employees.find((candidate: AppShopEmployee) => candidate.id === employeeId);
+      const storedStart = employeeId ? exportScheduleByEmployeeDay.get(`${employeeId}-${getEntryWorkDateKey(dayEntries[0])}`) : undefined;
       return (
         total +
-        getDayPayMinutes(dayEntries, new Date(), scheduledStartFor(employee), {
+        getDayPayMinutes(dayEntries, new Date(), scheduledStartFor(employee, storedStart), {
           isRoadMech: employee?.isRoadMech,
           isAdmin: employee?.isAdmin,
           isPartsRunner: employee?.isPartsRunner,
         }).totalMinutes
       );
     }, 0);
-  }, [employees, weeklyEntries]);
+  }, [employees, exportScheduleByEmployeeDay, weeklyEntries]);
 
   const rangeViewEmployee = useMemo(() => {
     if (!rangeViewEmployeeId) return null;
@@ -513,11 +527,7 @@ export default function ManagerDashboardPage() {
     return (
       <AccessCheckingCard
         title="Microsoft 365 sign-in failed"
-        message={
-          userError instanceof Error
-            ? userError.message
-            : 'Refresh the page and sign in with Microsoft 365 again.'
-        }
+        message={userError instanceof Error ? userError.message : 'Refresh the page and sign in with Microsoft 365 again.'}
       />
     );
   }
@@ -1454,397 +1464,337 @@ export default function ManagerDashboardPage() {
                 const dayNeedsReview = dayEntries.some((entry: ShopTimeEntry) => notesHaveAutoClockOut(entry.notes));
                 const dayClockLabel = dayClockCaption(dayEntries);
                 return (
-                <Collapsible
-                  key={dayKey}
-                  open={rangeOpenDay === dayKey}
-                  onOpenChange={() => setRangeOpenDay(rangeOpenDay === dayKey ? '' : dayKey)}
-                  asChild
-                >
-                  <section className="rounded-lg border border-border bg-background">
-                    <CollapsibleTrigger asChild>
-                      <button type="button" className="flex w-full items-center justify-between p-3 text-left">
-                        <div>
-                          <p className="font-semibold text-sm">{format(day, 'EEEE, MMM d')}</p>
-                          <p className="text-xs text-muted-foreground">
-                            {scheduledStartLabel}
-                            {dayClockLabel ? ` · ${dayClockLabel}` : ''} · {dayJobCount} {dayJobCount === 1 ? 'entry' : 'entries'} ·{' '}
-                            {formatDuration(dayMinutes)}
-                            {dayNoLunch ? ' · No lunch' : ''}
-                          </p>
+                  <Collapsible
+                    key={dayKey}
+                    open={rangeOpenDay === dayKey}
+                    onOpenChange={() => setRangeOpenDay(rangeOpenDay === dayKey ? '' : dayKey)}
+                    asChild
+                  >
+                    <section className="rounded-lg border border-border bg-background">
+                      <CollapsibleTrigger asChild>
+                        <button type="button" className="flex w-full items-center justify-between p-3 text-left">
+                          <div>
+                            <p className="font-semibold text-sm">{format(day, 'EEEE, MMM d')}</p>
+                            <p className="text-xs text-muted-foreground">
+                              {scheduledStartLabel}
+                              {dayClockLabel ? ` · ${dayClockLabel}` : ''} · {dayJobCount} {dayJobCount === 1 ? 'entry' : 'entries'} ·{' '}
+                              {formatDuration(dayMinutes)}
+                              {dayNoLunch ? ' · No lunch' : ''}
+                            </p>
+                          </div>
+                          <div className="flex items-center gap-2">
+                            {dayJobCount === 0 ? (
+                              <Badge variant="outline">{dayClockLabel ? 'Clocked in' : 'No entries'}</Badge>
+                            ) : (
+                              <Badge variant="secondary">{formatDuration(dayMinutes)}</Badge>
+                            )}
+                            {dayNeedsReview ? <Badge variant="secondary">Needs review</Badge> : null}
+                            {dayNoLunch ? <Badge variant="secondary">No lunch</Badge> : null}
+                            {dayOnCall ? (
+                              <Badge variant="secondary">
+                                <Phone className="mr-1 h-3 w-3" />
+                                On Call
+                              </Badge>
+                            ) : null}
+                            <ChevronDown className={`h-4 w-4 transition-transform ${rangeOpenDay === dayKey ? 'rotate-180' : ''}`} />
+                          </div>
+                        </button>
+                      </CollapsibleTrigger>
+                      <CollapsibleContent>
+                        <div className="flex flex-wrap gap-2 border-t border-border px-3 py-2">
+                          <NoLunchCheckbox
+                            checked={dayNoLunch}
+                            disabled={lunchUpdatingKey === `${rangeViewEmployeeId}-${dayKey}`}
+                            onCheckedChange={(checked: boolean) => void handleRangeNoLunchChange(dayEntries, dayKey, checked)}
+                          />
                         </div>
-                        <div className="flex items-center gap-2">
-                          {dayJobCount === 0 ? (
-                            <Badge variant="outline">{dayClockLabel ? 'Clocked in' : 'No entries'}</Badge>
-                          ) : (
-                            <Badge variant="secondary">{formatDuration(dayMinutes)}</Badge>
-                          )}
-                          {dayNeedsReview ? <Badge variant="secondary">Needs review</Badge> : null}
-                          {dayNoLunch ? <Badge variant="secondary">No lunch</Badge> : null}
-                          {dayOnCall ? (
-                            <Badge variant="secondary">
-                              <Phone className="mr-1 h-3 w-3" />
-                              On Call
-                            </Badge>
+                        <div className="space-y-2 border-t border-border p-3">
+                          {displayDayEntries.length === 0 ? (
+                            <p className="text-sm text-muted-foreground">
+                              {dayClockLabel ? `${dayClockLabel}.` : 'No entries for this day.'}
+                            </p>
                           ) : null}
-                          <ChevronDown className={`h-4 w-4 transition-transform ${rangeOpenDay === dayKey ? 'rotate-180' : ''}`} />
-                        </div>
-                      </button>
-                    </CollapsibleTrigger>
-                    <CollapsibleContent>
-                      <div className="flex flex-wrap gap-2 border-t border-border px-3 py-2">
-                        <NoLunchCheckbox
-                          checked={dayNoLunch}
-                          disabled={lunchUpdatingKey === `${rangeViewEmployeeId}-${dayKey}`}
-                          onCheckedChange={(checked: boolean) => void handleRangeNoLunchChange(dayEntries, dayKey, checked)}
-                        />
-                      </div>
-                      <div className="space-y-2 border-t border-border p-3">
-                        {displayDayEntries.length === 0 ? (
-                          <p className="text-sm text-muted-foreground">
-                            {dayClockLabel ? `${dayClockLabel}.` : 'No entries for this day.'}
-                          </p>
-                        ) : null}
-                        {displayDayEntries.map((entry: ShopTimeEntry) => {
-                          const isRangeEditing = editingEntryId === entry.id;
-                          if (isClockInOnlyRow(entry)) {
+                          {displayDayEntries.map((entry: ShopTimeEntry) => {
+                            const isRangeEditing = editingEntryId === entry.id;
+                            if (isClockInOnlyRow(entry)) {
+                              return (
+                                <ClockInLine
+                                  key={entry.id}
+                                  entry={entry}
+                                  isEditing={isRangeEditing && Boolean(editValues)}
+                                  value={editValues?.clockInTime ?? ''}
+                                  isSaving={isUpdating}
+                                  onChange={(clockInTime: string) => editValues && setEditValues({ ...editValues, clockInTime })}
+                                  onStartEdit={() => handleRangeStartEdit(entry)}
+                                  onSave={() => void handleRangeSaveEdit(entry, dayEntries)}
+                                  onCancel={handleCancelEdit}
+                                />
+                              );
+                            }
                             return (
-                              <ClockInLine
-                                key={entry.id}
-                                entry={entry}
-                                isEditing={isRangeEditing && Boolean(editValues)}
-                                value={editValues?.clockInTime ?? ''}
-                                isSaving={isUpdating}
-                                onChange={(clockInTime: string) => editValues && setEditValues({ ...editValues, clockInTime })}
-                                onStartEdit={() => handleRangeStartEdit(entry)}
-                                onSave={() => void handleRangeSaveEdit(entry, dayEntries)}
-                                onCancel={handleCancelEdit}
-                              />
-                            );
-                          }
-                          return (
-                            <div key={entry.id} className="rounded-lg border border-border bg-card p-3 text-card-foreground">
-                              {isRangeEditing && editValues ? (
-                                <div className="space-y-3">
-                                  <div className="space-y-2">
-                                    <p className="text-xs text-muted-foreground">Asset / job</p>
-                                    <AssetPicker
-                                      assets={assets}
-                                      value={editValues.assetId}
-                                      onChange={(asset: Pick<EquipmentAsset, 'id' | 'asset' | 'divisionCode'> | undefined) =>
-                                        setEditValues({
-                                          ...editValues,
-                                          assetId: asset?.id ?? '',
-                                          assetRecord: asset,
-                                          division: asset?.divisionCode ? String(asset.divisionCode) : editValues.division,
-                                        })
-                                      }
-                                      currentAsset={editValues.assetRecord ?? entry.asset}
-                                    />
-                                    <div className="grid gap-3 sm:grid-cols-2">
-                                      <div className="space-y-2">
-                                        <Label htmlFor={`range-div-${entry.id}`}>Division</Label>
-                                        <Input
-                                          id={`range-div-${entry.id}`}
-                                          value={editValues.division}
-                                          onChange={(event: React.ChangeEvent<HTMLInputElement>) =>
-                                            setEditValues({ ...editValues, division: event.target.value.replace(/\D/g, '') })
-                                          }
-                                          placeholder="Optional division code"
-                                        />
-                                      </div>
-                                      <div className="space-y-2">
-                                        <Label htmlFor={`range-job-${entry.id}`}>Job Number</Label>
-                                        <Input
-                                          id={`range-job-${entry.id}`}
-                                          value={editValues.jobNumber}
-                                          onChange={(event: React.ChangeEvent<HTMLInputElement>) =>
-                                            setEditValues({ ...editValues, jobNumber: event.target.value })
-                                          }
-                                          placeholder="Optional job note"
-                                        />
-                                      </div>
-                                    </div>
-                                    {!isPtoEntry(entry) ? (
-                                      <div className="space-y-2">
-                                        <Label htmlFor={`range-pay-${entry.id}`}>Pay type</Label>
-                                        <Select
-                                          value={editValues.payTypeKey}
-                                          onValueChange={(value: ShopTimeEntryPayTypeKey) =>
-                                            setEditValues({ ...editValues, payTypeKey: value })
-                                          }
-                                        >
-                                          <SelectTrigger id={`range-pay-${entry.id}`} className="w-full bg-background">
-                                            <SelectValue placeholder="Select pay type" />
-                                          </SelectTrigger>
-                                          <SelectContent>
-                                            {Object.entries(ShopTimeEntryPayTypeKeyToLabel).map(([key, label]) => (
-                                              <SelectItem key={key} value={key}>
-                                                {label}
-                                              </SelectItem>
-                                            ))}
-                                          </SelectContent>
-                                        </Select>
-                                      </div>
-                                    ) : null}
+                              <div key={entry.id} className="rounded-lg border border-border bg-card p-3 text-card-foreground">
+                                {isRangeEditing && editValues ? (
+                                  <div className="space-y-3">
                                     <div className="space-y-2">
-                                      <Label htmlFor={`range-notes-${entry.id}`}>Notes</Label>
-                                      <Textarea
-                                        id={`range-notes-${entry.id}`}
-                                        className="bg-background"
-                                        value={editValues.notes}
-                                        onChange={(event: React.ChangeEvent<HTMLTextAreaElement>) =>
-                                          setEditValues({ ...editValues, notes: event.target.value })
+                                      <p className="text-xs text-muted-foreground">Asset / job</p>
+                                      <AssetPicker
+                                        assets={assets}
+                                        value={editValues.assetId}
+                                        onChange={(asset: Pick<EquipmentAsset, 'id' | 'asset' | 'divisionCode'> | undefined) =>
+                                          setEditValues({
+                                            ...editValues,
+                                            assetId: asset?.id ?? '',
+                                            assetRecord: asset,
+                                            division: asset?.divisionCode ? String(asset.divisionCode) : editValues.division,
+                                          })
                                         }
-                                        placeholder="Optional notes"
+                                        currentAsset={editValues.assetRecord ?? entry.asset}
                                       />
-                                    </div>
-                                  </div>
-                                  <div className="grid gap-3 sm:grid-cols-3">
-                                    <div className="space-y-2">
-                                      <Label htmlFor={`range-ci-${entry.id}`}>Clock in</Label>
-                                      <Input
-                                        id={`range-ci-${entry.id}`}
-                                        type="time"
-                                        value={editValues.clockInTime}
-                                        onChange={(event: React.ChangeEvent<HTMLInputElement>) =>
-                                          setEditValues({ ...editValues, clockInTime: event.target.value })
-                                        }
-                                      />
-                                    </div>
-                                    <div className="space-y-2">
-                                      <Label htmlFor={`range-co-${entry.id}`}>Clock out</Label>
-                                      <Input
-                                        id={`range-co-${entry.id}`}
-                                        type="time"
-                                        value={editValues.clockOutTime}
-                                        onChange={(event: React.ChangeEvent<HTMLInputElement>) =>
-                                          setEditValues({ ...editValues, clockOutTime: event.target.value })
-                                        }
-                                      />
-                                    </div>
-                                    <div className="space-y-2">
-                                      <Label>Duration</Label>
-                                      <p className="font-semibold text-sm">{formatDuration(getRawDurationMinutes(entry))}</p>
-                                    </div>
-                                    <EntryDistanceField entry={entry} />
-                                  </div>
-                                  <div className="flex gap-2">
-                                    <Button
-                                      type="button"
-                                      size="sm"
-                                      onClick={() => void handleRangeSaveEdit(entry, dayEntries)}
-                                      disabled={isUpdating}
-                                    >
-                                      <Check className="mr-1 h-3 w-3" /> Save
-                                    </Button>
-                                    <Button type="button" size="sm" variant="outline" onClick={handleCancelEdit}>
-                                      <X className="mr-1 h-3 w-3" /> Cancel
-                                    </Button>
-                                  </div>
-                                </div>
-                              ) : (
-                                <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-                                  <div>
-                                    <div className="flex flex-wrap items-center gap-2">
-                                      <p className="font-medium text-sm">{managerEntryTitle(entry, assets)}</p>
-                                      {isPtoEntry(entry) && entry.pTOTypeKey ? (
-                                        <Badge variant="outline">{ShopTimeEntryPTOTypeKeyToLabel[entry.pTOTypeKey]}</Badge>
-                                      ) : null}
+                                      <div className="grid gap-3 sm:grid-cols-2">
+                                        <div className="space-y-2">
+                                          <Label htmlFor={`range-div-${entry.id}`}>Division</Label>
+                                          <Input
+                                            id={`range-div-${entry.id}`}
+                                            value={editValues.division}
+                                            onChange={(event: React.ChangeEvent<HTMLInputElement>) =>
+                                              setEditValues({ ...editValues, division: event.target.value.replace(/\D/g, '') })
+                                            }
+                                            placeholder="Optional division code"
+                                          />
+                                        </div>
+                                        <div className="space-y-2">
+                                          <Label htmlFor={`range-job-${entry.id}`}>Job Number</Label>
+                                          <Input
+                                            id={`range-job-${entry.id}`}
+                                            value={editValues.jobNumber}
+                                            onChange={(event: React.ChangeEvent<HTMLInputElement>) =>
+                                              setEditValues({ ...editValues, jobNumber: event.target.value })
+                                            }
+                                            placeholder="Optional job note"
+                                          />
+                                        </div>
+                                      </div>
                                       {!isPtoEntry(entry) ? (
-                                        <Badge variant="outline">
-                                          {ShopTimeEntryPayTypeKeyToLabel[entry.payTypeKey ?? DEFAULT_PAY_TYPE]}
+                                        <div className="space-y-2">
+                                          <Label htmlFor={`range-pay-${entry.id}`}>Pay type</Label>
+                                          <Select
+                                            value={editValues.payTypeKey}
+                                            onValueChange={(value: ShopTimeEntryPayTypeKey) =>
+                                              setEditValues({ ...editValues, payTypeKey: value })
+                                            }
+                                          >
+                                            <SelectTrigger id={`range-pay-${entry.id}`} className="w-full bg-background">
+                                              <SelectValue placeholder="Select pay type" />
+                                            </SelectTrigger>
+                                            <SelectContent>
+                                              {Object.entries(ShopTimeEntryPayTypeKeyToLabel).map(([key, label]) => (
+                                                <SelectItem key={key} value={key}>
+                                                  {label}
+                                                </SelectItem>
+                                              ))}
+                                            </SelectContent>
+                                          </Select>
+                                        </div>
+                                      ) : null}
+                                      <div className="space-y-2">
+                                        <Label htmlFor={`range-notes-${entry.id}`}>Notes</Label>
+                                        <Textarea
+                                          id={`range-notes-${entry.id}`}
+                                          className="bg-background"
+                                          value={editValues.notes}
+                                          onChange={(event: React.ChangeEvent<HTMLTextAreaElement>) =>
+                                            setEditValues({ ...editValues, notes: event.target.value })
+                                          }
+                                          placeholder="Optional notes"
+                                        />
+                                      </div>
+                                    </div>
+                                    <div className="grid gap-3 sm:grid-cols-3">
+                                      <div className="space-y-2">
+                                        <Label htmlFor={`range-ci-${entry.id}`}>Clock in</Label>
+                                        <Input
+                                          id={`range-ci-${entry.id}`}
+                                          type="time"
+                                          value={editValues.clockInTime}
+                                          onChange={(event: React.ChangeEvent<HTMLInputElement>) =>
+                                            setEditValues({ ...editValues, clockInTime: event.target.value })
+                                          }
+                                        />
+                                      </div>
+                                      <div className="space-y-2">
+                                        <Label htmlFor={`range-co-${entry.id}`}>Clock out</Label>
+                                        <Input
+                                          id={`range-co-${entry.id}`}
+                                          type="time"
+                                          value={editValues.clockOutTime}
+                                          onChange={(event: React.ChangeEvent<HTMLInputElement>) =>
+                                            setEditValues({ ...editValues, clockOutTime: event.target.value })
+                                          }
+                                        />
+                                      </div>
+                                      <div className="space-y-2">
+                                        <Label>Duration</Label>
+                                        <p className="font-semibold text-sm">{formatDuration(getRawDurationMinutes(entry))}</p>
+                                      </div>
+                                      <EntryDistanceField entry={entry} />
+                                    </div>
+                                    <div className="flex gap-2">
+                                      <Button
+                                        type="button"
+                                        size="sm"
+                                        onClick={() => void handleRangeSaveEdit(entry, dayEntries)}
+                                        disabled={isUpdating}
+                                      >
+                                        <Check className="mr-1 h-3 w-3" /> Save
+                                      </Button>
+                                      <Button type="button" size="sm" variant="outline" onClick={handleCancelEdit}>
+                                        <X className="mr-1 h-3 w-3" /> Cancel
+                                      </Button>
+                                    </div>
+                                  </div>
+                                ) : (
+                                  <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                                    <div>
+                                      <div className="flex flex-wrap items-center gap-2">
+                                        <p className="font-medium text-sm">{managerEntryTitle(entry, assets)}</p>
+                                        {isPtoEntry(entry) && entry.pTOTypeKey ? (
+                                          <Badge variant="outline">{ShopTimeEntryPTOTypeKeyToLabel[entry.pTOTypeKey]}</Badge>
+                                        ) : null}
+                                        {!isPtoEntry(entry) ? (
+                                          <Badge variant="outline">
+                                            {ShopTimeEntryPayTypeKeyToLabel[entry.payTypeKey ?? DEFAULT_PAY_TYPE]}
+                                          </Badge>
+                                        ) : null}
+                                      </div>
+                                      <p className="text-xs text-muted-foreground">
+                                        {entry.clockIn ? format(new Date(entry.clockIn), 'p') : '—'} –{' '}
+                                        {entry.clockOut ? format(new Date(entry.clockOut), 'p') : 'Active'}
+                                        {isPtoEntry(entry)
+                                          ? ` · ${getPtoHours(entry)}h PTO`
+                                          : ` · Div ${getEntryDivision(entry, assets) || '—'}`}
+                                        {getEntryJobNumber(entry) ? ` · Job ${getEntryJobNumber(entry)}` : ''}
+                                        {' · '}
+                                        {formatDuration(getRawDurationMinutes(entry))}
+                                      </p>
+                                    </div>
+                                    <div className="flex items-center gap-1.5">
+                                      <EntryDistanceBadges entry={entry} />
+                                      {entry.onCall ? (
+                                        <Badge variant="secondary">
+                                          <Phone className="mr-1 h-3 w-3" />
+                                          On Call
                                         </Badge>
                                       ) : null}
-                                    </div>
-                                    <p className="text-xs text-muted-foreground">
-                                      {entry.clockIn ? format(new Date(entry.clockIn), 'p') : '—'} –{' '}
-                                      {entry.clockOut ? format(new Date(entry.clockOut), 'p') : 'Active'}
-                                      {isPtoEntry(entry)
-                                        ? ` · ${getPtoHours(entry)}h PTO`
-                                        : ` · Div ${getEntryDivision(entry, assets) || '—'}`}
-                                      {getEntryJobNumber(entry) ? ` · Job ${getEntryJobNumber(entry)}` : ''}
-                                      {' · '}
-                                      {formatDuration(getRawDurationMinutes(entry))}
-                                    </p>
-                                  </div>
-                                  <div className="flex items-center gap-1.5">
-                                    <EntryDistanceBadges entry={entry} />
-                                    {entry.onCall ? (
-                                      <Badge variant="secondary">
-                                        <Phone className="mr-1 h-3 w-3" />
-                                        On Call
+                                      <Badge variant={entry.clockOut ? 'outline' : 'default'}>
+                                        {entry.clockOut ? 'Complete' : 'Active'}
                                       </Badge>
-                                    ) : null}
-                                    <Badge variant={entry.clockOut ? 'outline' : 'default'}>{entry.clockOut ? 'Complete' : 'Active'}</Badge>
-                                    {notesHaveAutoClockOut(entry.notes) ? <Badge variant="secondary">Needs review</Badge> : null}
-                                    <Button type="button" variant="outline" size="sm" onClick={() => handleRangeStartEdit(entry)}>
-                                      <Pencil className="mr-1 h-3 w-3" /> Edit
-                                    </Button>
-                                    <AlertDialog>
-                                      <AlertDialogTrigger asChild>
-                                        <Button type="button" variant="destructive" size="sm" disabled={isDeleting}>
-                                          <Trash2 className="mr-1 h-3 w-3" /> Delete
-                                        </Button>
-                                      </AlertDialogTrigger>
-                                      <AlertDialogContent>
-                                        <AlertDialogHeader>
-                                          <AlertDialogTitle>Delete this time entry?</AlertDialogTitle>
-                                          <AlertDialogDescription>
-                                            This removes {rangeViewEmployee?.employeeName ?? 'this employee'}&apos;s {format(day, 'MMM d')}{' '}
-                                            time entry for {managerEntryTitle(entry, assets)} from Dataverse and the weekly timecard export.
-                                          </AlertDialogDescription>
-                                        </AlertDialogHeader>
-                                        <AlertDialogFooter>
-                                          <AlertDialogCancel>Cancel</AlertDialogCancel>
-                                          <AlertDialogAction onClick={() => void handleDeleteEntry(entry)}>
-                                            Delete time entry
-                                          </AlertDialogAction>
-                                        </AlertDialogFooter>
-                                      </AlertDialogContent>
-                                    </AlertDialog>
+                                      {notesHaveAutoClockOut(entry.notes) ? <Badge variant="secondary">Needs review</Badge> : null}
+                                      <Button type="button" variant="outline" size="sm" onClick={() => handleRangeStartEdit(entry)}>
+                                        <Pencil className="mr-1 h-3 w-3" /> Edit
+                                      </Button>
+                                      <AlertDialog>
+                                        <AlertDialogTrigger asChild>
+                                          <Button type="button" variant="destructive" size="sm" disabled={isDeleting}>
+                                            <Trash2 className="mr-1 h-3 w-3" /> Delete
+                                          </Button>
+                                        </AlertDialogTrigger>
+                                        <AlertDialogContent>
+                                          <AlertDialogHeader>
+                                            <AlertDialogTitle>Delete this time entry?</AlertDialogTitle>
+                                            <AlertDialogDescription>
+                                              This removes {rangeViewEmployee?.employeeName ?? 'this employee'}&apos;s{' '}
+                                              {format(day, 'MMM d')} time entry for {managerEntryTitle(entry, assets)} from Dataverse and
+                                              the weekly timecard export.
+                                            </AlertDialogDescription>
+                                          </AlertDialogHeader>
+                                          <AlertDialogFooter>
+                                            <AlertDialogCancel>Cancel</AlertDialogCancel>
+                                            <AlertDialogAction onClick={() => void handleDeleteEntry(entry)}>
+                                              Delete time entry
+                                            </AlertDialogAction>
+                                          </AlertDialogFooter>
+                                        </AlertDialogContent>
+                                      </AlertDialog>
+                                    </div>
                                   </div>
-                                </div>
-                              )}
-                              {getEmployeeNotes(entry.notes) ? (
-                                <p className="mt-2 border-t border-border pt-2 text-xs text-muted-foreground">
-                                  {getEmployeeNotes(entry.notes)}
-                                </p>
-                              ) : null}
-                            </div>
-                          );
-                        })}
-                        {rangeAddingForDay === dayKey && newEntryDraft ? (
-                          <div className="space-y-3 rounded-lg border border-dashed border-border bg-muted p-3">
-                            <div className="flex items-center justify-between gap-3">
-                              <p className="font-medium text-sm text-foreground">Add time entry for {format(day, 'MMM d')}</p>
-                              <Button
-                                type="button"
-                                size="icon"
-                                variant="ghost"
-                                aria-label="Cancel add entry"
-                                onClick={handleRangeCancelAddEntry}
-                              >
-                                <X className="h-4 w-4" />
-                              </Button>
-                            </div>
-                            <div className="space-y-2">
-                              <Label>Equipment asset</Label>
-                              <AssetPicker
-                                assets={assets}
-                                value={newEntryDraft.assetId}
-                                onChange={(asset: Pick<EquipmentAsset, 'id' | 'asset' | 'divisionCode'> | undefined) =>
-                                  setNewEntryDraft({
-                                    ...newEntryDraft,
-                                    assetId: asset?.id ?? '',
-                                    assetRecord: asset,
-                                    division: asset?.divisionCode !== undefined ? String(asset.divisionCode) : newEntryDraft.division,
-                                  })
-                                }
-                                currentAsset={newEntryDraft.assetRecord}
-                              />
-                            </div>
-                            <div className="grid gap-3 sm:grid-cols-2">
-                              <div className="space-y-2">
-                                <Label htmlFor={`range-add-div-${dayKey}`}>Division</Label>
-                                <Input
-                                  id={`range-add-div-${dayKey}`}
-                                  className="bg-background"
-                                  value={newEntryDraft.division}
-                                  onChange={(event: React.ChangeEvent<HTMLInputElement>) =>
-                                    setNewEntryDraft({ ...newEntryDraft, division: event.target.value.replace(/\D/g, '') })
-                                  }
-                                  placeholder="Optional division code"
-                                />
+                                )}
+                                {getEmployeeNotes(entry.notes) ? (
+                                  <p className="mt-2 border-t border-border pt-2 text-xs text-muted-foreground">
+                                    {getEmployeeNotes(entry.notes)}
+                                  </p>
+                                ) : null}
                               </div>
-                              <div className="space-y-2">
-                                <Label htmlFor={`range-add-job-${dayKey}`}>Job number</Label>
-                                <Input
-                                  id={`range-add-job-${dayKey}`}
-                                  className="bg-background"
-                                  value={newEntryDraft.jobNumber}
-                                  onChange={(event: React.ChangeEvent<HTMLInputElement>) =>
-                                    setNewEntryDraft({ ...newEntryDraft, jobNumber: event.target.value })
-                                  }
-                                  placeholder="Optional job note"
-                                />
-                              </div>
-                            </div>
-                            <div className="space-y-2">
-                              <Label htmlFor={`range-add-pay-${dayKey}`}>Pay type</Label>
-                              <Select
-                                value={newEntryDraft.payTypeKey}
-                                onValueChange={(value: ShopTimeEntryPayTypeKey) =>
-                                  setNewEntryDraft({ ...newEntryDraft, payTypeKey: value })
-                                }
-                              >
-                                <SelectTrigger id={`range-add-pay-${dayKey}`} className="w-full bg-background">
-                                  <SelectValue placeholder="Select pay type" />
-                                </SelectTrigger>
-                                <SelectContent>
-                                  {Object.entries(ShopTimeEntryPayTypeKeyToLabel).map(([key, label]) => (
-                                    <SelectItem key={key} value={key}>
-                                      {label}
-                                    </SelectItem>
-                                  ))}
-                                </SelectContent>
-                              </Select>
-                            </div>
-                            <div className="grid gap-3 sm:grid-cols-2">
-                              <div className="space-y-2">
-                                <Label htmlFor={`range-add-ci-${dayKey}`}>Clock in</Label>
-                                <Input
-                                  id={`range-add-ci-${dayKey}`}
-                                  className="bg-background"
-                                  type="time"
-                                  value={newEntryDraft.clockInTime}
-                                  onChange={(event: React.ChangeEvent<HTMLInputElement>) =>
-                                    setNewEntryDraft({ ...newEntryDraft, clockInTime: event.target.value })
-                                  }
-                                />
-                              </div>
-                              <div className="space-y-2">
-                                <Label htmlFor={`range-add-co-${dayKey}`}>Clock out</Label>
-                                <Input
-                                  id={`range-add-co-${dayKey}`}
-                                  className="bg-background"
-                                  type="time"
-                                  value={newEntryDraft.clockOutTime}
-                                  onChange={(event: React.ChangeEvent<HTMLInputElement>) =>
-                                    setNewEntryDraft({ ...newEntryDraft, clockOutTime: event.target.value })
-                                  }
-                                />
-                              </div>
-                            </div>
-                            <div className="flex gap-2">
-                              <Button type="button" size="sm" onClick={() => void handleRangeSaveNewEntry(day)} disabled={isCreating}>
-                                Save time entry
-                              </Button>
-                              <Button type="button" size="sm" variant="outline" onClick={handleRangeCancelAddEntry}>
-                                Cancel
-                              </Button>
-                            </div>
-                          </div>
-                        ) : null}
-                        {rangePtoForDay === dayKey && ptoDraft ? (
-                          <div className="space-y-3 rounded-lg border border-dashed border-border bg-muted p-3">
-                            <div className="flex items-center justify-between gap-3">
-                              <p className="font-medium text-sm text-foreground">Add PTO for {format(day, 'MMM d')}</p>
-                              <Button type="button" size="icon" variant="ghost" aria-label="Cancel PTO" onClick={handleRangeCancelPto}>
-                                <X className="h-4 w-4" />
-                              </Button>
-                            </div>
-                            <div className="grid gap-3 sm:grid-cols-2">
-                              <div className="space-y-2">
-                                <Label htmlFor={`range-pto-type-${dayKey}`}>PTO type</Label>
-                                <Select
-                                  value={ptoDraft.type || undefined}
-                                  onValueChange={(value: ShopTimeEntryPTOTypeKey) => setPtoDraft({ ...ptoDraft, type: value })}
+                            );
+                          })}
+                          {rangeAddingForDay === dayKey && newEntryDraft ? (
+                            <div className="space-y-3 rounded-lg border border-dashed border-border bg-muted p-3">
+                              <div className="flex items-center justify-between gap-3">
+                                <p className="font-medium text-sm text-foreground">Add time entry for {format(day, 'MMM d')}</p>
+                                <Button
+                                  type="button"
+                                  size="icon"
+                                  variant="ghost"
+                                  aria-label="Cancel add entry"
+                                  onClick={handleRangeCancelAddEntry}
                                 >
-                                  <SelectTrigger id={`range-pto-type-${dayKey}`} className="w-full bg-background">
-                                    <SelectValue placeholder="Select PTO type" />
+                                  <X className="h-4 w-4" />
+                                </Button>
+                              </div>
+                              <div className="space-y-2">
+                                <Label>Equipment asset</Label>
+                                <AssetPicker
+                                  assets={assets}
+                                  value={newEntryDraft.assetId}
+                                  onChange={(asset: Pick<EquipmentAsset, 'id' | 'asset' | 'divisionCode'> | undefined) =>
+                                    setNewEntryDraft({
+                                      ...newEntryDraft,
+                                      assetId: asset?.id ?? '',
+                                      assetRecord: asset,
+                                      division: asset?.divisionCode !== undefined ? String(asset.divisionCode) : newEntryDraft.division,
+                                    })
+                                  }
+                                  currentAsset={newEntryDraft.assetRecord}
+                                />
+                              </div>
+                              <div className="grid gap-3 sm:grid-cols-2">
+                                <div className="space-y-2">
+                                  <Label htmlFor={`range-add-div-${dayKey}`}>Division</Label>
+                                  <Input
+                                    id={`range-add-div-${dayKey}`}
+                                    className="bg-background"
+                                    value={newEntryDraft.division}
+                                    onChange={(event: React.ChangeEvent<HTMLInputElement>) =>
+                                      setNewEntryDraft({ ...newEntryDraft, division: event.target.value.replace(/\D/g, '') })
+                                    }
+                                    placeholder="Optional division code"
+                                  />
+                                </div>
+                                <div className="space-y-2">
+                                  <Label htmlFor={`range-add-job-${dayKey}`}>Job number</Label>
+                                  <Input
+                                    id={`range-add-job-${dayKey}`}
+                                    className="bg-background"
+                                    value={newEntryDraft.jobNumber}
+                                    onChange={(event: React.ChangeEvent<HTMLInputElement>) =>
+                                      setNewEntryDraft({ ...newEntryDraft, jobNumber: event.target.value })
+                                    }
+                                    placeholder="Optional job note"
+                                  />
+                                </div>
+                              </div>
+                              <div className="space-y-2">
+                                <Label htmlFor={`range-add-pay-${dayKey}`}>Pay type</Label>
+                                <Select
+                                  value={newEntryDraft.payTypeKey}
+                                  onValueChange={(value: ShopTimeEntryPayTypeKey) =>
+                                    setNewEntryDraft({ ...newEntryDraft, payTypeKey: value })
+                                  }
+                                >
+                                  <SelectTrigger id={`range-add-pay-${dayKey}`} className="w-full bg-background">
+                                    <SelectValue placeholder="Select pay type" />
                                   </SelectTrigger>
                                   <SelectContent>
-                                    {Object.entries(ShopTimeEntryPTOTypeKeyToLabel).map(([key, label]) => (
+                                    {Object.entries(ShopTimeEntryPayTypeKeyToLabel).map(([key, label]) => (
                                       <SelectItem key={key} value={key}>
                                         {label}
                                       </SelectItem>
@@ -1852,66 +1802,130 @@ export default function ManagerDashboardPage() {
                                   </SelectContent>
                                 </Select>
                               </div>
-                              <div className="space-y-2">
-                                <Label>PTO hours</Label>
-                                <div className="grid grid-cols-2 gap-2">
-                                  <Button
-                                    type="button"
-                                    size="sm"
-                                    variant={ptoDraft.hours === 4 ? 'default' : 'outline'}
-                                    onClick={() => setPtoDraft({ ...ptoDraft, hours: 4 })}
-                                  >
-                                    4 hours
-                                  </Button>
-                                  <Button
-                                    type="button"
-                                    size="sm"
-                                    variant={ptoDraft.hours === 8 ? 'default' : 'outline'}
-                                    onClick={() => setPtoDraft({ ...ptoDraft, hours: 8 })}
-                                  >
-                                    8 hours
-                                  </Button>
+                              <div className="grid gap-3 sm:grid-cols-2">
+                                <div className="space-y-2">
+                                  <Label htmlFor={`range-add-ci-${dayKey}`}>Clock in</Label>
+                                  <Input
+                                    id={`range-add-ci-${dayKey}`}
+                                    className="bg-background"
+                                    type="time"
+                                    value={newEntryDraft.clockInTime}
+                                    onChange={(event: React.ChangeEvent<HTMLInputElement>) =>
+                                      setNewEntryDraft({ ...newEntryDraft, clockInTime: event.target.value })
+                                    }
+                                  />
+                                </div>
+                                <div className="space-y-2">
+                                  <Label htmlFor={`range-add-co-${dayKey}`}>Clock out</Label>
+                                  <Input
+                                    id={`range-add-co-${dayKey}`}
+                                    className="bg-background"
+                                    type="time"
+                                    value={newEntryDraft.clockOutTime}
+                                    onChange={(event: React.ChangeEvent<HTMLInputElement>) =>
+                                      setNewEntryDraft({ ...newEntryDraft, clockOutTime: event.target.value })
+                                    }
+                                  />
                                 </div>
                               </div>
+                              <div className="flex gap-2">
+                                <Button type="button" size="sm" onClick={() => void handleRangeSaveNewEntry(day)} disabled={isCreating}>
+                                  Save time entry
+                                </Button>
+                                <Button type="button" size="sm" variant="outline" onClick={handleRangeCancelAddEntry}>
+                                  Cancel
+                                </Button>
+                              </div>
                             </div>
-                            <div className="flex gap-2">
-                              <Button type="button" size="sm" onClick={() => void handleRangeSavePto(day)} disabled={isCreating}>
-                                Save PTO
+                          ) : null}
+                          {rangePtoForDay === dayKey && ptoDraft ? (
+                            <div className="space-y-3 rounded-lg border border-dashed border-border bg-muted p-3">
+                              <div className="flex items-center justify-between gap-3">
+                                <p className="font-medium text-sm text-foreground">Add PTO for {format(day, 'MMM d')}</p>
+                                <Button type="button" size="icon" variant="ghost" aria-label="Cancel PTO" onClick={handleRangeCancelPto}>
+                                  <X className="h-4 w-4" />
+                                </Button>
+                              </div>
+                              <div className="grid gap-3 sm:grid-cols-2">
+                                <div className="space-y-2">
+                                  <Label htmlFor={`range-pto-type-${dayKey}`}>PTO type</Label>
+                                  <Select
+                                    value={ptoDraft.type || undefined}
+                                    onValueChange={(value: ShopTimeEntryPTOTypeKey) => setPtoDraft({ ...ptoDraft, type: value })}
+                                  >
+                                    <SelectTrigger id={`range-pto-type-${dayKey}`} className="w-full bg-background">
+                                      <SelectValue placeholder="Select PTO type" />
+                                    </SelectTrigger>
+                                    <SelectContent>
+                                      {Object.entries(ShopTimeEntryPTOTypeKeyToLabel).map(([key, label]) => (
+                                        <SelectItem key={key} value={key}>
+                                          {label}
+                                        </SelectItem>
+                                      ))}
+                                    </SelectContent>
+                                  </Select>
+                                </div>
+                                <div className="space-y-2">
+                                  <Label>PTO hours</Label>
+                                  <div className="grid grid-cols-2 gap-2">
+                                    <Button
+                                      type="button"
+                                      size="sm"
+                                      variant={ptoDraft.hours === 4 ? 'default' : 'outline'}
+                                      onClick={() => setPtoDraft({ ...ptoDraft, hours: 4 })}
+                                    >
+                                      4 hours
+                                    </Button>
+                                    <Button
+                                      type="button"
+                                      size="sm"
+                                      variant={ptoDraft.hours === 8 ? 'default' : 'outline'}
+                                      onClick={() => setPtoDraft({ ...ptoDraft, hours: 8 })}
+                                    >
+                                      8 hours
+                                    </Button>
+                                  </div>
+                                </div>
+                              </div>
+                              <div className="flex gap-2">
+                                <Button type="button" size="sm" onClick={() => void handleRangeSavePto(day)} disabled={isCreating}>
+                                  Save PTO
+                                </Button>
+                                <Button type="button" size="sm" variant="outline" onClick={handleRangeCancelPto}>
+                                  Cancel
+                                </Button>
+                              </div>
+                            </div>
+                          ) : null}
+                          {rangeAddingForDay !== dayKey && rangePtoForDay !== dayKey ? (
+                            <div className="grid gap-2 sm:grid-cols-2">
+                              <Button
+                                type="button"
+                                variant="outline"
+                                size="sm"
+                                className="w-full justify-center border-dashed"
+                                onClick={() => handleRangeStartAddEntry(dayKey)}
+                              >
+                                <Plus className="mr-1 h-3 w-3" /> Add time entry
                               </Button>
-                              <Button type="button" size="sm" variant="outline" onClick={handleRangeCancelPto}>
-                                Cancel
+                              <Button
+                                type="button"
+                                variant="outline"
+                                size="sm"
+                                className="w-full justify-center border-dashed"
+                                onClick={() => handleRangeStartPto(dayKey)}
+                              >
+                                <Plus className="mr-1 h-3 w-3" /> Add PTO
                               </Button>
                             </div>
-                          </div>
-                        ) : null}
-                        {rangeAddingForDay !== dayKey && rangePtoForDay !== dayKey ? (
-                          <div className="grid gap-2 sm:grid-cols-2">
-                            <Button
-                              type="button"
-                              variant="outline"
-                              size="sm"
-                              className="w-full justify-center border-dashed"
-                              onClick={() => handleRangeStartAddEntry(dayKey)}
-                            >
-                              <Plus className="mr-1 h-3 w-3" /> Add time entry
-                            </Button>
-                            <Button
-                              type="button"
-                              variant="outline"
-                              size="sm"
-                              className="w-full justify-center border-dashed"
-                              onClick={() => handleRangeStartPto(dayKey)}
-                            >
-                              <Plus className="mr-1 h-3 w-3" /> Add PTO
-                            </Button>
-                          </div>
-                        ) : null}
-                      </div>
-                    </CollapsibleContent>
-                  </section>
-                </Collapsible>
-              );
-            })}
+                          ) : null}
+                        </div>
+                      </CollapsibleContent>
+                    </section>
+                  </Collapsible>
+                );
+              },
+            )}
 
             {rangeViewRange?.from && rangeViewRange?.to && rangeViewDays.every((d) => d.entries.length === 0) ? (
               <p className="rounded-lg bg-muted p-4 text-sm text-muted-foreground">

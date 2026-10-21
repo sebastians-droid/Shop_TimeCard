@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import { eachDayOfInterval, endOfWeek, format, startOfWeek, subWeeks } from 'date-fns';
 import type { DateRange } from 'react-day-picker';
@@ -31,7 +31,13 @@ import { EmployeeCodeSignIn, KioskSessionBar } from '@/components/kiosk-session'
 import { useUser } from '@/hooks/use-user';
 import { useKioskSession } from '@/hooks/use-kiosk-session';
 import { VoiceNoteButton } from '@/components/voice-note-button';
-import { useAllEquipmentAssets, useShopEmployeeList, useShopTimeEntryList, useUpdateShopTimeEntry } from '@/hooks/use-shop-data';
+import {
+  useAllEquipmentAssets,
+  useScheduleList,
+  useShopEmployeeList,
+  useShopTimeEntryList,
+  useUpdateShopTimeEntry,
+} from '@/hooks/use-shop-data';
 import { mapShopEmployees, type AppShopEmployee } from '@/lib/shop-employees';
 import {
   applyNoLunchMarker,
@@ -44,6 +50,7 @@ import {
   isPtoEntry,
   keepAutoClockOutMarker,
   notesHaveNoLunch,
+  paysFromClockIn,
   scheduledStartFor,
   waitBeforeFirstJob,
 } from '@/lib/time-rules';
@@ -133,6 +140,36 @@ export default function MechanicLogPage() {
     [selectedEmployee?.isAdmin, selectedEmployee?.isPartsRunner, selectedEmployee?.isRoadMech],
   );
   const isRoadMech = selectedEmployee?.isRoadMech === true;
+
+  // Shop mechanics are paid from the start the manager set for each day in the
+  // Mechanic Schedule. Without it the log fell back to 7:00 and disagreed with
+  // the manager dashboard on any day with a different start.
+  const needsScheduledStarts = Boolean(selectedEmployee) && !paysFromClockIn(selectedEmployee);
+  const {
+    data: employeeSchedules = [],
+    isError: schedulesFailed,
+    error: schedulesError,
+    refetch: refetchSchedules,
+  } = useScheduleList(
+    dateRange?.from ? format(dateRange.from, "yyyy-MM-dd'T'00:00:00'Z'") : undefined,
+    dateRange?.to ? format(dateRange.to, "yyyy-MM-dd'T'23:59:59'Z'") : undefined,
+    { employeeId: selectedEmployee?.id, enabled: needsScheduledStarts },
+  );
+  const scheduledStartByDay = useMemo(() => {
+    const map = new Map<string, string | undefined>();
+    for (const row of employeeSchedules) {
+      if (row.employeeId === selectedEmployee?.id && row.scheduleDate) map.set(row.scheduleDate.slice(0, 10), row.scheduledStart);
+    }
+    return map;
+  }, [employeeSchedules, selectedEmployee?.id]);
+  const payStartFor = (dateKey: string) => scheduledStartFor(selectedEmployee, scheduledStartByDay.get(dateKey));
+
+  useEffect(() => {
+    if (!schedulesFailed) return;
+    const message = schedulesError instanceof Error ? schedulesError.message : 'Schedule list failed to load.';
+    toast.error(`Could not load scheduled starts. ${message}`);
+  }, [schedulesFailed, schedulesError]);
+
   const canReshapeDay = (dateKey: string) => isRoadMech && isWithinRoadMechEditWindow(dateKey);
   const roadMechEdits = useRoadMechJobEdits(payStart, payProfile);
 
@@ -317,7 +354,7 @@ export default function MechanicLogPage() {
     }
     const startedAt = timeOnWorkDay(day, jobStartedAt, dayEntries);
     const endedAt = timeAfter(startedAt, jobEndedAt);
-    const plan = planForgottenJobInsert(dayEntries, startedAt, endedAt, payStart, payProfile);
+    const plan = planForgottenJobInsert(dayEntries, startedAt, endedAt, payStartFor(format(day, 'yyyy-MM-dd')), payProfile);
     if ('error' in plan) {
       toast.error(plan.error);
       return;
@@ -441,7 +478,8 @@ export default function MechanicLogPage() {
     return days.map((day) => {
       const dateKey = format(day, 'yyyy-MM-dd');
       const entries = filteredEntries.filter((entry: ShopTimeEntry) => getEntryWorkDateKey(entry) === dateKey);
-      const totalHours = getDayPayMinutes(entries, new Date(), payStart, payProfile).totalMinutes / 60;
+      const dayPayStart = scheduledStartFor(selectedEmployee, scheduledStartByDay.get(dateKey));
+      const totalHours = getDayPayMinutes(entries, new Date(), dayPayStart, payProfile).totalMinutes / 60;
       // Road mechanics also see unassigned time so they can assign it or stretch a neighbor over it.
       const rows = isRoadMech
         ? entries.filter((entry) => !isAwaitingAsset(entry) || (entry.clockOut && getRawDurationMinutes(entry) >= 5))
@@ -454,13 +492,13 @@ export default function MechanicLogPage() {
         rows,
         locksById: new Map(isRoadMech ? rows.map((entry) => [entry.id, jobTimeLocks(entries, entry)] as const) : []),
         clockLabel: dayClockCaption(entries),
-        waitBeforeJob: waitBeforeFirstJob(entries, new Date(), payStart, payProfile),
+        waitBeforeJob: waitBeforeFirstJob(entries, new Date(), dayPayStart, payProfile),
         totalHours,
         firstIn: dayFirstClockIn(entries),
         lastOut: dayLastClockOut(entries),
       };
     });
-  }, [days, filteredEntries, isRoadMech, payProfile, payStart]);
+  }, [days, filteredEntries, isRoadMech, payProfile, scheduledStartByDay, selectedEmployee]);
 
   const rangeTotalHours = useMemo(() => Math.round(dayData.reduce((sum, d) => sum + d.totalHours, 0) * 100) / 100, [dayData]);
 
@@ -510,6 +548,19 @@ export default function MechanicLogPage() {
                 {entriesError instanceof Error ? entriesError.message : 'Grant the app user Read on Shop Time Entry, then retry.'}
               </p>
               <Button type="button" variant="outline" className="mt-3" onClick={() => void refetchEntries()}>
+                Retry
+              </Button>
+            </div>
+          ) : null}
+
+          {schedulesFailed ? (
+            <div className="rounded-md border border-destructive/40 bg-destructive/10 p-3 text-sm text-destructive">
+              <p className="font-medium">Could not load scheduled starts.</p>
+              <p className="mt-1 break-words text-destructive/80">
+                {schedulesError instanceof Error ? schedulesError.message : 'Schedule list failed to load.'} Hours below assume a 7:00 AM
+                start until this succeeds, so they may not match the manager dashboard.
+              </p>
+              <Button type="button" variant="outline" className="mt-3" onClick={() => void refetchSchedules()}>
                 Retry
               </Button>
             </div>
