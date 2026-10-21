@@ -40,6 +40,8 @@ try {
   /* Sync optional */
 }
 
+const GUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
 function json(status, body) {
   return {
     status,
@@ -253,11 +255,31 @@ async function handleRequest(request) {
     }
 
     if (method === 'GET' && pathname === '/api/schedules') {
-      requireManager(request);
       const url = new URL(request.url, 'https://timecard.local');
       const from = url.searchParams.get('from') || undefined;
       const to = url.searchParams.get('to') || undefined;
-      return json(200, { schedules: await listSchedules({ from, to }) });
+      const employeeId = url.searchParams.get('employeeId') || undefined;
+      if (employeeId && !GUID_PATTERN.test(employeeId)) {
+        const error = new Error('employeeId must be a GUID.');
+        error.status = 400;
+        throw error;
+      }
+      // Managers see every schedule. Anyone else may read one employee's starts —
+      // the Mechanic Log needs them so its pay totals match the manager dashboard.
+      const user = await requireAppUser(request);
+      if (!user.isManager) {
+        if (!employeeId) {
+          const error = new Error('Manager access is required to list every schedule.');
+          error.status = 403;
+          throw error;
+        }
+        if (!user.isKioskAccount && employeeId !== user.shopEmployeeId) {
+          const error = new Error('You can only view your own schedule.');
+          error.status = 403;
+          throw error;
+        }
+      }
+      return json(200, { schedules: await listSchedules({ from, to, employeeId }) });
     }
 
     if (method === 'PATCH' && pathname === '/api/schedules') {

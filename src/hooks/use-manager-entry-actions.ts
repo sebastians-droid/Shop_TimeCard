@@ -6,6 +6,7 @@ import { toast } from '@/lib/toast';
 import { apiFetch } from '@/lib/api';
 import { queryKeys } from '@/lib/query-keys';
 import { useCreateShopTimeEntry, useDeleteShopTimeEntry, useUpdateShopTimeEntry } from '@/hooks/use-shop-data';
+import { fetchPayStart } from '@/hooks/use-employee-scheduled-starts';
 import {
   PTO_TIME_KEY_BY_HOURS,
   formatTimeForInput,
@@ -31,7 +32,6 @@ import {
   keepAutoClockOutMarker,
   notesHaveAutoClockOut,
   notesHaveNoLunch,
-  scheduledStartFor,
 } from '@/lib/time-rules';
 import type { AppShopEmployee } from '@/lib/shop-employees';
 import type { EditableEntry, NewEntryDraft, PtoDraft } from '@/lib/manager-timecard';
@@ -117,11 +117,19 @@ export function useManagerEntryActions({ employees, assets, timeEntries }: Manag
       ? getAssetDisplayName(selectedAsset)
       : manualJobNumber || (manualDivision ? `Division ${manualDivision}` : 'Time entry');
     const division = selectedAsset ? selectedAsset.divisionCode : manualDivision ? Number(manualDivision) : undefined;
+    // Stored hours use the day's scheduled start, matching every pay total.
+    let payStart: string | null | undefined;
+    try {
+      payStart = await fetchPayStart(queryClient, employee.id, employee, dayKey);
+    } catch (error: unknown) {
+      toast.error(toErrorMessage(error, 'Unable to load the scheduled start.'));
+      return false;
+    }
     // A manager-added entry inherits the day's existing lunch override so the
     // day's pay total does not change shape when the row lands.
     const notes = applyNoLunchMarker(
       undefined,
-      getDayPayMinutes(existingDayEntries, new Date(), scheduledStartFor(employee), {
+      getDayPayMinutes(existingDayEntries, new Date(), payStart, {
         isRoadMech: employee.isRoadMech,
         isAdmin: employee.isAdmin,
         isPartsRunner: employee.isPartsRunner,
@@ -140,7 +148,7 @@ export function useManagerEntryActions({ employees, assets, timeEntries }: Manag
       workDate: dayKey,
     };
     const hours =
-      getEntryPaidMinutes([...existingDayEntries, provisionalEntry], provisionalEntry, new Date(), scheduledStartFor(employee), {
+      getEntryPaidMinutes([...existingDayEntries, provisionalEntry], provisionalEntry, new Date(), payStart, {
         isRoadMech: employee.isRoadMech,
         isAdmin: employee.isAdmin,
         isPartsRunner: employee.isPartsRunner,
@@ -213,12 +221,21 @@ export function useManagerEntryActions({ employees, assets, timeEntries }: Manag
       .map((row: ShopTimeEntry) => (row.id === entry.id ? updatedEntry : row));
     const ptoHours = getPtoHours(entry);
     const employee = employees.find((candidate) => candidate.id === entry.employee?.id);
-    const payStart = scheduledStartFor(employee);
     const payProfile = {
       isRoadMech: employee?.isRoadMech,
       isAdmin: employee?.isAdmin,
       isPartsRunner: employee?.isPartsRunner,
     };
+    // Stored hours use the day's scheduled start, matching every pay total.
+    let payStart: string | null | undefined;
+    if (clockOut && entry.employee?.id) {
+      try {
+        payStart = await fetchPayStart(queryClient, entry.employee.id, payProfile, workDate);
+      } catch (error: unknown) {
+        toast.error(toErrorMessage(error, 'Unable to load the scheduled start.'));
+        return false;
+      }
+    }
 
     try {
       await updateTimeEntry.mutateAsync({

@@ -273,17 +273,29 @@ export type MechanicScheduleRow = {
   employeeId?: string;
 };
 
-export function useScheduleList(from?: string, to?: string) {
-  return useQuery({
-    queryKey: queryKeys.scheduleRange(from, to),
+/**
+ * Scheduled starts in a date range. Pass `employeeId` to read one employee's
+ * starts — required for non-managers, who may not list everyone's.
+ */
+export function scheduleListQuery(from?: string, to?: string, employeeId?: string) {
+  return {
+    queryKey: queryKeys.scheduleRange(from, to, employeeId),
     queryFn: async () => {
       const params = new URLSearchParams();
       if (from) params.set('from', from);
       if (to) params.set('to', to);
+      if (employeeId) params.set('employeeId', employeeId);
       const data = await apiFetch<{ schedules: MechanicScheduleRow[] }>(`/api/schedules?${params}`);
       return data.schedules;
     },
-    enabled: Boolean(from && to),
+  };
+}
+
+export function useScheduleList(from?: string, to?: string, options: { employeeId?: string; enabled?: boolean } = {}) {
+  const { employeeId, enabled = true } = options;
+  return useQuery({
+    ...scheduleListQuery(from, to, employeeId),
+    enabled: enabled && Boolean(from && to),
   });
 }
 

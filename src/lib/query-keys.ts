@@ -12,5 +12,5 @@ export const queryKeys = {
   timeEntries: () => ['shopTimeEntry-list'] as const,
   /** Root key covering every date range, for invalidation after a write. */
   schedules: () => ['schedule-list'] as const,
-  scheduleRange: (from?: string, to?: string) => ['schedule-list', from, to] as const,
+  scheduleRange: (from?: string, to?: string, employeeId?: string) => ['schedule-list', from, to, employeeId] as const,
 } as const;

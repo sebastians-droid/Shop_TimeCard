@@ -38,6 +38,7 @@ import {
   useSwitchShopTimeEntryJob,
   useUpdateShopTimeEntry,
 } from '@/hooks/use-shop-data';
+import { useEmployeeScheduledStarts } from '@/hooks/use-employee-scheduled-starts';
 import type { EquipmentAsset } from '@/models/equipment-asset';
 import { mapShopEmployees, type AppShopEmployee } from '@/lib/shop-employees';
 import {
@@ -52,7 +53,6 @@ import {
   isAwaitingAsset,
   isPtoEntry,
   keepAutoClockOutMarker,
-  scheduledStartFor,
   notesHaveNoLunch,
   stripNoLunchMarker,
 } from '@/lib/time-rules';
@@ -178,9 +178,6 @@ export default function TimecardPage() {
   }, [employeeTodayEntries, liveOpenEntries]);
   const awaitingFirstJob = Boolean(employeeActiveEntry && isAwaitingAsset(employeeActiveEntry));
   const todayClockLabel = dayClockCaption(employeeTodayEntries);
-  // Road mechanics start whenever they punch in, so their early time is paid
-  // rather than being pulled forward to the default start.
-  const payStart = scheduledStartFor(selectedEmployee);
   const payProfile = useMemo(
     () => ({
       isRoadMech: selectedEmployee?.isRoadMech,
@@ -189,9 +186,18 @@ export default function TimecardPage() {
     }),
     [adminStaff, partsRunnerStaff, selectedEmployee?.isRoadMech],
   );
+  // Shop pay runs from the day's scheduled start (or clock-in, if later); road
+  // mechanics and admins from clock-in. Cover every day an open punch is on.
+  const oldestOpenDay = oldestOpen ? getEntryWorkDateKey(oldestOpen) : undefined;
+  const { payStartFor } = useEmployeeScheduledStarts(
+    selectedEmployee?.id,
+    selectedEmployee ? payProfile : undefined,
+    oldestOpenDay && oldestOpenDay < currentWorkDay ? oldestOpenDay : currentWorkDay,
+    currentWorkDay,
+  );
   const todayPay = useMemo(
-    () => getDayPayMinutes(employeeTodayEntries, new Date(), payStart, payProfile),
-    [employeeTodayEntries, payProfile, payStart],
+    () => getDayPayMinutes(employeeTodayEntries, new Date(), payStartFor(currentWorkDay), payProfile),
+    [currentWorkDay, employeeTodayEntries, payProfile, payStartFor],
   );
   const voicePhrases = useMemo(
     () =>
@@ -340,7 +346,7 @@ export default function TimecardPage() {
       await switchJob.mutateAsync({
         activeEntryId: closedActiveEntry.id,
         switchAt,
-        closingHours: getEntryPaidMinutes(dayAfterClose, closedActiveEntry, new Date(), payStart, payProfile) / 60,
+        closingHours: getEntryPaidMinutes(dayAfterClose, closedActiveEntry, new Date(), payStartFor(currentWorkDay), payProfile) / 60,
         lat: pos?.lat,
         lon: pos?.lon,
         next: {
@@ -422,7 +428,7 @@ export default function TimecardPage() {
       const dayEntries = employeeEntries
         .filter((row: ShopTimeEntry) => row.clockIn && getEntryWorkDateKey(row) === dayKey && !isPtoEntry(row))
         .map((row: ShopTimeEntry) => (openIds.has(row.id) ? { ...row, clockOut: row.clockOut ?? clockOut } : row));
-      const minutes = getEntryPaidMinutes(dayEntries, { ...entry, clockOut }, new Date(), payStart, payProfile);
+      const minutes = getEntryPaidMinutes(dayEntries, { ...entry, clockOut }, new Date(), payStartFor(dayKey), payProfile);
       return { id: entry.id, hours: Number.isFinite(minutes) ? minutes / 60 : undefined };
     });
     try {
@@ -674,10 +680,11 @@ export default function TimecardPage() {
                               <AlertDialogHeader>
                                 <AlertDialogTitle>Confirm clock out?</AlertDialogTitle>
                                 <AlertDialogDescription>
-                                  Clock out closes {liveOpenEntries.length === 1 ? 'the open punch' : `all ${liveOpenEntries.length} open punches`} for{' '}
+                                  Clock out closes{' '}
+                                  {liveOpenEntries.length === 1 ? 'the open punch' : `all ${liveOpenEntries.length} open punches`} for{' '}
                                   {selectedEmployee.employeeName}
-                                  {oldestOpen?.clockIn ? `, started ${format(new Date(oldestOpen.clockIn), 'EEE, MMM d, p')}` : ''}. A manager
-                                  can correct the time afterward.
+                                  {oldestOpen?.clockIn ? `, started ${format(new Date(oldestOpen.clockIn), 'EEE, MMM d, p')}` : ''}. A
+                                  manager can correct the time afterward.
                                 </AlertDialogDescription>
                               </AlertDialogHeader>
                               <AlertDialogFooter>
@@ -699,9 +706,7 @@ export default function TimecardPage() {
                           <p className="text-sm text-muted-foreground">
                             {employeeActiveEntry.clockIn ? format(new Date(employeeActiveEntry.clockIn), 'EEE, MMM d') : 'Today'}
                           </p>
-                          <p className="text-lg font-semibold">
-                            {clockInOnlyCaption}
-                          </p>
+                          <p className="text-lg font-semibold">{clockInOnlyCaption}</p>
                         </div>
                         <Badge variant="secondary">Clocked in</Badge>
                       </div>
@@ -795,189 +800,197 @@ export default function TimecardPage() {
                   ) : null}
                   {!clockInOnlyTimecard
                     ? displayedEntries.map((entry: ShopTimeEntry) => (
-                    <div key={entry.id} className="rounded-lg border border-border bg-background p-4">
-                      <div className="grid gap-4 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-start">
-                        <div>
-                          {editingEntryId === entry.id && !isPtoEntry(entry) ? (
-                            <div className="max-w-md space-y-3">
-                              <div className="space-y-2">
-                                <Label>Equipment asset</Label>
-                                <AssetPicker
-                                  assets={assets}
-                                  value={editingAssetId}
-                                  onChange={(asset: Pick<EquipmentAsset, 'id' | 'asset' | 'divisionCode'> | undefined) => {
-                                    setEditingAssetRecord(asset);
-                                    setEditingAssetId(asset?.id ?? '');
-                                    if (asset?.divisionCode !== undefined) {
-                                      setEditingDivision(String(asset.divisionCode));
-                                    }
-                                  }}
-                                  currentAsset={editingAssetRecord ?? entry.asset}
-                                />
-                              </div>
-                              <div className="grid gap-3 sm:grid-cols-2">
-                                <div className="space-y-2">
-                                  <Label htmlFor={`edit-division-${entry.id}`}>Division</Label>
-                                  <Input
-                                    id={`edit-division-${entry.id}`}
-                                    value={editingDivision}
-                                    onChange={(event: React.ChangeEvent<HTMLInputElement>) =>
-                                      setEditingDivision(event.target.value.replace(/\D/g, ''))
-                                    }
-                                    placeholder="Optional division code"
-                                  />
+                        <div key={entry.id} className="rounded-lg border border-border bg-background p-4">
+                          <div className="grid gap-4 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-start">
+                            <div>
+                              {editingEntryId === entry.id && !isPtoEntry(entry) ? (
+                                <div className="max-w-md space-y-3">
+                                  <div className="space-y-2">
+                                    <Label>Equipment asset</Label>
+                                    <AssetPicker
+                                      assets={assets}
+                                      value={editingAssetId}
+                                      onChange={(asset: Pick<EquipmentAsset, 'id' | 'asset' | 'divisionCode'> | undefined) => {
+                                        setEditingAssetRecord(asset);
+                                        setEditingAssetId(asset?.id ?? '');
+                                        if (asset?.divisionCode !== undefined) {
+                                          setEditingDivision(String(asset.divisionCode));
+                                        }
+                                      }}
+                                      currentAsset={editingAssetRecord ?? entry.asset}
+                                    />
+                                  </div>
+                                  <div className="grid gap-3 sm:grid-cols-2">
+                                    <div className="space-y-2">
+                                      <Label htmlFor={`edit-division-${entry.id}`}>Division</Label>
+                                      <Input
+                                        id={`edit-division-${entry.id}`}
+                                        value={editingDivision}
+                                        onChange={(event: React.ChangeEvent<HTMLInputElement>) =>
+                                          setEditingDivision(event.target.value.replace(/\D/g, ''))
+                                        }
+                                        placeholder="Optional division code"
+                                      />
+                                    </div>
+                                    <div className="space-y-2">
+                                      <Label htmlFor={`edit-job-${entry.id}`}>Job number</Label>
+                                      <Input
+                                        id={`edit-job-${entry.id}`}
+                                        value={editingJobNumber}
+                                        onChange={(event: React.ChangeEvent<HTMLInputElement>) => setEditingJobNumber(event.target.value)}
+                                        placeholder="Optional job note"
+                                      />
+                                    </div>
+                                  </div>
+                                  <div className="space-y-2">
+                                    <div className="flex items-center justify-between gap-2">
+                                      <Label htmlFor={`edit-notes-${entry.id}`}>Notes</Label>
+                                      <VoiceNoteButton
+                                        value={editingNotes}
+                                        onChange={setEditingNotes}
+                                        phrases={voicePhrases}
+                                        disabled={updateTimeEntry.isPending}
+                                      />
+                                    </div>
+                                    <Textarea
+                                      id={`edit-notes-${entry.id}`}
+                                      value={editingNotes}
+                                      onChange={(event: React.ChangeEvent<HTMLTextAreaElement>) => setEditingNotes(event.target.value)}
+                                      placeholder="Add notes for this time entry"
+                                    />
+                                  </div>
                                 </div>
-                                <div className="space-y-2">
-                                  <Label htmlFor={`edit-job-${entry.id}`}>Job number</Label>
-                                  <Input
-                                    id={`edit-job-${entry.id}`}
-                                    value={editingJobNumber}
-                                    onChange={(event: React.ChangeEvent<HTMLInputElement>) => setEditingJobNumber(event.target.value)}
-                                    placeholder="Optional job note"
-                                  />
+                              ) : (
+                                <div className="space-y-1">
+                                  <div className="flex flex-wrap items-center gap-2">
+                                    {isPtoEntry(entry) ? <Badge variant="secondary">PTO</Badge> : null}
+                                    {entry.pTOTypeKey ? (
+                                      <Badge variant="outline">{ShopTimeEntryPTOTypeKeyToLabel[entry.pTOTypeKey]}</Badge>
+                                    ) : null}
+                                    <p className="text-sm text-muted-foreground">{isPtoEntry(entry) ? 'Paid time off' : 'Asset'}</p>
+                                  </div>
+                                  <p className="text-lg font-semibold">{getEntryAssetName(entry, assets)}</p>
+                                  <p className="text-sm text-muted-foreground">
+                                    {isPtoEntry(entry)
+                                      ? `${getPtoHours(entry) || Math.round(entry.hours ?? 0)} hours submitted`
+                                      : `Division ${getEntryDivision(entry, assets) || '—'} · Job ${getEntryJobNumber(entry) || '—'}`}
+                                  </p>
                                 </div>
-                              </div>
-                              <div className="space-y-2">
-                                <div className="flex items-center justify-between gap-2">
-                                  <Label htmlFor={`edit-notes-${entry.id}`}>Notes</Label>
-                                  <VoiceNoteButton
+                              )}
+                              {editingNotesEntryId === entry.id ? (
+                                <div className="mt-3 space-y-2">
+                                  <div className="flex items-center justify-between gap-2">
+                                    <Label htmlFor={`notes-${entry.id}`}>Notes</Label>
+                                    <VoiceNoteButton
+                                      value={editingNotes}
+                                      onChange={setEditingNotes}
+                                      phrases={voicePhrases}
+                                      disabled={updateTimeEntry.isPending}
+                                    />
+                                  </div>
+                                  <Textarea
+                                    id={`notes-${entry.id}`}
                                     value={editingNotes}
-                                    onChange={setEditingNotes}
-                                    phrases={voicePhrases}
-                                    disabled={updateTimeEntry.isPending}
+                                    onChange={(event: React.ChangeEvent<HTMLTextAreaElement>) => setEditingNotes(event.target.value)}
+                                    placeholder="Add notes for this time entry"
                                   />
                                 </div>
-                                <Textarea
-                                  id={`edit-notes-${entry.id}`}
-                                  value={editingNotes}
-                                  onChange={(event: React.ChangeEvent<HTMLTextAreaElement>) => setEditingNotes(event.target.value)}
-                                  placeholder="Add notes for this time entry"
-                                />
+                              ) : stripNoLunchMarker(entry.notes) && editingEntryId !== entry.id ? (
+                                <p className="mt-3 rounded-md bg-muted p-3 text-sm text-muted-foreground">
+                                  {stripNoLunchMarker(entry.notes)}
+                                </p>
+                              ) : null}
+                            </div>
+                            <div className="flex flex-col gap-2 sm:items-end">
+                              <div className="space-y-2 text-left sm:text-right">
+                                <div>
+                                  <p className="text-sm text-muted-foreground">Clock in</p>
+                                  <p className="text-lg font-semibold">
+                                    {entry.clockIn
+                                      ? format(new Date(entry.clockIn), openPunchStartedBeforeToday(entry) ? 'EEE, MMM d, p' : 'p')
+                                      : '—'}
+                                  </p>
+                                </div>
+                                <div>
+                                  <p className="text-sm text-muted-foreground">Clock out</p>
+                                  <p className="text-lg font-semibold">{entry.clockOut ? format(new Date(entry.clockOut), 'p') : '—'}</p>
+                                </div>
+                                <div>
+                                  <p className="text-xs text-muted-foreground">Duration</p>
+                                  <p className="text-sm font-medium text-foreground">{formatDuration(getRawDurationMinutes(entry))}</p>
+                                </div>
                               </div>
-                            </div>
-                          ) : (
-                            <div className="space-y-1">
-                              <div className="flex flex-wrap items-center gap-2">
-                                {isPtoEntry(entry) ? <Badge variant="secondary">PTO</Badge> : null}
-                                {entry.pTOTypeKey ? (
-                                  <Badge variant="outline">{ShopTimeEntryPTOTypeKeyToLabel[entry.pTOTypeKey]}</Badge>
-                                ) : null}
-                                <p className="text-sm text-muted-foreground">{isPtoEntry(entry) ? 'Paid time off' : 'Asset'}</p>
-                              </div>
-                              <p className="text-lg font-semibold">{getEntryAssetName(entry, assets)}</p>
-                              <p className="text-sm text-muted-foreground">
-                                {isPtoEntry(entry)
-                                  ? `${getPtoHours(entry) || Math.round(entry.hours ?? 0)} hours submitted`
-                                  : `Division ${getEntryDivision(entry, assets) || '—'} · Job ${getEntryJobNumber(entry) || '—'}`}
-                              </p>
-                            </div>
-                          )}
-                          {editingNotesEntryId === entry.id ? (
-                            <div className="mt-3 space-y-2">
-                              <div className="flex items-center justify-between gap-2">
-                                <Label htmlFor={`notes-${entry.id}`}>Notes</Label>
-                                <VoiceNoteButton
-                                  value={editingNotes}
-                                  onChange={setEditingNotes}
-                                  phrases={voicePhrases}
-                                  disabled={updateTimeEntry.isPending}
-                                />
-                              </div>
-                              <Textarea
-                                id={`notes-${entry.id}`}
-                                value={editingNotes}
-                                onChange={(event: React.ChangeEvent<HTMLTextAreaElement>) => setEditingNotes(event.target.value)}
-                                placeholder="Add notes for this time entry"
-                              />
-                            </div>
-                          ) : stripNoLunchMarker(entry.notes) && editingEntryId !== entry.id ? (
-                            <p className="mt-3 rounded-md bg-muted p-3 text-sm text-muted-foreground">{stripNoLunchMarker(entry.notes)}</p>
-                          ) : null}
-                        </div>
-                        <div className="flex flex-col gap-2 sm:items-end">
-                          <div className="space-y-2 text-left sm:text-right">
-                            <div>
-                              <p className="text-sm text-muted-foreground">Clock in</p>
-                              <p className="text-lg font-semibold">
-                                {entry.clockIn
-                                  ? format(new Date(entry.clockIn), openPunchStartedBeforeToday(entry) ? 'EEE, MMM d, p' : 'p')
-                                  : '—'}
-                              </p>
-                            </div>
-                            <div>
-                              <p className="text-sm text-muted-foreground">Clock out</p>
-                              <p className="text-lg font-semibold">{entry.clockOut ? format(new Date(entry.clockOut), 'p') : '—'}</p>
-                            </div>
-                            <div>
-                              <p className="text-xs text-muted-foreground">Duration</p>
-                              <p className="text-sm font-medium text-foreground">{formatDuration(getRawDurationMinutes(entry))}</p>
+                              {editingEntryId === entry.id ? (
+                                <div className="flex flex-wrap items-center justify-end gap-2">
+                                  <Button
+                                    type="button"
+                                    size="icon"
+                                    aria-label="Save timecard"
+                                    onClick={() => void handleSaveEditAsset(entry)}
+                                    disabled={updateTimeEntry.isPending}
+                                  >
+                                    <Check className="h-4 w-4" />
+                                  </Button>
+                                  <Button
+                                    type="button"
+                                    size="icon"
+                                    variant="outline"
+                                    aria-label="Cancel edit"
+                                    onClick={handleCancelEditAsset}
+                                  >
+                                    <X className="h-4 w-4" />
+                                  </Button>
+                                </div>
+                              ) : editingNotesEntryId === entry.id ? (
+                                <div className="flex flex-wrap items-center justify-end gap-2">
+                                  <Button
+                                    type="button"
+                                    size="icon"
+                                    aria-label="Save notes"
+                                    onClick={() => void handleSaveEditNotes(entry)}
+                                    disabled={updateTimeEntry.isPending}
+                                  >
+                                    <Check className="h-4 w-4" />
+                                  </Button>
+                                  <Button
+                                    type="button"
+                                    size="icon"
+                                    variant="outline"
+                                    aria-label="Cancel notes edit"
+                                    onClick={() => setEditingNotesEntryId('')}
+                                  >
+                                    <X className="h-4 w-4" />
+                                  </Button>
+                                </div>
+                              ) : (
+                                <div className="flex flex-wrap items-center justify-end gap-2">
+                                  {!entry.clockOut && !isPtoEntry(entry) ? (
+                                    <Badge variant="secondary">Active</Badge>
+                                  ) : (
+                                    <Badge variant="outline">Complete</Badge>
+                                  )}
+                                  {!isPtoEntry(entry) ? (
+                                    <Button type="button" variant="outline" onClick={() => handleStartEditAsset(entry)}>
+                                      Edit timecard
+                                    </Button>
+                                  ) : null}
+                                  <Button
+                                    type="button"
+                                    variant="outline"
+                                    onClick={() => {
+                                      setEditingEntryId('');
+                                      setEditingNotesEntryId(entry.id);
+                                      setEditingNotes(stripNoLunchMarker(entry.notes));
+                                    }}
+                                  >
+                                    {stripNoLunchMarker(entry.notes) ? 'Edit notes' : 'Add notes'}
+                                  </Button>
+                                </div>
+                              )}
                             </div>
                           </div>
-                          {editingEntryId === entry.id ? (
-                            <div className="flex flex-wrap items-center justify-end gap-2">
-                              <Button
-                                type="button"
-                                size="icon"
-                                aria-label="Save timecard"
-                                onClick={() => void handleSaveEditAsset(entry)}
-                                disabled={updateTimeEntry.isPending}
-                              >
-                                <Check className="h-4 w-4" />
-                              </Button>
-                              <Button type="button" size="icon" variant="outline" aria-label="Cancel edit" onClick={handleCancelEditAsset}>
-                                <X className="h-4 w-4" />
-                              </Button>
-                            </div>
-                          ) : editingNotesEntryId === entry.id ? (
-                            <div className="flex flex-wrap items-center justify-end gap-2">
-                              <Button
-                                type="button"
-                                size="icon"
-                                aria-label="Save notes"
-                                onClick={() => void handleSaveEditNotes(entry)}
-                                disabled={updateTimeEntry.isPending}
-                              >
-                                <Check className="h-4 w-4" />
-                              </Button>
-                              <Button
-                                type="button"
-                                size="icon"
-                                variant="outline"
-                                aria-label="Cancel notes edit"
-                                onClick={() => setEditingNotesEntryId('')}
-                              >
-                                <X className="h-4 w-4" />
-                              </Button>
-                            </div>
-                          ) : (
-                            <div className="flex flex-wrap items-center justify-end gap-2">
-                              {!entry.clockOut && !isPtoEntry(entry) ? (
-                                <Badge variant="secondary">Active</Badge>
-                              ) : (
-                                <Badge variant="outline">Complete</Badge>
-                              )}
-                              {!isPtoEntry(entry) ? (
-                                <Button type="button" variant="outline" onClick={() => handleStartEditAsset(entry)}>
-                                  Edit timecard
-                                </Button>
-                              ) : null}
-                              <Button
-                                type="button"
-                                variant="outline"
-                                onClick={() => {
-                                  setEditingEntryId('');
-                                  setEditingNotesEntryId(entry.id);
-                                  setEditingNotes(stripNoLunchMarker(entry.notes));
-                                }}
-                              >
-                                {stripNoLunchMarker(entry.notes) ? 'Edit notes' : 'Add notes'}
-                              </Button>
-                            </div>
-                          )}
                         </div>
-                      </div>
-                    </div>
-                  ))
+                      ))
                     : null}
                   {clockInOnlyTimecard
                     ? displayedEntries
@@ -1010,79 +1023,79 @@ export default function TimecardPage() {
               </Card>
 
               {!clockInOnlyTimecard ? (
-              <Card className="bg-card text-card-foreground shadow-sm">
-                <CardHeader>
-                  <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-                    <div>
-                      <CardTitle className="flex items-center gap-2 text-xl">
-                        <CalendarIcon className="h-5 w-5" /> PTO
-                      </CardTitle>
-                      <p className="mt-1 text-sm text-muted-foreground">Submit 4 or 8 hours of paid time off for a past or future day.</p>
+                <Card className="bg-card text-card-foreground shadow-sm">
+                  <CardHeader>
+                    <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                      <div>
+                        <CardTitle className="flex items-center gap-2 text-xl">
+                          <CalendarIcon className="h-5 w-5" /> PTO
+                        </CardTitle>
+                        <p className="mt-1 text-sm text-muted-foreground">Submit 4 or 8 hours of paid time off for a past or future day.</p>
+                      </div>
+                      <Button type="button" variant="outline" onClick={() => setShowPtoForm((currentValue: boolean) => !currentValue)}>
+                        {showPtoForm ? 'Cancel PTO' : 'Submit PTO'}
+                      </Button>
                     </div>
-                    <Button type="button" variant="outline" onClick={() => setShowPtoForm((currentValue: boolean) => !currentValue)}>
-                      {showPtoForm ? 'Cancel PTO' : 'Submit PTO'}
-                    </Button>
-                  </div>
-                </CardHeader>
-                {showPtoForm ? (
-                  <CardContent className="grid gap-4 rounded-b-xl border-t border-border bg-muted p-4 text-muted-foreground sm:grid-cols-[1fr_auto] sm:items-end">
-                    <div className="grid gap-4 sm:grid-cols-3">
-                      <div className="space-y-2">
-                        <Label>PTO date</Label>
-                        <Popover>
-                          <PopoverTrigger asChild>
-                            <Button type="button" variant="outline" className="w-full justify-start bg-background text-left font-normal">
-                              <CalendarIcon className="mr-2 h-4 w-4" />
-                              {ptoDate ? format(ptoDate, 'MMM d, yyyy') : 'Pick a date'}
+                  </CardHeader>
+                  {showPtoForm ? (
+                    <CardContent className="grid gap-4 rounded-b-xl border-t border-border bg-muted p-4 text-muted-foreground sm:grid-cols-[1fr_auto] sm:items-end">
+                      <div className="grid gap-4 sm:grid-cols-3">
+                        <div className="space-y-2">
+                          <Label>PTO date</Label>
+                          <Popover>
+                            <PopoverTrigger asChild>
+                              <Button type="button" variant="outline" className="w-full justify-start bg-background text-left font-normal">
+                                <CalendarIcon className="mr-2 h-4 w-4" />
+                                {ptoDate ? format(ptoDate, 'MMM d, yyyy') : 'Pick a date'}
+                              </Button>
+                            </PopoverTrigger>
+                            <PopoverContent className="w-auto p-0" align="start">
+                              <Calendar
+                                mode="single"
+                                selected={ptoDate}
+                                onSelect={(date: Date | undefined) => {
+                                  if (date) setPtoDate(startOfDay(date));
+                                }}
+                                initialFocus
+                              />
+                            </PopoverContent>
+                          </Popover>
+                        </div>
+                        <div className="space-y-2">
+                          <Label htmlFor="pto-type">PTO type</Label>
+                          <Select value={ptoType} onValueChange={(value: ShopTimeEntryPTOTypeKey) => setPtoType(value)}>
+                            <SelectTrigger id="pto-type" className="w-full bg-background">
+                              <SelectValue placeholder="Select PTO type" />
+                            </SelectTrigger>
+                            <SelectContent>
+                              {Object.entries(ShopTimeEntryPTOTypeKeyToLabel)
+                                .filter(([key]: [string, string]) => Boolean(key))
+                                .map(([key, label]: [string, string]) => (
+                                  <SelectItem key={key} value={key}>
+                                    {label}
+                                  </SelectItem>
+                                ))}
+                            </SelectContent>
+                          </Select>
+                        </div>
+                        <div className="space-y-2">
+                          <Label>PTO hours</Label>
+                          <div className="grid grid-cols-2 gap-2">
+                            <Button type="button" variant={ptoHours === 4 ? 'default' : 'outline'} onClick={() => setPtoHours(4)}>
+                              4 hours
                             </Button>
-                          </PopoverTrigger>
-                          <PopoverContent className="w-auto p-0" align="start">
-                            <Calendar
-                              mode="single"
-                              selected={ptoDate}
-                              onSelect={(date: Date | undefined) => {
-                                if (date) setPtoDate(startOfDay(date));
-                              }}
-                              initialFocus
-                            />
-                          </PopoverContent>
-                        </Popover>
-                      </div>
-                      <div className="space-y-2">
-                        <Label htmlFor="pto-type">PTO type</Label>
-                        <Select value={ptoType} onValueChange={(value: ShopTimeEntryPTOTypeKey) => setPtoType(value)}>
-                          <SelectTrigger id="pto-type" className="w-full bg-background">
-                            <SelectValue placeholder="Select PTO type" />
-                          </SelectTrigger>
-                          <SelectContent>
-                            {Object.entries(ShopTimeEntryPTOTypeKeyToLabel)
-                              .filter(([key]: [string, string]) => Boolean(key))
-                              .map(([key, label]: [string, string]) => (
-                                <SelectItem key={key} value={key}>
-                                  {label}
-                                </SelectItem>
-                              ))}
-                          </SelectContent>
-                        </Select>
-                      </div>
-                      <div className="space-y-2">
-                        <Label>PTO hours</Label>
-                        <div className="grid grid-cols-2 gap-2">
-                          <Button type="button" variant={ptoHours === 4 ? 'default' : 'outline'} onClick={() => setPtoHours(4)}>
-                            4 hours
-                          </Button>
-                          <Button type="button" variant={ptoHours === 8 ? 'default' : 'outline'} onClick={() => setPtoHours(8)}>
-                            8 hours
-                          </Button>
+                            <Button type="button" variant={ptoHours === 8 ? 'default' : 'outline'} onClick={() => setPtoHours(8)}>
+                              8 hours
+                            </Button>
+                          </div>
                         </div>
                       </div>
-                    </div>
-                    <Button className="h-12" type="button" onClick={() => void handleSubmitPto()} disabled={createTimeEntry.isPending}>
-                      Submit PTO
-                    </Button>
-                  </CardContent>
-                ) : null}
-              </Card>
+                      <Button className="h-12" type="button" onClick={() => void handleSubmitPto()} disabled={createTimeEntry.isPending}>
+                        Submit PTO
+                      </Button>
+                    </CardContent>
+                  ) : null}
+                </Card>
               ) : null}
             </>
           )}

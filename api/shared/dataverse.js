@@ -77,8 +77,7 @@ function loadConfig() {
 
   const orgUrl = (cleanEnv('DATAVERSE_ORG_URL') || fileCfg.org_url || 'https://org9cab1d0f.crm.dynamics.com').replace(/\/$/, '');
 
-  const defaultManagerEmails =
-    'alisonh@swankco.com,bryank@swankco.com,beaul@swankco.com,sebastians@swankco.com,nickl@swankco.com';
+  const defaultManagerEmails = 'alisonh@swankco.com,bryank@swankco.com,beaul@swankco.com,sebastians@swankco.com,nickl@swankco.com';
   // Deployed with the repo — Azure/local env vars may override. dataverse.local.json is gitignored and not read on Azure.
   const defaultKioskEmails = 'shoptimecard@swankco.com,shopkiosk@swankco.com,mechanicshop@swankco.com';
 
@@ -346,8 +345,7 @@ function timeEntryPayload(record, { isCreate }) {
 
 const SHOP_EMPLOYEE_SELECT =
   'swank_shopemployeeid,swank_autonumber,swank_empnum,swank_isroadmech,swank_isadmin,swank_ispartsrunner,_swank_employee_value';
-const SHOP_EMPLOYEE_EXPAND =
-  '&$expand=swank_Employee($select=swank_employeeid,swank_name,swank_empnum,swank_companyemail)';
+const SHOP_EMPLOYEE_EXPAND = '&$expand=swank_Employee($select=swank_employeeid,swank_name,swank_empnum,swank_companyemail)';
 
 async function listEmployees() {
   try {
@@ -525,7 +523,13 @@ const AUTO_CLOCK_OUT_MS = 16 * 60 * 60 * 1000;
 const AUTO_CLOCK_OUT_MARKER = '[AUTO_CLOCK_OUT]';
 
 function isPtoRow(entry) {
-  return Boolean(entry?.pTOTimeKey) || entry?.jobNumber === 'PTO' || String(entry?.timeEntry || '').toLowerCase().includes(' - pto');
+  return (
+    Boolean(entry?.pTOTimeKey) ||
+    entry?.jobNumber === 'PTO' ||
+    String(entry?.timeEntry || '')
+      .toLowerCase()
+      .includes(' - pto')
+  );
 }
 
 function autoClockOutDue(entry, now) {
@@ -669,10 +673,11 @@ async function deleteTimeEntry(id) {
   await dataverseFetch('DELETE', `/swank_shoptimeentries(${id})`);
 }
 
-async function listSchedules({ from, to } = {}) {
+async function listSchedules({ from, to, employeeId } = {}) {
   let filter = 'statecode eq 0';
   if (from) filter += ` and swank_scheduledate ge ${from}`;
   if (to) filter += ` and swank_scheduledate le ${to}`;
+  if (employeeId) filter += ` and _swank_employee_value eq ${employeeId}`;
   const rows = await listAll(
     `/swank_mechanicschedules?$select=swank_mechanicscheduleid,swank_schedulekey,swank_scheduledate,swank_scheduledstart,swank_oncall,_swank_employee_value&$filter=${filter}&$orderby=swank_scheduledate`,
   );

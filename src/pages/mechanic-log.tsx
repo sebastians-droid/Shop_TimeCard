@@ -32,6 +32,7 @@ import { useUser } from '@/hooks/use-user';
 import { useKioskSession } from '@/hooks/use-kiosk-session';
 import { VoiceNoteButton } from '@/components/voice-note-button';
 import { useAllEquipmentAssets, useShopEmployeeList, useShopTimeEntryList, useUpdateShopTimeEntry } from '@/hooks/use-shop-data';
+import { useEmployeeScheduledStarts } from '@/hooks/use-employee-scheduled-starts';
 import { mapShopEmployees, type AppShopEmployee } from '@/lib/shop-employees';
 import {
   applyNoLunchMarker,
@@ -44,7 +45,6 @@ import {
   isPtoEntry,
   keepAutoClockOutMarker,
   notesHaveNoLunch,
-  scheduledStartFor,
   waitBeforeFirstJob,
 } from '@/lib/time-rules';
 import {
@@ -122,8 +122,6 @@ export default function MechanicLogPage() {
   const updateTimeEntry = useUpdateShopTimeEntry();
 
   const selectedEmployee = employees.find((e: AppShopEmployee) => e.id === selectedEmployeeId);
-  // Road mechanics are paid from their actual clock-in rather than a default start.
-  const payStart = scheduledStartFor(selectedEmployee);
   const payProfile = useMemo(
     () => ({
       isRoadMech: selectedEmployee?.isRoadMech,
@@ -133,8 +131,22 @@ export default function MechanicLogPage() {
     [selectedEmployee?.isAdmin, selectedEmployee?.isPartsRunner, selectedEmployee?.isRoadMech],
   );
   const isRoadMech = selectedEmployee?.isRoadMech === true;
+  // Each day pays from that day's scheduled start (or clock-in, if later).
+  // Road mechanics and admins are paid from clock-in.
+  const {
+    payStartFor,
+    failed: schedulesFailed,
+    error: schedulesError,
+    refetch: refetchSchedules,
+  } = useEmployeeScheduledStarts(
+    selectedEmployee?.id,
+    selectedEmployee ? payProfile : undefined,
+    dateRange?.from ? format(dateRange.from, 'yyyy-MM-dd') : undefined,
+    dateRange?.to ? format(dateRange.to, 'yyyy-MM-dd') : undefined,
+  );
+
   const canReshapeDay = (dateKey: string) => isRoadMech && isWithinRoadMechEditWindow(dateKey);
-  const roadMechEdits = useRoadMechJobEdits(payStart, payProfile);
+  const roadMechEdits = useRoadMechJobEdits(payStartFor, payProfile);
 
   const resetJobForm = () => {
     setAddingJobDateKey('');
@@ -317,7 +329,7 @@ export default function MechanicLogPage() {
     }
     const startedAt = timeOnWorkDay(day, jobStartedAt, dayEntries);
     const endedAt = timeAfter(startedAt, jobEndedAt);
-    const plan = planForgottenJobInsert(dayEntries, startedAt, endedAt, payStart, payProfile);
+    const plan = planForgottenJobInsert(dayEntries, startedAt, endedAt, payStartFor(format(day, 'yyyy-MM-dd')), payProfile);
     if ('error' in plan) {
       toast.error(plan.error);
       return;
@@ -441,7 +453,8 @@ export default function MechanicLogPage() {
     return days.map((day) => {
       const dateKey = format(day, 'yyyy-MM-dd');
       const entries = filteredEntries.filter((entry: ShopTimeEntry) => getEntryWorkDateKey(entry) === dateKey);
-      const totalHours = getDayPayMinutes(entries, new Date(), payStart, payProfile).totalMinutes / 60;
+      const dayPayStart = payStartFor(dateKey);
+      const totalHours = getDayPayMinutes(entries, new Date(), dayPayStart, payProfile).totalMinutes / 60;
       // Road mechanics also see unassigned time so they can assign it or stretch a neighbor over it.
       const rows = isRoadMech
         ? entries.filter((entry) => !isAwaitingAsset(entry) || (entry.clockOut && getRawDurationMinutes(entry) >= 5))
@@ -454,13 +467,13 @@ export default function MechanicLogPage() {
         rows,
         locksById: new Map(isRoadMech ? rows.map((entry) => [entry.id, jobTimeLocks(entries, entry)] as const) : []),
         clockLabel: dayClockCaption(entries),
-        waitBeforeJob: waitBeforeFirstJob(entries, new Date(), payStart, payProfile),
+        waitBeforeJob: waitBeforeFirstJob(entries, new Date(), dayPayStart, payProfile),
         totalHours,
         firstIn: dayFirstClockIn(entries),
         lastOut: dayLastClockOut(entries),
       };
     });
-  }, [days, filteredEntries, isRoadMech, payProfile, payStart]);
+  }, [days, filteredEntries, isRoadMech, payProfile, payStartFor]);
 
   const rangeTotalHours = useMemo(() => Math.round(dayData.reduce((sum, d) => sum + d.totalHours, 0) * 100) / 100, [dayData]);
 
@@ -473,7 +486,7 @@ export default function MechanicLogPage() {
       }
     }
     return [...map.entries()].map(([name, total]) => ({ name, total: Math.round(total * 100) / 100 })).sort((a, b) => b.total - a.total);
-  }, [dayData, assets, payProfile, payStart]);
+  }, [dayData, assets]);
 
   return (
     <main className="mx-auto flex w-full max-w-5xl flex-1 flex-col gap-6 p-4 sm:p-6 lg:p-8">
@@ -510,6 +523,19 @@ export default function MechanicLogPage() {
                 {entriesError instanceof Error ? entriesError.message : 'Grant the app user Read on Shop Time Entry, then retry.'}
               </p>
               <Button type="button" variant="outline" className="mt-3" onClick={() => void refetchEntries()}>
+                Retry
+              </Button>
+            </div>
+          ) : null}
+
+          {schedulesFailed ? (
+            <div className="rounded-md border border-destructive/40 bg-destructive/10 p-3 text-sm text-destructive">
+              <p className="font-medium">Could not load scheduled starts.</p>
+              <p className="mt-1 break-words text-destructive/80">
+                {schedulesError instanceof Error ? schedulesError.message : 'Schedule list failed to load.'} Hours below assume a 7:00 AM
+                start until this succeeds, so they may not match the manager dashboard.
+              </p>
+              <Button type="button" variant="outline" className="mt-3" onClick={() => void refetchSchedules()}>
                 Retry
               </Button>
             </div>
