@@ -14,11 +14,13 @@ const PTO_TYPE_TO_VALUE = {
   Personal: 290180000,
   Vacation: 290180001,
   Holiday: 290180002,
+  Bereavement: 290180003,
 };
 const PTO_VALUE_TO_TYPE = {
   290180000: 'Personal',
   290180001: 'Vacation',
   290180002: 'Holiday',
+  290180003: 'Bereavement',
 };
 const PAY_TYPE_TO_VALUE = {
   JR: 290180000,

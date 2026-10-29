@@ -11,6 +11,7 @@ export const ShopTimeEntryPTOTypeKeyToLabel = {
   Personal: 'Personal',
   Vacation: 'Vacation',
   Holiday: 'Holiday',
+  Bereavement: 'Bereavement',
 } as const;
 export type ShopTimeEntryPTOTypeKey = keyof typeof ShopTimeEntryPTOTypeKeyToLabel;
 
