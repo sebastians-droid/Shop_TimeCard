@@ -312,7 +312,12 @@ export function useManagerEntryActions({ employees, assets, timeEntries }: Manag
   const deleteEntry = async (entry: ShopTimeEntry): Promise<boolean> => {
     try {
       await deleteTimeEntryMutation.mutateAsync(entry.id);
-      toast.success('Timecard row deleted.');
+      const employeeName = getEntryEmployeeName(entry, employees);
+      const label = isClockInOnlyRow(entry) ? 'clock-in' : getEntryAssetName(entry, assets);
+      const workDate = entryWorkDateKey(entry);
+      const day = workDate ? ` on ${format(new Date(`${workDate}T12:00:00`), 'MMM d')}` : '';
+      const span = entry.clockIn ? ` (${formatSpan(entry.clockIn, entry.clockOut)})` : '';
+      toast.success(`Deleted ${employeeName}'s ${label}${day}${span}.`);
       return true;
     } catch (error: unknown) {
       toast.error(toErrorMessage(error, 'Unable to delete timecard row.'));

@@ -1,29 +1,66 @@
 import { format } from 'date-fns';
-import { Check, LogIn, Pencil, X } from 'lucide-react';
+import { Check, LogIn, Pencil, Trash2, X } from 'lucide-react';
 
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+  AlertDialogTrigger,
+} from '@/components/ui/alert-dialog';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { EntryDistanceBadges } from '@/components/manager/entry-distance-badges';
+import { formatDuration, getRawDurationMinutes } from '@/lib/time-rules';
 import type { ShopTimeEntry } from '@/models/shop-time-entry';
 
 type ClockInLineProps = {
   entry: ShopTimeEntry;
+  employeeName: string;
   isEditing: boolean;
   value: string;
   isSaving: boolean;
+  isDeleting: boolean;
   onChange: (value: string) => void;
   onStartEdit: () => void;
   onSave: () => void;
   onCancel: () => void;
+  onDelete: () => void;
 };
+
+/** "4:30 PM – 5:32 AM (next day)", or just the clock-in while the punch is open. */
+function punchSpan(entry: ShopTimeEntry) {
+  if (!entry.clockIn) return '—';
+  const clockIn = format(new Date(entry.clockIn), 'p');
+  if (!entry.clockOut) return clockIn;
+  const nextDay = format(new Date(entry.clockOut), 'yyyy-MM-dd') !== format(new Date(entry.clockIn), 'yyyy-MM-dd');
+  return `${clockIn} – ${format(new Date(entry.clockOut), 'p')}${nextDay ? ' (next day)' : ''}`;
+}
 
 /**
  * The arrival punch each clock-in creates, shown as one line instead of a job
  * card. It only records when the employee clocked in, so the clock-in time is
- * the one thing a manager edits here.
+ * the one thing a manager edits here. A stray punch can be deleted outright.
  */
-export function ClockInLine({ entry, isEditing, value, isSaving, onChange, onStartEdit, onSave, onCancel }: ClockInLineProps) {
-  const clockIn = entry.clockIn ? format(new Date(entry.clockIn), 'p') : '—';
+export function ClockInLine({
+  entry,
+  employeeName,
+  isEditing,
+  value,
+  isSaving,
+  isDeleting,
+  onChange,
+  onStartEdit,
+  onSave,
+  onCancel,
+  onDelete,
+}: ClockInLineProps) {
+  const span = punchSpan(entry);
+  const minutes = entry.clockOut ? getRawDurationMinutes(entry) : 0;
   const inputId = `clock-in-line-${entry.id}`;
   return (
     <div className="flex flex-wrap items-center gap-x-3 gap-y-2 rounded-md border border-dashed border-border bg-muted/50 px-3 py-2 text-sm">
@@ -60,13 +97,40 @@ export function ClockInLine({ entry, isEditing, value, isSaving, onChange, onSta
       ) : (
         <>
           <span>
-            <span className="font-medium">Clocked in {clockIn}</span>
-            {entry.clockOut ? null : <span className="text-muted-foreground"> · no job started yet</span>}
+            <span className="font-medium">Clocked in {span}</span>
+            {entry.clockOut ? (
+              minutes >= 5 ? (
+                <span className="text-muted-foreground"> · {formatDuration(minutes)} with no job</span>
+              ) : null
+            ) : (
+              <span className="text-muted-foreground"> · no job started yet</span>
+            )}
           </span>
           <EntryDistanceBadges entry={{ ...entry, clockOutLat: undefined, clockOutLon: undefined }} />
-          <Button type="button" variant="ghost" size="sm" className="ml-auto h-7 px-2" onClick={onStartEdit}>
-            <Pencil className="mr-1 h-3 w-3" /> Edit clock-in
-          </Button>
+          <div className="ml-auto flex items-center gap-1">
+            <Button type="button" variant="ghost" size="sm" className="h-7 px-2" onClick={onStartEdit}>
+              <Pencil className="mr-1 h-3 w-3" /> Edit clock-in
+            </Button>
+            <AlertDialog>
+              <AlertDialogTrigger asChild>
+                <Button type="button" variant="ghost" size="sm" className="h-7 px-2 text-destructive" disabled={isDeleting}>
+                  <Trash2 className="mr-1 h-3 w-3" /> Delete
+                </Button>
+              </AlertDialogTrigger>
+              <AlertDialogContent>
+                <AlertDialogHeader>
+                  <AlertDialogTitle>Delete this clock-in?</AlertDialogTitle>
+                  <AlertDialogDescription>
+                    This removes {employeeName}&apos;s unassigned punch ({span}) from Dataverse and the weekly timecard export.
+                  </AlertDialogDescription>
+                </AlertDialogHeader>
+                <AlertDialogFooter>
+                  <AlertDialogCancel>Cancel</AlertDialogCancel>
+                  <AlertDialogAction onClick={onDelete}>Delete clock-in</AlertDialogAction>
+                </AlertDialogFooter>
+              </AlertDialogContent>
+            </AlertDialog>
+          </div>
         </>
       )}
     </div>

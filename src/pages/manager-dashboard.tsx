@@ -1012,13 +1012,16 @@ export default function ManagerDashboardPage() {
                               <ClockInLine
                                 key={entry.id}
                                 entry={entry}
+                                employeeName={summary.employeeName}
                                 isEditing={isEditing && Boolean(editValues)}
                                 value={editValues?.clockInTime ?? ''}
                                 isSaving={isUpdating}
+                                isDeleting={isDeleting}
                                 onChange={(clockInTime: string) => editValues && setEditValues({ ...editValues, clockInTime })}
                                 onStartEdit={() => handleStartEdit(entry)}
                                 onSave={() => void handleSaveEdit(entry)}
                                 onCancel={handleCancelEdit}
+                                onDelete={() => void handleDeleteEntry(entry)}
                               />
                             );
                           }
@@ -1521,13 +1524,16 @@ export default function ManagerDashboardPage() {
                                 <ClockInLine
                                   key={entry.id}
                                   entry={entry}
+                                  employeeName={rangeViewEmployee?.employeeName ?? 'this employee'}
                                   isEditing={isRangeEditing && Boolean(editValues)}
                                   value={editValues?.clockInTime ?? ''}
                                   isSaving={isUpdating}
+                                  isDeleting={isDeleting}
                                   onChange={(clockInTime: string) => editValues && setEditValues({ ...editValues, clockInTime })}
                                   onStartEdit={() => handleRangeStartEdit(entry)}
                                   onSave={() => void handleRangeSaveEdit(entry, dayEntries)}
                                   onCancel={handleCancelEdit}
+                                  onDelete={() => void handleDeleteEntry(entry)}
                                 />
                               );
                             }
