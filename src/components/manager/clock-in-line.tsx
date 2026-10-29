@@ -15,7 +15,7 @@ import {
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { EntryDistanceBadges } from '@/components/manager/entry-distance-badges';
-import { formatDuration, getRawDurationMinutes } from '@/lib/time-rules';
+import { entryWorkDateKey, formatDuration, getRawDurationMinutes } from '@/lib/time-rules';
 import type { ShopTimeEntry } from '@/models/shop-time-entry';
 
 type ClockInLineProps = {
@@ -32,13 +32,24 @@ type ClockInLineProps = {
   onDelete: () => void;
 };
 
-/** "4:30 PM – 5:32 AM (next day)", or just the clock-in while the punch is open. */
+const dayKey = (iso: string) => format(new Date(iso), 'yyyy-MM-dd');
+const dayLabel = (iso: string) => format(new Date(iso), 'EEE, MMM d');
+
+/**
+ * "4:30 PM – 5:15 PM" when the punch sits on its work day. Otherwise the dates
+ * are spelled out, "Wed, Oct 28 4:30 PM – Thu, Oct 29 5:32 AM", because a row
+ * filed under one day can hold times from the next.
+ */
 function punchSpan(entry: ShopTimeEntry) {
   if (!entry.clockIn) return '—';
+  const workDay = entryWorkDateKey(entry);
   const clockIn = format(new Date(entry.clockIn), 'p');
-  if (!entry.clockOut) return clockIn;
-  const nextDay = format(new Date(entry.clockOut), 'yyyy-MM-dd') !== format(new Date(entry.clockIn), 'yyyy-MM-dd');
-  return `${clockIn} – ${format(new Date(entry.clockOut), 'p')}${nextDay ? ' (next day)' : ''}`;
+  const clockOut = entry.clockOut ? format(new Date(entry.clockOut), 'p') : undefined;
+  const offDay = dayKey(entry.clockIn) !== workDay || (entry.clockOut !== undefined && dayKey(entry.clockOut) !== workDay);
+  if (!offDay) return clockOut ? `${clockIn} – ${clockOut}` : clockIn;
+  if (!entry.clockOut || !clockOut) return `${dayLabel(entry.clockIn)} ${clockIn}`;
+  if (dayKey(entry.clockIn) === dayKey(entry.clockOut)) return `${dayLabel(entry.clockIn)} ${clockIn} – ${clockOut}`;
+  return `${dayLabel(entry.clockIn)} ${clockIn} – ${dayLabel(entry.clockOut)} ${clockOut}`;
 }
 
 /**
@@ -113,7 +124,7 @@ export function ClockInLine({
             </Button>
             <AlertDialog>
               <AlertDialogTrigger asChild>
-                <Button type="button" variant="ghost" size="sm" className="h-7 px-2 text-destructive" disabled={isDeleting}>
+                <Button type="button" variant="destructive" size="sm" className="h-7 px-2" disabled={isDeleting}>
                   <Trash2 className="mr-1 h-3 w-3" /> Delete
                 </Button>
               </AlertDialogTrigger>

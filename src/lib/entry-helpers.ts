@@ -210,6 +210,17 @@ export const getEntryDivision = (entry: ShopTimeEntry, assets: EquipmentAsset[])
 
 export const getEntryWorkDateKey = (entry: ShopTimeEntry) => entryWorkDateKey(entry) ?? 'No clock-in date';
 
+/**
+ * A punch time, with its date added when it falls on a different calendar day
+ * than the row's work day. A row filed under one day can hold times from the
+ * next, and a bare "5:55 AM" hides which morning that was.
+ */
+export function formatPunchTime(iso: string, entry: Pick<ShopTimeEntry, 'workDate' | 'clockIn'>): string {
+  const time = format(new Date(iso), 'p');
+  const workDay = entryWorkDateKey(entry);
+  return workDay && format(new Date(iso), 'yyyy-MM-dd') !== workDay ? `${time} (${format(new Date(iso), 'EEE, MMM d')})` : time;
+}
+
 export const getEmployeeNotes = (notes?: string) => stripNoLunchMarker(notes);
 
 export const getWeekRange = (date: Date) => {

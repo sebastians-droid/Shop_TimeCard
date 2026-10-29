@@ -6,6 +6,7 @@ import type { ShopTimeEntry } from '@/models/shop-time-entry';
 import {
   PTO_TIME_KEY_BY_HOURS,
   combineSelectedDateAndTime,
+  formatPunchTime,
   formatTimeForInput,
   formatScheduledStartTime,
   formatWeekRangeLabel,
@@ -384,5 +385,17 @@ describe('PTO_TIME_KEY_BY_HOURS', () => {
   it('maps the two selectable PTO lengths to Dataverse keys', () => {
     expect(PTO_TIME_KEY_BY_HOURS[4]).toBe('PTOTimeKey04');
     expect(PTO_TIME_KEY_BY_HOURS[8]).toBe('PTOTimeKey18');
+  });
+});
+
+describe('formatPunchTime', () => {
+  const row = { workDate: '2026-10-28', clockIn: at('2026-10-28', '05:54') };
+
+  it('shows only the time when the punch is on its work day', () => {
+    expect(formatPunchTime(at('2026-10-28', '16:30'), row)).toBe('4:30 PM');
+  });
+
+  it('adds the date when the punch falls on another day', () => {
+    expect(formatPunchTime(at('2026-10-29', '05:32'), row)).toBe('5:32 AM (Thu, Oct 29)');
   });
 });

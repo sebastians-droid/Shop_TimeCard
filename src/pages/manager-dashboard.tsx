@@ -78,6 +78,7 @@ import {
   getEntryDivision,
   getEntryWorkDateKey,
   getEmployeeNotes,
+  formatPunchTime,
   formatTimeForInput,
   getWeekRange,
   formatWeekRangeLabel,
@@ -1139,7 +1140,7 @@ export default function ManagerDashboardPage() {
                                         }
                                       />
                                     ) : (
-                                      <p className="font-semibold">{entry.clockIn ? format(new Date(entry.clockIn), 'p') : '—'}</p>
+                                      <p className="font-semibold">{entry.clockIn ? formatPunchTime(entry.clockIn, entry) : '—'}</p>
                                     )}
                                   </div>
                                   <div className="space-y-2">
@@ -1154,7 +1155,7 @@ export default function ManagerDashboardPage() {
                                         }
                                       />
                                     ) : (
-                                      <p className="font-semibold">{entry.clockOut ? format(new Date(entry.clockOut), 'p') : 'Active'}</p>
+                                      <p className="font-semibold">{entry.clockOut ? formatPunchTime(entry.clockOut, entry) : 'Active'}</p>
                                     )}
                                   </div>
                                   <div className="space-y-2">
@@ -1673,8 +1674,8 @@ export default function ManagerDashboardPage() {
                                         ) : null}
                                       </div>
                                       <p className="text-xs text-muted-foreground">
-                                        {entry.clockIn ? format(new Date(entry.clockIn), 'p') : '—'} –{' '}
-                                        {entry.clockOut ? format(new Date(entry.clockOut), 'p') : 'Active'}
+                                        {entry.clockIn ? formatPunchTime(entry.clockIn, entry) : '—'} –{' '}
+                                        {entry.clockOut ? formatPunchTime(entry.clockOut, entry) : 'Active'}
                                         {isPtoEntry(entry)
                                           ? ` · ${getPtoHours(entry)}h PTO`
                                           : ` · Div ${getEntryDivision(entry, assets) || '—'}`}
