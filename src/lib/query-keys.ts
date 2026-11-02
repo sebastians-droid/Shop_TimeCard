@@ -9,6 +9,7 @@ export const queryKeys = {
   shopEmployees: () => ['shopEmployee-list'] as const,
   lookupEmployees: () => ['lookupEmployee-list'] as const,
   equipmentAssets: () => ['equipmentAsset-list'] as const,
+  jobs: () => ['job-list'] as const,
   timeEntries: () => ['shopTimeEntry-list'] as const,
   /** Root key covering every date range, for invalidation after a write. */
   schedules: () => ['schedule-list'] as const,

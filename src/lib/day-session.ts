@@ -230,11 +230,11 @@ export function planForgottenJobInsert(
   return { patches, creates, firstIn, lastOut };
 }
 
-/** Road mechanics may reshape jobs on today and the seven days before it. Matches ROAD_MECH_EDIT_DAYS in api/shared/auth.js. */
-export const ROAD_MECH_EDIT_DAYS = 7;
+/** Employees may reshape jobs on today and the seven days before it. Matches JOB_EDIT_DAYS in api/shared/auth.js. */
+export const JOB_EDIT_DAYS = 7;
 
-export function isWithinRoadMechEditWindow(dateKey: string, now = new Date()): boolean {
-  return dateKey >= format(subDays(now, ROAD_MECH_EDIT_DAYS), 'yyyy-MM-dd');
+export function isWithinJobEditWindow(dateKey: string, now = new Date()): boolean {
+  return dateKey >= format(subDays(now, JOB_EDIT_DAYS), 'yyyy-MM-dd');
 }
 
 function toMs(iso: string | undefined): number {
@@ -271,7 +271,7 @@ export type JobTimeEdit = {
   /**
    * Ordered so every step leaves the day's punched spans untouched: rows grow
    * first, then shrink, then fully covered unassigned rows are removed. The
-   * server rejects a road mechanic's write that would move a clock-in or clock-out.
+   * server rejects an employee's write that would move a clock-in or clock-out.
    */
   writes: JobTimeWrite[];
   dayAfter: ShopTimeEntry[];

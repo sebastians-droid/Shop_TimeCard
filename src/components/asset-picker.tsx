@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react';
-import { Check, ChevronDown } from 'lucide-react';
+import { Check, ChevronDown, X } from 'lucide-react';
 
 import { Input } from '@/components/ui/input';
 import type { EquipmentAsset } from '@/models/equipment-asset';
@@ -66,7 +66,24 @@ export function AssetPicker({ assets, value, onChange, currentAsset }: AssetPick
         }}
         placeholder="Search assets"
       />
-      <ChevronDown className="pointer-events-none absolute right-3 top-3 h-4 w-4 text-muted-foreground" />
+      {value || search ? (
+        <button
+          type="button"
+          aria-label="Remove asset"
+          title="Remove asset"
+          className="absolute right-1 top-1/2 flex h-8 w-8 -translate-y-1/2 items-center justify-center rounded text-muted-foreground hover:bg-muted hover:text-foreground"
+          onMouseDown={(event: React.MouseEvent<HTMLButtonElement>) => event.preventDefault()}
+          onClick={() => {
+            setSearch('');
+            setIsOpen(false);
+            onChange(undefined);
+          }}
+        >
+          <X className="h-4 w-4" />
+        </button>
+      ) : (
+        <ChevronDown className="pointer-events-none absolute right-3 top-3 h-4 w-4 text-muted-foreground" />
+      )}
       {isOpen ? (
         <div className="absolute z-20 mt-1 max-h-64 w-full overflow-auto rounded-md border border-border bg-popover text-popover-foreground shadow-md">
           {filteredAssets.length === 0 ? (

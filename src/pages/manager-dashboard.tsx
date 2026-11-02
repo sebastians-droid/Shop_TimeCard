@@ -45,7 +45,9 @@ import { ClockInLine } from '@/components/manager/clock-in-line';
 import { EntryDistanceBadges, EntryDistanceField } from '@/components/manager/entry-distance-badges';
 import { PtoApprovalPanel } from '@/components/manager/pto-approval-panel';
 import { PayrollExportCard } from '@/components/manager/payroll-export-card';
-import { useAllEquipmentAssets, useScheduleList, useShopEmployeeList, useShopTimeEntryList } from '@/hooks/use-shop-data';
+import { useAllEquipmentAssets, useJobNames, useScheduleList, useShopEmployeeList, useShopTimeEntryList } from '@/hooks/use-shop-data';
+import { JobNameHint, JobNamesNotice } from '@/components/job-names-notice';
+import { formatJobLabel } from '@/lib/job-details';
 import { useManagerEntryActions } from '@/hooks/use-manager-entry-actions';
 import { useReloadTables } from '@/hooks/use-reload-tables';
 import type { EquipmentAsset } from '@/models/equipment-asset';
@@ -147,6 +149,7 @@ export default function ManagerDashboardPage() {
   const { saveNewEntry, saveEdit, savePto, deleteEntry, setDayNoLunch, lunchUpdatingKey, isCreating, isUpdating, isDeleting } =
     useManagerEntryActions({ employees, assets, timeEntries });
   const handleReloadTables = useReloadTables(refetchAssets, refetchEntries);
+  const { jobNames, failed: jobNamesFailed, error: jobNamesError, refetch: refetchJobNames } = useJobNames();
 
   const selectedDayKey = format(selectedDate, 'yyyy-MM-dd');
   const selectedDayEntries = useMemo(() => {
@@ -436,6 +439,7 @@ export default function ManagerDashboardPage() {
       checked,
       updatingKey: summary.employeeKey,
       employeeName: summary.employeeName,
+      dayLabel: format(selectedDate, 'MMM d'),
     });
 
   const handleRangeClearEdits = () => {
@@ -522,6 +526,7 @@ export default function ManagerDashboardPage() {
       checked,
       updatingKey: `${rangeViewEmployeeId}-${dayKey}`,
       employeeName: rangeViewEmployee?.employeeName ?? 'employee',
+      dayLabel: format(new Date(`${dayKey}T12:00:00`), 'MMM d'),
     });
 
   if (userFailed) {
@@ -605,6 +610,10 @@ export default function ManagerDashboardPage() {
           <StatTile label="Export week" value={formatDuration(weeklyPayrollMinutes)} caption={formatWeekRangeLabel(exportWeekDate)} />
         </CardContent>
       </Card>
+
+      {managerView === 'timecards' && jobNamesFailed ? (
+        <JobNamesNotice error={jobNamesError} onRetry={() => void refetchJobNames()} />
+      ) : null}
 
       {managerView === 'schedule' ? <MechanicSchedule employees={employees} timeEntries={timeEntries} /> : null}
 
@@ -883,8 +892,9 @@ export default function ManagerDashboardPage() {
                       onChange={(event: React.ChangeEvent<HTMLInputElement>) =>
                         setNewEntryDraft({ ...newEntryDraft, jobNumber: event.target.value })
                       }
-                      placeholder="Optional job note"
+                      placeholder="Optional job number"
                     />
+                    <JobNameHint jobNumber={newEntryDraft.jobNumber} jobNames={jobNames} />
                   </div>
                 </div>
                 <div className="space-y-2">
@@ -1066,8 +1076,9 @@ export default function ManagerDashboardPage() {
                                             onChange={(event: React.ChangeEvent<HTMLInputElement>) =>
                                               setEditValues({ ...editValues, jobNumber: event.target.value })
                                             }
-                                            placeholder="Optional job note"
+                                            placeholder="Optional job number"
                                           />
+                                          <JobNameHint jobNumber={editValues.jobNumber} jobNames={jobNames} />
                                         </div>
                                       </div>
                                       {!isPtoEntry(entry) ? (
@@ -1121,7 +1132,9 @@ export default function ManagerDashboardPage() {
                                       <p className="mt-1 text-sm text-muted-foreground">
                                         {isPtoEntry(entry)
                                           ? `${getPtoHours(entry)} hours PTO`
-                                          : `Division ${getEntryDivision(entry, assets) || '—'} · Job ${getEntryJobNumber(entry) || '—'}`}
+                                          : `Division ${getEntryDivision(entry, assets) || '—'} · Job ${
+                                              getEntryJobNumber(entry) ? formatJobLabel(getEntryJobNumber(entry), jobNames) : '—'
+                                            }`}
                                       </p>
                                     </div>
                                   )}
@@ -1283,8 +1296,9 @@ export default function ManagerDashboardPage() {
                                   onChange={(event: React.ChangeEvent<HTMLInputElement>) =>
                                     setNewEntryDraft({ ...newEntryDraft, jobNumber: event.target.value })
                                   }
-                                  placeholder="Optional job note"
+                                  placeholder="Optional job number"
                                 />
+                                <JobNameHint jobNumber={newEntryDraft.jobNumber} jobNames={jobNames} />
                               </div>
                             </div>
                             <div className="space-y-2">
@@ -1577,8 +1591,9 @@ export default function ManagerDashboardPage() {
                                             onChange={(event: React.ChangeEvent<HTMLInputElement>) =>
                                               setEditValues({ ...editValues, jobNumber: event.target.value })
                                             }
-                                            placeholder="Optional job note"
+                                            placeholder="Optional job number"
                                           />
+                                          <JobNameHint jobNumber={editValues.jobNumber} jobNames={jobNames} />
                                         </div>
                                       </div>
                                       {!isPtoEntry(entry) ? (
@@ -1679,7 +1694,7 @@ export default function ManagerDashboardPage() {
                                         {isPtoEntry(entry)
                                           ? ` · ${getPtoHours(entry)}h PTO`
                                           : ` · Div ${getEntryDivision(entry, assets) || '—'}`}
-                                        {getEntryJobNumber(entry) ? ` · Job ${getEntryJobNumber(entry)}` : ''}
+                                        {getEntryJobNumber(entry) ? ` · Job ${formatJobLabel(getEntryJobNumber(entry), jobNames)}` : ''}
                                         {' · '}
                                         {formatDuration(getRawDurationMinutes(entry))}
                                       </p>
@@ -1785,8 +1800,9 @@ export default function ManagerDashboardPage() {
                                     onChange={(event: React.ChangeEvent<HTMLInputElement>) =>
                                       setNewEntryDraft({ ...newEntryDraft, jobNumber: event.target.value })
                                     }
-                                    placeholder="Optional job note"
+                                    placeholder="Optional job number"
                                   />
+                                  <JobNameHint jobNumber={newEntryDraft.jobNumber} jobNames={jobNames} />
                                 </div>
                               </div>
                               <div className="space-y-2">

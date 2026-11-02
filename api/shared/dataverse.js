@@ -413,6 +413,14 @@ async function listAssets() {
   return rows.map(mapAsset).filter((row) => row.id && row.asset);
 }
 
+// Inactive jobs are included so older time entries still show their job name.
+async function listJobs() {
+  const rows = await listAll('/swank_jobs?$select=swank_jobid,swank_jobnumber,swank_jobname&$filter=swank_jobnumber ne null');
+  return rows
+    .map((row) => ({ id: row.swank_jobid, jobNumber: String(row.swank_jobnumber).trim(), jobName: row.swank_jobname?.trim() || '' }))
+    .filter((row) => row.jobNumber && row.jobName);
+}
+
 async function createAsset(record) {
   const payload = {};
   if (record.asset) payload.swank_assetidentifier = record.asset;
@@ -756,6 +764,7 @@ module.exports = {
   listEmployeeTimeEntries,
   listLookupEmployees,
   listAssets,
+  listJobs,
   createAsset,
   updateAsset,
   deactivateAsset,

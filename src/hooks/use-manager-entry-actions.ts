@@ -1,10 +1,9 @@
-import { useState } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import { addHours, format } from 'date-fns';
 import { toast } from '@/lib/toast';
 
-import { apiFetch } from '@/lib/api';
-import { queryKeys } from '@/lib/query-keys';
+import { useDayNoLunch } from '@/hooks/use-day-no-lunch';
+import { buildJobDetails } from '@/lib/job-details';
 import { useCreateShopTimeEntry, useDeleteShopTimeEntry, useUpdateShopTimeEntry } from '@/hooks/use-shop-data';
 import { fetchPayStart } from '@/hooks/use-employee-scheduled-starts';
 import {
@@ -28,8 +27,8 @@ import {
   getDayPayMinutes,
   getEntryPaidMinutes,
   getPtoHours,
+  isAwaitingAsset,
   isPtoEntry,
-  keepAutoClockOutMarker,
   notesHaveAutoClockOut,
   notesHaveNoLunch,
 } from '@/lib/time-rules';
@@ -75,7 +74,7 @@ export function useManagerEntryActions({ employees, assets, timeEntries }: Manag
   const createTimeEntry = useCreateShopTimeEntry();
   const updateTimeEntry = useUpdateShopTimeEntry();
   const deleteTimeEntryMutation = useDeleteShopTimeEntry();
-  const [lunchUpdatingKey, setLunchUpdatingKey] = useState('');
+  const { setDayNoLunch, lunchUpdatingKey } = useDayNoLunch();
 
   const findEmployee = (employeeId: string) => employees.find((row: AppShopEmployee) => row.id === employeeId);
 
@@ -191,9 +190,18 @@ export function useManagerEntryActions({ employees, assets, timeEntries }: Manag
       return false;
     }
 
-    const selectedAsset = resolveDraftAsset(editValues, assets);
-    const manualDivision = editValues.division.trim();
-    const manualJobNumber = editValues.jobNumber.trim();
+    const employeeName = getEntryEmployeeName(entry, employees);
+    const job = isPtoEntry(entry)
+      ? undefined
+      : buildJobDetails(
+          employeeName,
+          { asset: resolveDraftAsset(editValues, assets), division: editValues.division, jobNumber: editValues.jobNumber },
+          { allowUnassigned: isClockInOnlyRow(entry) || isAwaitingAsset(entry) },
+        );
+    if (job && 'error' in job) {
+      toast.error(job.error);
+      return false;
+    }
     const clockIn =
       editValues.clockInTime === formatTimeForInput(entry.clockIn) ? entry.clockIn : timeNear(entry.clockIn, editValues.clockInTime);
     const clockOut = !editValues.clockOutTime
@@ -210,9 +218,7 @@ export function useManagerEntryActions({ employees, assets, timeEntries }: Manag
       toast.error('Clock-out must be after clock-in.');
       return false;
     }
-    const label = selectedAsset
-      ? getAssetDisplayName(selectedAsset)
-      : manualJobNumber || (manualDivision ? `Division ${manualDivision}` : getEntryAssetName(entry, assets));
+    const label = job ? job.label : getEntryAssetName(entry, assets);
     // The row stays on its shift's work day even when its times now fall after midnight.
     const workDate = entryWorkDateKey(entry) ?? format(new Date(clockIn), 'yyyy-MM-dd');
     const updatedEntry = { ...entry, clockIn, clockOut };
@@ -241,15 +247,11 @@ export function useManagerEntryActions({ employees, assets, timeEntries }: Manag
       await updateTimeEntry.mutateAsync({
         id: entry.id,
         changedFields: {
-          timeEntry: `${getEntryEmployeeName(entry, employees)} - ${label}`,
-          asset: selectedAsset ? { id: selectedAsset.id, asset: getAssetDisplayName(selectedAsset) } : entry.asset,
-          assetDivision: selectedAsset ? selectedAsset.divisionCode : manualDivision ? Number(manualDivision) : entry.assetDivision,
+          ...job?.fields,
           // Always sent, even when empty: an omitted field would leave the auto clock-out marker in place.
           notes: applyNoLunchMarker(editValues.notes.trim() || undefined, notesHaveNoLunch(entry.notes)),
           clockIn,
           clockOut,
-          division: !selectedAsset && manualDivision ? Number(manualDivision) : undefined,
-          jobNumber: manualJobNumber || undefined,
           payTypeKey: isPtoEntry(entry) ? entry.payTypeKey : editValues.payTypeKey,
           hours: clockOut ? getEntryPaidMinutes(employeeDayEntries, updatedEntry, new Date(), payStart, payProfile) / 60 : undefined,
           pTOTimeKey:
@@ -257,7 +259,6 @@ export function useManagerEntryActions({ employees, assets, timeEntries }: Manag
           workDate,
         },
       });
-      const employeeName = getEntryEmployeeName(entry, employees);
       const day = format(new Date(`${workDate}T12:00:00`), 'MMM d');
       const span = formatSpan(clockIn, clockOut);
       const saved = clockInOnly
@@ -322,62 +323,6 @@ export function useManagerEntryActions({ employees, assets, timeEntries }: Manag
     } catch (error: unknown) {
       toast.error(toErrorMessage(error, 'Unable to delete timecard row.'));
       return false;
-    }
-  };
-
-  /**
-   * Applies a no-lunch override across every labor entry in a day.
-   *
-   * These writes deliberately bypass `useUpdateShopTimeEntry` and patch
-   * directly: that mutation invalidates the entry list on each success, which
-   * would fight the optimistic cache update partway through the loop. Instead
-   * the cache is patched once up front and invalidated once at the end.
-   */
-  const setDayNoLunch = async ({
-    entries,
-    checked,
-    updatingKey,
-    employeeName,
-  }: {
-    entries: ShopTimeEntry[];
-    checked: boolean;
-    updatingKey: string;
-    employeeName: string;
-  }): Promise<void> => {
-    const laborEntries = entries.filter((entry: ShopTimeEntry) => !isPtoEntry(entry));
-    if (laborEntries.length === 0) {
-      toast.info('Clock time for this employee first, then lunch can be overridden.');
-      return;
-    }
-
-    const entryIds = new Set(laborEntries.map((entry: ShopTimeEntry) => entry.id));
-    const previousEntries = queryClient.getQueryData<ShopTimeEntry[]>(queryKeys.timeEntries());
-
-    queryClient.setQueryData<ShopTimeEntry[]>(queryKeys.timeEntries(), (current) =>
-      (current ?? []).map((entry: ShopTimeEntry) =>
-        entryIds.has(entry.id) ? { ...entry, notes: keepAutoClockOutMarker(entry.notes, applyNoLunchMarker(entry.notes, checked)) } : entry,
-      ),
-    );
-
-    setLunchUpdatingKey(updatingKey);
-    try {
-      for (const entry of laborEntries) {
-        await apiFetch<ShopTimeEntry>(`/api/time-entries/${entry.id}`, {
-          method: 'PATCH',
-          body: JSON.stringify({ notes: keepAutoClockOutMarker(entry.notes, applyNoLunchMarker(entry.notes, checked)) }),
-        });
-      }
-      await queryClient.invalidateQueries({ queryKey: queryKeys.timeEntries() });
-      toast.success(checked ? `No lunch saved for ${employeeName}.` : `Lunch deduction restored for ${employeeName}.`);
-    } catch (error: unknown) {
-      if (previousEntries) {
-        queryClient.setQueryData(queryKeys.timeEntries(), previousEntries);
-      } else {
-        await queryClient.invalidateQueries({ queryKey: queryKeys.timeEntries() });
-      }
-      toast.error(toErrorMessage(error, 'Unable to update lunch setting.'));
-    } finally {
-      setLunchUpdatingKey('');
     }
   };
 

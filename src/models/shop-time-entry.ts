@@ -56,3 +56,6 @@ export interface ShopTimeEntry {
   ptoApproval?: ShopTimeEntryPTOApprovalKey;
   workDate?: string;
 }
+
+/** Fields for an update. Null clears a field; an omitted one is left as stored. */
+export type ShopTimeEntryPatch = { [Field in keyof Omit<ShopTimeEntry, 'id'>]?: ShopTimeEntry[Field] | null };

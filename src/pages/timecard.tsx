@@ -34,15 +34,23 @@ import {
   useCreateShopTimeEntry,
   useShopEmployeeList,
   useClockOutOpenPunches,
+  useJobNames,
   useShopTimeEntryList,
   useSwitchShopTimeEntryJob,
   useUpdateShopTimeEntry,
 } from '@/hooks/use-shop-data';
 import { useEmployeeScheduledStarts } from '@/hooks/use-employee-scheduled-starts';
+import { useJobTimeEdits } from '@/hooks/use-job-time-edits';
+import { useDayNoLunch } from '@/hooks/use-day-no-lunch';
+import { JobTimeFields } from '@/components/job-time-fields';
+import { JobNameHint, JobNamesNotice } from '@/components/job-names-notice';
+import { NoLunchCheckbox } from '@/components/no-lunch-checkbox';
+import { buildJobDetails, formatJobLabel } from '@/lib/job-details';
 import type { EquipmentAsset } from '@/models/equipment-asset';
 import { mapShopEmployees, type AppShopEmployee } from '@/lib/shop-employees';
 import {
   applyNoLunchMarker,
+  dayHasNoLunch,
   formatDuration,
   getDayPayMinutes,
   getEntryPaidMinutes,
@@ -58,6 +66,7 @@ import {
 } from '@/lib/time-rules';
 import {
   dayClockCaption,
+  formatTimeForInput,
   getAssetDisplayName,
   getEntryAssetName,
   getEntryDivision,
@@ -68,7 +77,7 @@ import {
   type PtoHours,
 } from '@/lib/entry-helpers';
 import { openLaborEntries, openPunchIsLeftOver, openPunchStartedBeforeToday } from '@/lib/open-punches';
-import { workDateForClockIn } from '@/lib/day-session';
+import { isWithinJobEditWindow, jobTimeLocks, workDateForClockIn } from '@/lib/day-session';
 import { useReloadTables } from '@/hooks/use-reload-tables';
 import { ShopTimeEntryPTOTypeKeyToLabel, type ShopTimeEntry, type ShopTimeEntryPTOTypeKey } from '@/models/shop-time-entry';
 import { getCurrentPosition } from '@/lib/geolocation';
@@ -119,6 +128,8 @@ export default function TimecardPage() {
   );
   const [editingDivision, setEditingDivision] = useState<string>('');
   const [editingJobNumber, setEditingJobNumber] = useState<string>('');
+  const [editingStartedAt, setEditingStartedAt] = useState<string>('');
+  const [editingEndedAt, setEditingEndedAt] = useState<string>('');
   const [editingNotesEntryId, setEditingNotesEntryId] = useState<string>('');
   const [editingNotes, setEditingNotes] = useState<string>('');
   const [clockInConfirmation, setClockInConfirmation] = useState<ClockInConfirmation | undefined>(undefined);
@@ -199,6 +210,9 @@ export default function TimecardPage() {
     () => getDayPayMinutes(employeeTodayEntries, new Date(), payStartFor(currentWorkDay), payProfile),
     [currentWorkDay, employeeTodayEntries, payProfile, payStartFor],
   );
+  const jobEdits = useJobTimeEdits(payStartFor, payProfile);
+  const { setDayNoLunch, lunchUpdatingKey } = useDayNoLunch();
+  const { jobNames, failed: jobNamesFailed, error: jobNamesError, refetch: refetchJobNames } = useJobNames();
   const voicePhrases = useMemo(
     () =>
       [
@@ -238,6 +252,8 @@ export default function TimecardPage() {
     setEditingAssetRecord(undefined);
     setEditingDivision('');
     setEditingJobNumber('');
+    setEditingStartedAt('');
+    setEditingEndedAt('');
     setEditingNotesEntryId('');
     setEditingNotes('');
     refreshReferenceData();
@@ -462,6 +478,8 @@ export default function TimecardPage() {
     setEditingAssetRecord(entry.asset);
     setEditingDivision(getEntryDivision(entry, assets));
     setEditingJobNumber(getEntryJobNumber(entry));
+    setEditingStartedAt(entry.clockIn ? formatTimeForInput(entry.clockIn) : '');
+    setEditingEndedAt(entry.clockOut ? formatTimeForInput(entry.clockOut) : '');
     setEditingNotesEntryId('');
     setEditingNotes(stripNoLunchMarker(entry.notes));
   };
@@ -471,43 +489,50 @@ export default function TimecardPage() {
     setEditingAssetRecord(undefined);
     setEditingDivision('');
     setEditingJobNumber('');
+    setEditingStartedAt('');
+    setEditingEndedAt('');
     setEditingNotes('');
   };
+  /** The entry's whole work day, which a time change has to stay inside. */
+  const workDayOf = (entry: ShopTimeEntry) => {
+    const dayKey = getEntryWorkDateKey(entry);
+    return {
+      dayKey,
+      day: new Date(`${dayKey}T12:00:00`),
+      dayEntries: employeeEntries.filter((row: ShopTimeEntry) => row.clockIn && getEntryWorkDateKey(row) === dayKey),
+    };
+  };
   const handleSaveEditAsset = async (entry: ShopTimeEntry) => {
-    const newAsset = editingAssetId
-      ? (editingAssetRecord ?? assets.find((asset: EquipmentAsset) => asset.id === editingAssetId))
-      : undefined;
-    const manualDivision = editingDivision.trim();
-    const manualJobNumber = editingJobNumber.trim();
-    if (manualDivision && !Number.isFinite(Number(manualDivision))) {
-      toast.error('Division must be a number.');
+    const employeeName = selectedEmployee?.employeeName ?? entry.employee?.autoNumber ?? 'Employee';
+    const job = buildJobDetails(employeeName, {
+      asset: editingAssetId ? (editingAssetRecord ?? assets.find((asset: EquipmentAsset) => asset.id === editingAssetId)) : undefined,
+      division: editingDivision,
+      jobNumber: editingJobNumber,
+    });
+    if ('error' in job) {
+      toast.error(job.error);
       return;
     }
-    const assetLabel = newAsset ? getAssetDisplayName(newAsset) : getEntryAssetName(entry, assets);
-    const entryLabel =
-      [assetLabel, manualJobNumber ? `Job ${manualJobNumber}` : ''].filter((value: string) => value).join(' · ') ||
-      (manualDivision ? `Division ${manualDivision}` : 'Time entry');
-    const employeeName = selectedEmployee?.employeeName ?? entry.employee?.autoNumber ?? 'Employee';
-    try {
-      await updateTimeEntry.mutateAsync({
-        id: entry.id,
-        changedFields: {
-          timeEntry: `${employeeName} - ${entryLabel}`,
-          asset: newAsset ? { id: newAsset.id, asset: getAssetDisplayName(newAsset) } : entry.asset,
-          assetDivision: newAsset ? newAsset.divisionCode : manualDivision ? Number(manualDivision) : undefined,
-          division: newAsset ? newAsset.divisionCode : manualDivision ? Number(manualDivision) : undefined,
-          jobNumber: manualJobNumber || undefined,
-          notes: keepAutoClockOutMarker(
-            entry.notes,
-            applyNoLunchMarker(editingNotes.trim() || undefined, notesHaveNoLunch(entry.notes) || todayPay.noLunch),
-          ),
-        },
-      });
+    const { dayKey, day, dayEntries } = workDayOf(entry);
+    const saved = await jobEdits.saveJob({
+      entry,
+      day,
+      dayEntries,
+      startValue: editingStartedAt,
+      endValue: editingEndedAt,
+      canMoveTimes: isWithinJobEditWindow(dayKey),
+      details: {
+        ...job.fields,
+        notes: keepAutoClockOutMarker(
+          entry.notes,
+          applyNoLunchMarker(editingNotes.trim() || undefined, notesHaveNoLunch(entry.notes) || dayHasNoLunch(dayEntries)),
+        ),
+      },
+      label: job.label,
+    });
+    if (saved) {
       handleCancelEditAsset();
       setEditingNotesEntryId('');
-      toast.success('Timecard updated.');
-    } catch (error: unknown) {
-      toast.error(error instanceof Error ? error.message : 'Unable to update asset.');
     }
   };
   const handleSaveEditNotes = async (entry: ShopTimeEntry) => {
@@ -604,9 +629,29 @@ export default function TimecardPage() {
                         : 'Clock in when you arrive. Add a job when work begins, and again to change equipment. After clock-out, add forgotten jobs on Mechanic Log.'}
                     </p>
                     {todayClockLabel ? <p className="text-sm font-medium text-foreground">{todayClockLabel}</p> : null}
+                    {employeeTodayEntries.some((entry: ShopTimeEntry) => !isPtoEntry(entry)) ? (
+                      <div className="pt-1">
+                        <NoLunchCheckbox
+                          checked={todayPay.noLunch}
+                          disabled={lunchUpdatingKey === currentWorkDay}
+                          onCheckedChange={(checked: boolean) =>
+                            void setDayNoLunch({
+                              entries: employeeTodayEntries,
+                              checked,
+                              updatingKey: currentWorkDay,
+                              employeeName: selectedEmployee.employeeName,
+                              dayLabel: format(new Date(`${currentWorkDay}T12:00:00`), 'MMM d'),
+                            })
+                          }
+                        />
+                      </div>
+                    ) : null}
                   </div>
                 </CardHeader>
                 <CardContent className="space-y-3">
+                  {jobNamesFailed && !clockInOnlyTimecard ? (
+                    <JobNamesNotice error={jobNamesError} onRetry={() => void refetchJobNames()} />
+                  ) : null}
                   {assetsFailed || entriesFailed ? (
                     <Card className="border-l-4 border-l-destructive bg-card text-card-foreground shadow-sm">
                       <CardContent className="flex flex-col gap-3 p-4 sm:flex-row sm:items-center sm:justify-between">
@@ -641,12 +686,12 @@ export default function TimecardPage() {
                       Clock in at the shop kiosk when you arrive. Once you are clocked in, you can add jobs here from any device.
                     </p>
                   ) : (
-                    <div className="flex flex-col gap-2 sm:flex-row">
+                    <div className="flex flex-col gap-4 sm:flex-row sm:gap-3">
                       {!employeeActiveEntry ? (
                         <Button
                           type="button"
                           size="lg"
-                          className="h-14 flex-1 justify-center text-base font-semibold shadow-sm"
+                          className="h-16 flex-1 justify-center text-lg font-semibold shadow-sm sm:h-14 sm:text-base"
                           onClick={() => void handleClockIn()}
                           disabled={isClockingIn || createTimeEntry.isPending}
                         >
@@ -658,7 +703,7 @@ export default function TimecardPage() {
                             <Button
                               type="button"
                               size="lg"
-                              className="h-14 flex-1 justify-center bg-blue-700 text-base font-semibold text-white hover:bg-blue-800"
+                              className="h-16 flex-1 justify-center bg-blue-700 text-lg font-semibold text-white hover:bg-blue-800 sm:h-14 sm:text-base"
                               onClick={() => setAssetFormMode('start-asset')}
                             >
                               <Plus className="mr-2 h-5 w-5" /> Add job
@@ -670,7 +715,7 @@ export default function TimecardPage() {
                                 type="button"
                                 size="lg"
                                 variant="destructive"
-                                className="h-14 flex-1 justify-center text-base font-semibold"
+                                className="h-16 flex-1 justify-center text-lg font-semibold sm:h-14 sm:text-base"
                                 disabled={clockOutPunches.isPending}
                               >
                                 {clockOutPunches.isPending ? 'Clocking out…' : 'Clock out'}
@@ -756,6 +801,7 @@ export default function TimecardPage() {
                             onChange={(event: React.ChangeEvent<HTMLInputElement>) => setJobNumber(event.target.value)}
                             placeholder="Enter job number"
                           />
+                          <JobNameHint jobNumber={jobNumber} jobNames={jobNames} />
                         </div>
                       </div>
                       {employeeActiveEntry && !isAwaitingAsset(employeeActiveEntry) ? (
@@ -782,7 +828,7 @@ export default function TimecardPage() {
                         />
                       </div>
                       <Button
-                        className="h-12"
+                        className="mt-2 h-16 text-lg font-semibold sm:h-12 sm:text-base"
                         type="button"
                         onClick={() => void handleStartAsset()}
                         disabled={assetsLoading || switchJob.isPending || updateTimeEntry.isPending}
@@ -805,6 +851,20 @@ export default function TimecardPage() {
                             <div>
                               {editingEntryId === entry.id && !isPtoEntry(entry) ? (
                                 <div className="max-w-md space-y-3">
+                                  {isWithinJobEditWindow(getEntryWorkDateKey(entry)) ? (
+                                    <JobTimeFields
+                                      entryId={entry.id}
+                                      locks={jobTimeLocks(workDayOf(entry).dayEntries, entry)}
+                                      running={!entry.clockOut}
+                                      startValue={editingStartedAt}
+                                      endValue={editingEndedAt}
+                                      onStartChange={setEditingStartedAt}
+                                      onEndChange={setEditingEndedAt}
+                                      onCommit={() => void handleSaveEditAsset(entry)}
+                                      onCancel={handleCancelEditAsset}
+                                      disabled={jobEdits.saving}
+                                    />
+                                  ) : null}
                                   <div className="space-y-2">
                                     <Label>Equipment asset</Label>
                                     <AssetPicker
@@ -838,8 +898,9 @@ export default function TimecardPage() {
                                         id={`edit-job-${entry.id}`}
                                         value={editingJobNumber}
                                         onChange={(event: React.ChangeEvent<HTMLInputElement>) => setEditingJobNumber(event.target.value)}
-                                        placeholder="Optional job note"
+                                        placeholder="Optional job number"
                                       />
+                                      <JobNameHint jobNumber={editingJobNumber} jobNames={jobNames} />
                                     </div>
                                   </div>
                                   <div className="space-y-2">
@@ -873,7 +934,9 @@ export default function TimecardPage() {
                                   <p className="text-sm text-muted-foreground">
                                     {isPtoEntry(entry)
                                       ? `${getPtoHours(entry) || Math.round(entry.hours ?? 0)} hours submitted`
-                                      : `Division ${getEntryDivision(entry, assets) || '—'} · Job ${getEntryJobNumber(entry) || '—'}`}
+                                      : `Division ${getEntryDivision(entry, assets) || '—'} · Job ${
+                                          getEntryJobNumber(entry) ? formatJobLabel(getEntryJobNumber(entry), jobNames) : '—'
+                                        }`}
                                   </p>
                                 </div>
                               )}
@@ -927,7 +990,7 @@ export default function TimecardPage() {
                                     size="icon"
                                     aria-label="Save timecard"
                                     onClick={() => void handleSaveEditAsset(entry)}
-                                    disabled={updateTimeEntry.isPending}
+                                    disabled={updateTimeEntry.isPending || jobEdits.saving}
                                   >
                                     <Check className="h-4 w-4" />
                                   </Button>

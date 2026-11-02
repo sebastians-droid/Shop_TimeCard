@@ -3,6 +3,7 @@ const {
   listEmployees,
   listLookupEmployees,
   listAssets,
+  listJobs,
   createAsset,
   updateAsset,
   deactivateAsset,
@@ -124,6 +125,11 @@ async function handleRequest(request) {
 
     if (method === 'GET' && pathname === '/api/assets') {
       return json(200, { assets: await listAssets() });
+    }
+
+    if (method === 'GET' && pathname === '/api/jobs') {
+      requireUser(request);
+      return json(200, { jobs: await listJobs() });
     }
 
     if (method === 'POST' && pathname === '/api/assets') {

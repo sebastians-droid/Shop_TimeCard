@@ -1,3 +1,4 @@
+import { useMemo } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { toast } from '@/lib/toast';
 
@@ -5,7 +6,7 @@ import { apiFetch } from '@/lib/api';
 import { queryKeys } from '@/lib/query-keys';
 import type { EquipmentAsset } from '@/models/equipment-asset';
 import type { ShopEmployee } from '@/models/shop-employee';
-import type { ShopTimeEntry } from '@/models/shop-time-entry';
+import type { ShopTimeEntry, ShopTimeEntryPatch } from '@/models/shop-time-entry';
 
 export function useShopEmployeeList() {
   return useQuery({
@@ -37,6 +38,26 @@ export function useAllEquipmentAssets() {
       return data.assets;
     },
   });
+}
+
+export type JobRecord = { id: string; jobNumber: string; jobName: string };
+
+/**
+ * Job names keyed by job number, for showing "4821 - Name" beside an entry's
+ * job number. A failed read leaves the bare numbers, so callers should report it.
+ */
+export function useJobNames() {
+  const query = useQuery({
+    queryKey: queryKeys.jobs(),
+    queryFn: async () => {
+      const data = await apiFetch<{ jobs: JobRecord[] }>('/api/jobs');
+      return data.jobs;
+    },
+    staleTime: 10 * 60 * 1000,
+    retry: false,
+  });
+  const jobNames = useMemo(() => new Map((query.data ?? []).map((job) => [job.jobNumber.toLowerCase(), job.jobName])), [query.data]);
+  return { jobNames, failed: query.isError, error: query.error, refetch: query.refetch };
 }
 
 export function useShopTimeEntryList() {
@@ -94,7 +115,7 @@ export function useClockOutOpenPunches() {
 export function useUpdateShopTimeEntry() {
   const client = useQueryClient();
   return useMutation({
-    mutationFn: ({ id, changedFields }: { id: string; changedFields: Partial<Omit<ShopTimeEntry, 'id'>> }) =>
+    mutationFn: ({ id, changedFields }: { id: string; changedFields: ShopTimeEntryPatch }) =>
       apiFetch<ShopTimeEntry>(`/api/time-entries/${id}`, {
         method: 'PATCH',
         body: JSON.stringify(changedFields),

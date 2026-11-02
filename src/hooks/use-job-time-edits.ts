@@ -6,11 +6,12 @@ import { apiFetch } from '@/lib/api';
 import { planHoursRefresh, planJobTimeEdit, type JobTimeWrite } from '@/lib/day-session';
 import { formatTimeForInput, timeAfter, timeOnWorkDay } from '@/lib/entry-helpers';
 import { queryKeys } from '@/lib/query-keys';
+import { withJobDetails, type JobDetailsFields } from '@/lib/job-details';
 import { AWAITING_ASSET_LABEL, type EmployeePayProfile } from '@/lib/time-rules';
 import { toast } from '@/lib/toast';
 import type { ShopTimeEntry } from '@/models/shop-time-entry';
 
-type JobDetails = Pick<ShopTimeEntry, 'timeEntry' | 'asset' | 'assetDivision' | 'division' | 'jobNumber' | 'notes'>;
+type JobDetails = JobDetailsFields & { notes: string };
 
 async function runWrites(writes: JobTimeWrite[]) {
   for (const write of writes) {
@@ -26,11 +27,11 @@ async function runWrites(writes: JobTimeWrite[]) {
 }
 
 /**
- * Road mechanic Mechanic Log writes: moving a job's start and end, and
- * cancelling a job into unassigned time. Both update the cached day at once,
- * restore it if the server refuses, and reload once at the end.
+ * An employee's own job edits on the timecard and Mechanic Log: moving a job's
+ * start and end, and cancelling a job into unassigned time. Both update the
+ * cached day at once, restore it if the server refuses, and reload once at the end.
  */
-export function useRoadMechJobEdits(payStartFor: (dateKey: string) => string | null | undefined, payProfile: EmployeePayProfile) {
+export function useJobTimeEdits(payStartFor: (dateKey: string) => string | null | undefined, payProfile: EmployeePayProfile) {
   const queryClient = useQueryClient();
   const [saving, setSaving] = useState(false);
 
@@ -87,7 +88,7 @@ export function useRoadMechJobEdits(payStartFor: (dateKey: string) => string | n
     }
     const previous = await replaceDayInCache(
       dayEntries,
-      plan.dayAfter.map((row) => (row.id === entry.id ? { ...row, ...details } : row)),
+      plan.dayAfter.map((row) => (row.id === entry.id ? withJobDetails(row, details) : row)),
     );
     setSaving(true);
     try {
@@ -110,6 +111,36 @@ export function useRoadMechJobEdits(payStartFor: (dateKey: string) => string | n
       setSaving(false);
     }
     return true;
+  };
+
+  /**
+   * Saves a job edit. Changed times go through `saveJobTimes` so the
+   * neighbors absorb the difference; otherwise only the details are written.
+   * Resolves true when the edit form can close.
+   */
+  const saveJob = async ({
+    canMoveTimes,
+    ...edit
+  }: Parameters<typeof saveJobTimes>[0] & { canMoveTimes: boolean }): Promise<boolean> => {
+    if (canMoveTimes && timesChanged(edit.entry, edit.startValue, edit.endValue)) return saveJobTimes(edit);
+    const { entry, day, dayEntries, details, label } = edit;
+    const previous = await replaceDayInCache(
+      dayEntries,
+      dayEntries.map((row) => (row.id === entry.id ? withJobDetails(row, details) : row)),
+    );
+    setSaving(true);
+    try {
+      await apiFetch<ShopTimeEntry>(`/api/time-entries/${entry.id}`, { method: 'PATCH', body: JSON.stringify(details) });
+      toast.success(`${label} saved for ${format(day, 'MMM d')}.`);
+      return true;
+    } catch (error: unknown) {
+      if (previous) queryClient.setQueryData(queryKeys.timeEntries(), previous);
+      toast.error(error instanceof Error ? error.message : 'Unable to save the job.');
+      return false;
+    } finally {
+      await queryClient.invalidateQueries({ queryKey: queryKeys.timeEntries() });
+      setSaving(false);
+    }
   };
 
   /** Turns a finished job into unassigned time. The day's hours and the neighbors' times stay put. */
@@ -156,5 +187,5 @@ export function useRoadMechJobEdits(payStartFor: (dateKey: string) => string | n
     }
   };
 
-  return { saving, timesChanged, saveJobTimes, cancelJob };
+  return { saving, timesChanged, saveJob, cancelJob };
 }

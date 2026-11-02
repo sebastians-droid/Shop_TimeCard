@@ -52,6 +52,12 @@ app.http('assetsById', {
   handler: azureHandler,
 });
 
+app.http('jobs', {
+  methods: ['GET'],
+  authLevel: 'anonymous',
+  handler: azureHandler,
+});
+
 app.http('health', {
   methods: ['GET'],
   authLevel: 'anonymous',

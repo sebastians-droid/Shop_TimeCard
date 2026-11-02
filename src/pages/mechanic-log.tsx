@@ -31,10 +31,17 @@ import { EmployeeCodeSignIn, KioskSessionBar } from '@/components/kiosk-session'
 import { useUser } from '@/hooks/use-user';
 import { useKioskSession } from '@/hooks/use-kiosk-session';
 import { VoiceNoteButton } from '@/components/voice-note-button';
-import { useAllEquipmentAssets, useShopEmployeeList, useShopTimeEntryList, useUpdateShopTimeEntry } from '@/hooks/use-shop-data';
+import {
+  useAllEquipmentAssets,
+  useJobNames,
+  useShopEmployeeList,
+  useShopTimeEntryList,
+  useUpdateShopTimeEntry,
+} from '@/hooks/use-shop-data';
 import { useEmployeeScheduledStarts } from '@/hooks/use-employee-scheduled-starts';
 import { mapShopEmployees, type AppShopEmployee } from '@/lib/shop-employees';
 import {
+  AWAITING_ASSET_LABEL,
   applyNoLunchMarker,
   dayHasNoLunch,
   formatDuration,
@@ -61,14 +68,19 @@ import {
   timeOnWorkDay,
 } from '@/lib/entry-helpers';
 import {
-  ROAD_MECH_EDIT_DAYS,
+  JOB_EDIT_DAYS,
   dayFirstClockIn,
   dayLastClockOut,
-  isWithinRoadMechEditWindow,
+  isWithinJobEditWindow,
   jobTimeLocks,
   planForgottenJobInsert,
 } from '@/lib/day-session';
-import { useRoadMechJobEdits } from '@/hooks/use-road-mech-job-edits';
+import { useJobTimeEdits } from '@/hooks/use-job-time-edits';
+import { useDayNoLunch } from '@/hooks/use-day-no-lunch';
+import { JobTimeFields } from '@/components/job-time-fields';
+import { JobNameHint, JobNamesNotice } from '@/components/job-names-notice';
+import { NoLunchCheckbox } from '@/components/no-lunch-checkbox';
+import { buildJobDetails, formatJobLabel } from '@/lib/job-details';
 import { apiFetch } from '@/lib/api';
 import { queryKeys } from '@/lib/query-keys';
 import type { EquipmentAsset } from '@/models/equipment-asset';
@@ -145,8 +157,10 @@ export default function MechanicLogPage() {
     dateRange?.to ? format(dateRange.to, 'yyyy-MM-dd') : undefined,
   );
 
-  const canReshapeDay = (dateKey: string) => isRoadMech && isWithinRoadMechEditWindow(dateKey);
-  const roadMechEdits = useRoadMechJobEdits(payStartFor, payProfile);
+  const canReshapeDay = (dateKey: string) => isWithinJobEditWindow(dateKey);
+  const jobEdits = useJobTimeEdits(payStartFor, payProfile);
+  const { setDayNoLunch, lunchUpdatingKey } = useDayNoLunch();
+  const { jobNames, failed: jobNamesFailed, error: jobNamesError, refetch: refetchJobNames } = useJobNames();
 
   const resetJobForm = () => {
     setAddingJobDateKey('');
@@ -197,7 +211,7 @@ export default function MechanicLogPage() {
   };
 
   const cancelJob = (entry: ShopTimeEntry, day: Date, dayEntries: ShopTimeEntry[]) =>
-    roadMechEdits.cancelJob({
+    jobEdits.cancelJob({
       entry,
       day,
       dayEntries,
@@ -206,57 +220,37 @@ export default function MechanicLogPage() {
     });
 
   const saveTimecard = async (entry: ShopTimeEntry, day: Date, dayEntries: ShopTimeEntry[]) => {
-    const when = format(day, 'MMM d');
-    const newAsset = editingAssetId
-      ? (editingAssetRecord ?? assets.find((asset: EquipmentAsset) => asset.id === editingAssetId))
-      : undefined;
-    const manualDivision = editingDivision.trim();
-    const manualJobNumber = editingJobNumber.trim();
-    if (manualDivision && !Number.isFinite(Number(manualDivision))) {
-      toast.error('Division must be a number.');
-      return;
-    }
-    const assetLabel = newAsset ? getAssetDisplayName(newAsset) : getEntryAssetName(entry, assets);
-    const entryLabel =
-      [assetLabel, manualJobNumber ? `Job ${manualJobNumber}` : ''].filter((value: string) => value).join(' · ') ||
-      (manualDivision ? `Division ${manualDivision}` : 'Time entry');
     const employeeName = selectedEmployee?.employeeName ?? entry.employee?.autoNumber ?? 'Employee';
-    const nextNotes = keepAutoClockOutMarker(
-      entry.notes,
-      applyNoLunchMarker(editingNotes.trim() || undefined, notesHaveNoLunch(entry.notes) || dayHasNoLunch(dayEntries)),
+    const job = buildJobDetails(
+      employeeName,
+      {
+        asset: editingAssetId ? (editingAssetRecord ?? assets.find((asset: EquipmentAsset) => asset.id === editingAssetId)) : undefined,
+        division: editingDivision,
+        jobNumber: editingJobNumber,
+      },
+      { allowUnassigned: isAwaitingAsset(entry) },
     );
-    const staysUnassigned = isAwaitingAsset(entry) && !newAsset && !manualDivision && !manualJobNumber;
-    const details = {
-      timeEntry: staysUnassigned ? entry.timeEntry : `${employeeName} - ${entryLabel}`,
-      asset: newAsset ? { id: newAsset.id, asset: getAssetDisplayName(newAsset) } : entry.asset,
-      assetDivision: newAsset ? newAsset.divisionCode : manualDivision ? Number(manualDivision) : undefined,
-      division: newAsset ? newAsset.divisionCode : manualDivision ? Number(manualDivision) : undefined,
-      jobNumber: manualJobNumber || undefined,
-      notes: nextNotes,
-    };
-
-    if (canReshapeDay(format(day, 'yyyy-MM-dd')) && roadMechEdits.timesChanged(entry, editingStartedAt, editingEndedAt)) {
-      const label = staysUnassigned ? 'Unassigned time' : assetLabel;
-      const saved = await roadMechEdits.saveJobTimes({
-        entry,
-        day,
-        dayEntries,
-        startValue: editingStartedAt,
-        endValue: editingEndedAt,
-        details,
-        label,
-      });
-      if (saved) cancelEditTimecard();
+    if ('error' in job) {
+      toast.error(job.error);
       return;
     }
-
-    try {
-      await updateTimeEntry.mutateAsync({ id: entry.id, changedFields: details });
-      cancelEditTimecard();
-      toast.success(`Timecard updated for ${when} — ${assetLabel}.`);
-    } catch (error: unknown) {
-      toast.error(error instanceof Error ? error.message : 'Unable to update timecard.');
-    }
+    const saved = await jobEdits.saveJob({
+      entry,
+      day,
+      dayEntries,
+      startValue: editingStartedAt,
+      endValue: editingEndedAt,
+      canMoveTimes: canReshapeDay(format(day, 'yyyy-MM-dd')),
+      details: {
+        ...job.fields,
+        notes: keepAutoClockOutMarker(
+          entry.notes,
+          applyNoLunchMarker(editingNotes.trim() || undefined, notesHaveNoLunch(entry.notes) || dayHasNoLunch(dayEntries)),
+        ),
+      },
+      label: job.label === AWAITING_ASSET_LABEL ? 'Unassigned time' : job.label,
+    });
+    if (saved) cancelEditTimecard();
   };
 
   const startEditNotes = (entry: ShopTimeEntry) => {
@@ -455,17 +449,16 @@ export default function MechanicLogPage() {
       const entries = filteredEntries.filter((entry: ShopTimeEntry) => getEntryWorkDateKey(entry) === dateKey);
       const dayPayStart = payStartFor(dateKey);
       const totalHours = getDayPayMinutes(entries, new Date(), dayPayStart, payProfile).totalMinutes / 60;
-      // Road mechanics also see unassigned time so they can assign it or stretch a neighbor over it.
-      const rows = isRoadMech
-        ? entries.filter((entry) => !isAwaitingAsset(entry) || (entry.clockOut && getRawDurationMinutes(entry) >= 5))
-        : jobEntriesForDisplay(entries);
+      // Unassigned time is listed so it can be assigned a job, or a neighbor stretched over it.
+      const rows = entries.filter((entry) => !isAwaitingAsset(entry) || (entry.clockOut && getRawDurationMinutes(entry) >= 5));
       return {
         day,
         dateKey,
         entries,
         jobs: jobEntriesForDisplay(entries),
         rows,
-        locksById: new Map(isRoadMech ? rows.map((entry) => [entry.id, jobTimeLocks(entries, entry)] as const) : []),
+        noLunch: dayHasNoLunch(entries),
+        locksById: new Map(rows.map((entry) => [entry.id, jobTimeLocks(entries, entry)] as const)),
         clockLabel: dayClockCaption(entries),
         waitBeforeJob: waitBeforeFirstJob(entries, new Date(), dayPayStart, payProfile),
         totalHours,
@@ -473,7 +466,7 @@ export default function MechanicLogPage() {
         lastOut: dayLastClockOut(entries),
       };
     });
-  }, [days, filteredEntries, isRoadMech, payProfile, payStartFor]);
+  }, [days, filteredEntries, payProfile, payStartFor]);
 
   const rangeTotalHours = useMemo(() => Math.round(dayData.reduce((sum, d) => sum + d.totalHours, 0) * 100) / 100, [dayData]);
 
@@ -500,7 +493,7 @@ export default function MechanicLogPage() {
           failed={employeesFailed}
           error={employeesError}
           onRetry={() => void refetchEmployees()}
-          submitLabel="View my work log"
+          submitLabel="View my timecard"
           onAccepted={handleAcceptedCode}
         />
       ) : null}
@@ -527,6 +520,8 @@ export default function MechanicLogPage() {
               </Button>
             </div>
           ) : null}
+
+          {jobNamesFailed ? <JobNamesNotice error={jobNamesError} onRetry={() => void refetchJobNames()} /> : null}
 
           {schedulesFailed ? (
             <div className="rounded-md border border-destructive/40 bg-destructive/10 p-3 text-sm text-destructive">
@@ -630,7 +625,20 @@ export default function MechanicLogPage() {
                                   {d.clockLabel ? ` · ${d.clockLabel}` : ''}
                                 </p>
                               </div>
-                              <div className="flex items-center gap-4">
+                              <div className="flex items-center gap-3 sm:gap-4">
+                                <NoLunchCheckbox
+                                  checked={d.noLunch}
+                                  disabled={lunchUpdatingKey === d.dateKey}
+                                  onCheckedChange={(checked: boolean) =>
+                                    void setDayNoLunch({
+                                      entries: d.entries,
+                                      checked,
+                                      updatingKey: d.dateKey,
+                                      employeeName: selectedEmployee.employeeName,
+                                      dayLabel: format(d.day, 'MMM d'),
+                                    })
+                                  }
+                                />
                                 <span className="text-sm font-semibold">{d.totalHours.toFixed(1)}h</span>
                                 <ChevronDown className="h-4 w-4 shrink-0 text-muted-foreground transition-transform [[data-state=open]>*>&]:rotate-180" />
                               </div>
@@ -639,9 +647,9 @@ export default function MechanicLogPage() {
                         </CollapsibleTrigger>
                         <CollapsibleContent>
                           <CardContent className="space-y-2 border-t border-border pt-4">
-                            {isRoadMech && d.firstIn && !canReshapeDay(d.dateKey) ? (
+                            {d.firstIn && !canReshapeDay(d.dateKey) ? (
                               <p className="text-sm text-muted-foreground">
-                                Job times can be changed for the last {ROAD_MECH_EDIT_DAYS} days. Ask a manager to change an older day.
+                                Job times can be changed for the last {JOB_EDIT_DAYS} days. Ask a manager to change an older day.
                               </p>
                             ) : d.lastOut ? (
                               <div className="space-y-3">
@@ -721,6 +729,7 @@ export default function MechanicLogPage() {
                                           value={jobNumber}
                                           onChange={(event: React.ChangeEvent<HTMLInputElement>) => setJobNumber(event.target.value)}
                                         />
+                                        <JobNameHint jobNumber={jobNumber} jobNames={jobNames} />
                                       </div>
                                     </div>
                                     <div className="space-y-2">
@@ -752,7 +761,10 @@ export default function MechanicLogPage() {
                                 ) : null}
                               </div>
                             ) : d.firstIn ? (
-                              <p className="text-sm text-muted-foreground">Clock out on the timecard before adding a forgotten job.</p>
+                              <p className="text-sm text-muted-foreground">
+                                Still clocked in. Use Add job on the timecard, or edit a job's times below. Forgotten jobs can be added
+                                here after you clock out.
+                              </p>
                             ) : null}
                             {d.rows.map((entry: ShopTimeEntry) => {
                               const paidMinutes = getRawDurationMinutes(entry);
@@ -766,18 +778,7 @@ export default function MechanicLogPage() {
                               const editingNotesOnly = editingNotesEntryId === entry.id;
                               const reshape = canReshapeDay(d.dateKey) && !isPtoEntry(entry);
                               const locks = reshape ? d.locksById.get(entry.id) : undefined;
-                              const busy = updateTimeEntry.isPending || jobSaving || roadMechEdits.saving;
-                              const timeKeys = (event: React.KeyboardEvent<HTMLInputElement>) => {
-                                if (event.key === 'Enter') {
-                                  event.preventDefault();
-                                  event.currentTarget.blur();
-                                  void saveTimecard(entry, d.day, d.entries);
-                                }
-                                if (event.key === 'Escape') {
-                                  event.preventDefault();
-                                  cancelEditTimecard();
-                                }
-                              };
+                              const busy = updateTimeEntry.isPending || jobSaving || jobEdits.saving;
                               return (
                                 <div
                                   key={entry.id}
@@ -786,52 +787,18 @@ export default function MechanicLogPage() {
                                   {editingTimecard && !isPtoEntry(entry) ? (
                                     <div className="space-y-3">
                                       {locks ? (
-                                        <div className="space-y-2">
-                                          <div className="grid gap-3 sm:grid-cols-2">
-                                            <div className="space-y-2">
-                                              <Label htmlFor={`edit-start-${entry.id}`}>Started</Label>
-                                              <Input
-                                                id={`edit-start-${entry.id}`}
-                                                type="time"
-                                                className="bg-background"
-                                                value={editingStartedAt}
-                                                onChange={(event: React.ChangeEvent<HTMLInputElement>) =>
-                                                  setEditingStartedAt(event.target.value)
-                                                }
-                                                onKeyDown={timeKeys}
-                                                disabled={locks.startLocked || busy}
-                                              />
-                                              {locks.startLocked ? (
-                                                <p className="text-xs text-muted-foreground">This is your clock-in, so it can't move.</p>
-                                              ) : null}
-                                            </div>
-                                            <div className="space-y-2">
-                                              <Label htmlFor={`edit-end-${entry.id}`}>Ended</Label>
-                                              <Input
-                                                id={`edit-end-${entry.id}`}
-                                                type="time"
-                                                className="bg-background"
-                                                value={editingEndedAt}
-                                                onChange={(event: React.ChangeEvent<HTMLInputElement>) =>
-                                                  setEditingEndedAt(event.target.value)
-                                                }
-                                                onKeyDown={timeKeys}
-                                                disabled={locks.endLocked || busy}
-                                              />
-                                              {!entry.clockOut ? (
-                                                <p className="text-xs text-muted-foreground">
-                                                  Still running. It ends when you switch jobs or clock out.
-                                                </p>
-                                              ) : locks.endLocked ? (
-                                                <p className="text-xs text-muted-foreground">This is your clock-out, so it can't move.</p>
-                                              ) : null}
-                                            </div>
-                                          </div>
-                                          <p className="text-sm text-muted-foreground">
-                                            The job next to this one gives up or takes the difference. Your clock-in and clock-out stay the
-                                            same.
-                                          </p>
-                                        </div>
+                                        <JobTimeFields
+                                          entryId={entry.id}
+                                          locks={locks}
+                                          running={!entry.clockOut}
+                                          startValue={editingStartedAt}
+                                          endValue={editingEndedAt}
+                                          onStartChange={setEditingStartedAt}
+                                          onEndChange={setEditingEndedAt}
+                                          onCommit={() => void saveTimecard(entry, d.day, d.entries)}
+                                          onCancel={cancelEditTimecard}
+                                          disabled={busy}
+                                        />
                                       ) : null}
                                       <div className="space-y-2">
                                         <Label>Equipment asset</Label>
@@ -872,6 +839,7 @@ export default function MechanicLogPage() {
                                             }
                                             placeholder="Optional job number"
                                           />
+                                          <JobNameHint jobNumber={editingJobNumber} jobNames={jobNames} />
                                         </div>
                                       </div>
                                       <div className="space-y-2">
@@ -899,7 +867,7 @@ export default function MechanicLogPage() {
                                           size="icon"
                                           aria-label="Save timecard"
                                           onClick={() => void saveTimecard(entry, d.day, d.entries)}
-                                          disabled={updateTimeEntry.isPending}
+                                          disabled={busy}
                                         >
                                           <Check className="h-4 w-4" />
                                         </Button>
@@ -931,7 +899,7 @@ export default function MechanicLogPage() {
                                           <div className="flex flex-wrap items-center gap-1.5 text-sm text-muted-foreground">
                                             {div && <span>Div {div}</span>}
                                             {div && jobNum && <span>·</span>}
-                                            {jobNum && <span>Job {jobNum}</span>}
+                                            {jobNum && <span>Job {formatJobLabel(jobNum, jobNames)}</span>}
                                           </div>
                                         </div>
                                         <div className="flex flex-wrap items-center gap-1.5">

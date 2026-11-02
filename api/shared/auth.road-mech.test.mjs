@@ -35,7 +35,7 @@ function seed(daysAgo = 1) {
   return key;
 }
 
-describe('road mechanic job-time edits', () => {
+describe('employee job-time edits', () => {
   let key;
   beforeEach(() => {
     key = seed();
@@ -79,7 +79,28 @@ describe('road mechanic job-time edits', () => {
     await expect(assertTimeEntryDelete(roadMech, 'w')).resolves.toBeUndefined();
   });
 
-  it('keeps manager-only deletes for shop mechanics', async () => {
-    await expect(assertTimeEntryDelete(shopMech, 'w')).rejects.toThrow(/Manager access/);
+  it('holds shop mechanics to the same punched-day rule', async () => {
+    await expect(assertTimeEntryAccess(shopMech, 'b', { clockIn: at(key, '13:00') })).resolves.toBeUndefined();
+    await expect(assertTimeEntryAccess(shopMech, 'b', { clockOut: at(key, '20:00') })).rejects.toThrow(/clock-in, clock-out, or break/);
+    await expect(assertTimeEntryDelete(shopMech, 'a')).rejects.toThrow(/clock-in, clock-out, or break/);
+  });
+
+  it('lets a shop mechanic reshape jobs while still clocked in', async () => {
+    const today = dayKey(0);
+    const started = new Date(Date.now() - 3 * 60 * 60 * 1000).toISOString();
+    const switched = new Date(Date.now() - 60 * 60 * 1000).toISOString();
+    rows = [
+      { id: 'a', timeEntry: 'Alex - LOADER-7', clockIn: started, clockOut: switched, workDate: today },
+      { id: 'b', timeEntry: 'Alex - TRUCK-2', clockIn: switched, workDate: today },
+    ];
+    const earlier = new Date(Date.now() - 2 * 60 * 60 * 1000).toISOString();
+    await expect(assertTimeEntryAccess(shopMech, 'b', { clockIn: earlier })).resolves.toBeUndefined();
+    await expect(assertTimeEntryAccess(shopMech, 'a', { clockIn: earlier })).rejects.toThrow(/clock-in, clock-out, or break/);
+  });
+
+  it('keeps clock-in at the kiosk for shop mechanics', async () => {
+    await expect(assertTimeEntryCreate(shopMech, { employee: { id: 'emp' }, clockIn: new Date().toISOString() })).rejects.toThrow(
+      /shop kiosk/,
+    );
   });
 });

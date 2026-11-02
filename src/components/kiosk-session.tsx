@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react';
-import { NavLink, useLocation } from 'react-router-dom';
+import { NavLink, useLocation, useNavigate } from 'react-router-dom';
 import { Clock } from 'lucide-react';
 
 import { Button } from '@/components/ui/button';
@@ -14,6 +14,7 @@ import { toast } from '@/lib/toast';
 
 /** Shared kiosk routes. Leaving both of these clears the signed-in employee. */
 const KIOSK_PATHS = ['/timecard', '/mechanic-log'];
+const KIOSK_HOME = '/timecard';
 
 /** Shop kiosk only — personal Microsoft accounts are not signed out for inactivity. */
 const KIOSK_IDLE_MS = 30_000;
@@ -21,6 +22,7 @@ const KIOSK_IDLE_MS = 30_000;
 export function KioskSessionProvider({ children }: { children: ReactNode }) {
   const [employeeId, setEmployeeId] = useState('');
   const { pathname } = useLocation();
+  const navigate = useNavigate();
   const { data: user } = useUser();
   const onKioskRoute = KIOSK_PATHS.includes(pathname);
   const requiresEmployeeCode = user?.requiresEmployeeCode ?? true;
@@ -48,6 +50,7 @@ export function KioskSessionProvider({ children }: { children: ReactNode }) {
 
     const signOutForIdle = () => {
       setEmployeeId('');
+      if (pathname !== KIOSK_HOME) navigate(KIOSK_HOME);
       toast.info(`Signed out after ${KIOSK_IDLE_MS / 1000} seconds of inactivity.`);
     };
 
@@ -67,7 +70,7 @@ export function KioskSessionProvider({ children }: { children: ReactNode }) {
       for (const eventName of events) window.removeEventListener(eventName, reset);
       window.removeEventListener('scroll', reset, { capture: true });
     };
-  }, [employeeId, onKioskRoute, requiresEmployeeCode]);
+  }, [employeeId, navigate, onKioskRoute, pathname, requiresEmployeeCode]);
 
   const value = useMemo(() => ({ employeeId, signIn, signOut }), [employeeId, signIn, signOut]);
 
@@ -153,6 +156,8 @@ export function EmployeeCodeSignIn({
   onAccepted?: () => void;
 }) {
   const { signIn } = useKioskSession();
+  const navigate = useNavigate();
+  const { pathname } = useLocation();
   const [employeeCode, setEmployeeCode] = useState('');
 
   const handleSubmit = (event: React.FormEvent<HTMLFormElement>) => {
@@ -164,6 +169,8 @@ export function EmployeeCodeSignIn({
     }
     onAccepted?.();
     signIn(matched.id);
+    // Every code sign-in starts on the timecard, wherever the last person left the kiosk.
+    if (pathname !== KIOSK_HOME) navigate(KIOSK_HOME);
     setEmployeeCode('');
     toast.success(`Verified ${matched.employeeName}.`);
   };

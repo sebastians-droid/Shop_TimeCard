@@ -4,7 +4,7 @@ import {
   dayFirstClockIn,
   dayLastClockOut,
   findLaborEntryCovering,
-  isWithinRoadMechEditWindow,
+  isWithinJobEditWindow,
   jobTimeLocks,
   laborEntries,
   planForgottenJobInsert,
@@ -245,11 +245,11 @@ describe('planJobTimeEdit', () => {
   });
 });
 
-describe('isWithinRoadMechEditWindow', () => {
+describe('isWithinJobEditWindow', () => {
   it('allows today and the seven days before it', () => {
     const now = new Date(2026, 9, 16, 9, 0);
-    expect(isWithinRoadMechEditWindow('2026-10-16', now)).toBe(true);
-    expect(isWithinRoadMechEditWindow('2026-10-09', now)).toBe(true);
-    expect(isWithinRoadMechEditWindow('2026-10-08', now)).toBe(false);
+    expect(isWithinJobEditWindow('2026-10-16', now)).toBe(true);
+    expect(isWithinJobEditWindow('2026-10-09', now)).toBe(true);
+    expect(isWithinJobEditWindow('2026-10-08', now)).toBe(false);
   });
 });
