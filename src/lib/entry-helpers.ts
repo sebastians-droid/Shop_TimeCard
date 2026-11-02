@@ -198,6 +198,10 @@ export const isInOpenPayrollWeek = (entry: ShopTimeEntry) => {
 };
 
 export const getEntryDivision = (entry: ShopTimeEntry, assets: EquipmentAsset[]) => {
+  // A division typed over the asset's own code (see divisionFields) is a deliberate override and always wins.
+  if (entry.division !== undefined && entry.assetDivision !== undefined && entry.division !== entry.assetDivision) {
+    return String(entry.assetDivision);
+  }
   const matchedAsset = entry.asset?.id ? assets.find((asset: EquipmentAsset) => asset.id === entry.asset?.id) : undefined;
   // Entries in the current payroll week track the asset's live division so a
   // reassignment applies to work that hasn't been paid yet. Earlier weeks keep

@@ -44,8 +44,9 @@ import { useJobTimeEdits } from '@/hooks/use-job-time-edits';
 import { useDayNoLunch } from '@/hooks/use-day-no-lunch';
 import { JobTimeFields } from '@/components/job-time-fields';
 import { JobNameHint, JobNamesNotice } from '@/components/job-names-notice';
+import { JobPicker } from '@/components/job-picker';
 import { NoLunchCheckbox } from '@/components/no-lunch-checkbox';
-import { buildJobDetails, formatJobLabel } from '@/lib/job-details';
+import { buildJobDetails, formatJobLabel, storedDivisions } from '@/lib/job-details';
 import type { EquipmentAsset } from '@/models/equipment-asset';
 import { mapShopEmployees, type AppShopEmployee } from '@/lib/shop-employees';
 import {
@@ -369,8 +370,7 @@ export default function TimecardPage() {
           timeEntry: `${selectedEmployee.employeeName} - ${entryLabel}`,
           employee: { id: selectedEmployee.id, autoNumber: selectedEmployee.autoNumber },
           asset: selectedAssetForEntry ? { id: selectedAssetForEntry.id, asset: selectedAssetName } : undefined,
-          assetDivision: divisionNumber,
-          division: divisionNumber,
+          ...storedDivisions(selectedAssetForEntry?.divisionCode, divisionNumber === undefined ? '' : String(divisionNumber)),
           jobNumber: manualJobNumber || undefined,
           clockIn: switchAt,
           workDate: getEntryWorkDateKey(employeeActiveEntry),
@@ -648,7 +648,7 @@ export default function TimecardPage() {
                     ) : null}
                   </div>
                 </CardHeader>
-                <CardContent className="space-y-3">
+                <CardContent className="flex flex-col gap-3">
                   {jobNamesFailed && !clockInOnlyTimecard ? (
                     <JobNamesNotice error={jobNamesError} onRetry={() => void refetchJobNames()} />
                   ) : null}
@@ -686,7 +686,7 @@ export default function TimecardPage() {
                       Clock in at the shop kiosk when you arrive. Once you are clocked in, you can add jobs here from any device.
                     </p>
                   ) : (
-                    <div className="flex flex-col gap-4 sm:flex-row sm:gap-3">
+                    <div className="order-last -mx-3 flex gap-4 pt-1 sm:order-none sm:mx-0 sm:gap-3 sm:pt-0">
                       {!employeeActiveEntry ? (
                         <Button
                           type="button"
@@ -758,7 +758,7 @@ export default function TimecardPage() {
                     </div>
                   ) : null}
                   {!clockInOnlyTimecard && assetFormMode && employeeActiveEntry ? (
-                    <div className="grid gap-4 rounded-lg border border-dashed border-border bg-muted p-4 text-muted-foreground">
+                    <div className="order-last grid gap-4 rounded-lg border border-dashed border-border bg-muted p-4 text-muted-foreground sm:order-none">
                       <div className="flex items-center justify-between gap-3">
                         <p className="font-medium text-foreground">{awaitingFirstJob ? 'Start first job' : 'Add job'}</p>
                         <Button type="button" size="icon" variant="ghost" aria-label="Cancel form" onClick={() => setAssetFormMode(null)}>
@@ -794,13 +794,7 @@ export default function TimecardPage() {
                         </div>
                         <div className="space-y-2">
                           <Label htmlFor="job-number">Job Number (optional)</Label>
-                          <Input
-                            id="job-number"
-                            className="bg-background"
-                            value={jobNumber}
-                            onChange={(event: React.ChangeEvent<HTMLInputElement>) => setJobNumber(event.target.value)}
-                            placeholder="Enter job number"
-                          />
+                          <JobPicker id="job-number" value={jobNumber} onChange={setJobNumber} />
                           <JobNameHint jobNumber={jobNumber} jobNames={jobNames} />
                         </div>
                       </div>
@@ -846,8 +840,8 @@ export default function TimecardPage() {
                   ) : null}
                   {!clockInOnlyTimecard
                     ? displayedEntries.map((entry: ShopTimeEntry) => (
-                        <div key={entry.id} className="rounded-lg border border-border bg-background p-4">
-                          <div className="grid gap-4 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-start">
+                        <div key={entry.id} className="rounded-lg border border-border bg-background p-3 sm:p-4">
+                          <div className="grid gap-2 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-start sm:gap-4">
                             <div>
                               {editingEntryId === entry.id && !isPtoEntry(entry) ? (
                                 <div className="max-w-md space-y-3">
@@ -894,12 +888,7 @@ export default function TimecardPage() {
                                     </div>
                                     <div className="space-y-2">
                                       <Label htmlFor={`edit-job-${entry.id}`}>Job number</Label>
-                                      <Input
-                                        id={`edit-job-${entry.id}`}
-                                        value={editingJobNumber}
-                                        onChange={(event: React.ChangeEvent<HTMLInputElement>) => setEditingJobNumber(event.target.value)}
-                                        placeholder="Optional job number"
-                                      />
+                                      <JobPicker id={`edit-job-${entry.id}`} value={editingJobNumber} onChange={setEditingJobNumber} />
                                       <JobNameHint jobNumber={editingJobNumber} jobNames={jobNames} />
                                     </div>
                                   </div>
@@ -922,15 +911,17 @@ export default function TimecardPage() {
                                   </div>
                                 </div>
                               ) : (
-                                <div className="space-y-1">
+                                <div className="space-y-0.5 sm:space-y-1">
                                   <div className="flex flex-wrap items-center gap-2">
                                     {isPtoEntry(entry) ? <Badge variant="secondary">PTO</Badge> : null}
                                     {entry.pTOTypeKey ? (
                                       <Badge variant="outline">{ShopTimeEntryPTOTypeKeyToLabel[entry.pTOTypeKey]}</Badge>
                                     ) : null}
-                                    <p className="text-sm text-muted-foreground">{isPtoEntry(entry) ? 'Paid time off' : 'Asset'}</p>
+                                    <p className={`text-sm text-muted-foreground ${isPtoEntry(entry) ? '' : 'hidden sm:block'}`}>
+                                      {isPtoEntry(entry) ? 'Paid time off' : 'Asset'}
+                                    </p>
                                   </div>
-                                  <p className="text-lg font-semibold">{getEntryAssetName(entry, assets)}</p>
+                                  <p className="text-base font-semibold sm:text-lg">{getEntryAssetName(entry, assets)}</p>
                                   <p className="text-sm text-muted-foreground">
                                     {isPtoEntry(entry)
                                       ? `${getPtoHours(entry) || Math.round(entry.hours ?? 0)} hours submitted`
@@ -965,22 +956,26 @@ export default function TimecardPage() {
                               ) : null}
                             </div>
                             <div className="flex flex-col gap-2 sm:items-end">
-                              <div className="space-y-2 text-left sm:text-right">
+                              <div className="grid grid-cols-3 gap-2 rounded-md bg-muted/50 px-2 py-1.5 text-left sm:block sm:space-y-2 sm:bg-transparent sm:p-0 sm:text-right">
                                 <div>
-                                  <p className="text-sm text-muted-foreground">Clock in</p>
-                                  <p className="text-lg font-semibold">
+                                  <p className="text-xs text-muted-foreground sm:text-sm">Clock in</p>
+                                  <p className="text-base font-semibold sm:text-lg">
                                     {entry.clockIn
                                       ? format(new Date(entry.clockIn), openPunchStartedBeforeToday(entry) ? 'EEE, MMM d, p' : 'p')
                                       : '—'}
                                   </p>
                                 </div>
                                 <div>
-                                  <p className="text-sm text-muted-foreground">Clock out</p>
-                                  <p className="text-lg font-semibold">{entry.clockOut ? format(new Date(entry.clockOut), 'p') : '—'}</p>
+                                  <p className="text-xs text-muted-foreground sm:text-sm">Clock out</p>
+                                  <p className="text-base font-semibold sm:text-lg">
+                                    {entry.clockOut ? format(new Date(entry.clockOut), 'p') : '—'}
+                                  </p>
                                 </div>
                                 <div>
                                   <p className="text-xs text-muted-foreground">Duration</p>
-                                  <p className="text-sm font-medium text-foreground">{formatDuration(getRawDurationMinutes(entry))}</p>
+                                  <p className="text-base font-semibold text-foreground sm:text-sm sm:font-medium">
+                                    {formatDuration(getRawDurationMinutes(entry))}
+                                  </p>
                                 </div>
                               </div>
                               {editingEntryId === entry.id ? (
@@ -1026,20 +1021,26 @@ export default function TimecardPage() {
                                   </Button>
                                 </div>
                               ) : (
-                                <div className="flex flex-wrap items-center justify-end gap-2">
+                                <div className="flex flex-wrap items-center gap-2 sm:justify-end">
                                   {!entry.clockOut && !isPtoEntry(entry) ? (
                                     <Badge variant="secondary">Active</Badge>
                                   ) : (
                                     <Badge variant="outline">Complete</Badge>
                                   )}
                                   {!isPtoEntry(entry) ? (
-                                    <Button type="button" variant="outline" onClick={() => handleStartEditAsset(entry)}>
+                                    <Button
+                                      type="button"
+                                      variant="outline"
+                                      className="ml-auto h-9 sm:ml-0"
+                                      onClick={() => handleStartEditAsset(entry)}
+                                    >
                                       Edit timecard
                                     </Button>
                                   ) : null}
                                   <Button
                                     type="button"
                                     variant="outline"
+                                    className={`h-9 ${isPtoEntry(entry) ? 'ml-auto sm:ml-0' : ''}`}
                                     onClick={() => {
                                       setEditingEntryId('');
                                       setEditingNotesEntryId(entry.id);

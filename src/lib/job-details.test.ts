@@ -24,6 +24,16 @@ describe('buildJobDetails', () => {
     });
   });
 
+  it('records a division typed over the asset code as an override', () => {
+    const asset = { id: 'a1', asset: 'SS243', divisionCode: 800 };
+    expect(buildJobDetails('Pat Lee', { asset, division: '700', jobNumber: '' })).toMatchObject({
+      fields: { assetDivision: 700, division: 800 },
+    });
+    expect(buildJobDetails('Pat Lee', { asset, division: '800', jobNumber: '' })).toMatchObject({
+      fields: { assetDivision: 800, division: 800 },
+    });
+  });
+
   it('rejects a non-numeric division', () => {
     expect(buildJobDetails('Pat Lee', { division: '7a', jobNumber: '' })).toEqual({ error: 'Division must be a number.' });
   });

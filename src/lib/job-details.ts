@@ -23,6 +23,27 @@ export type JobDetailsFields = {
   jobNumber: string;
 };
 
+/**
+ * The two stored division fields. `assetDivision` is the division the entry is
+ * paid under: the typed one, else the asset's. `division` keeps the asset's own
+ * code, so when the two differ the typed division was a deliberate override and
+ * `getEntryDivision` stops following the asset's live division.
+ */
+export function divisionFields(
+  assetCode: number | undefined,
+  typedDivision: string,
+): { assetDivision: number | null; division: number | null } {
+  const typed = typedDivision.trim();
+  const assetDivision = typed ? Number(typed) : (assetCode ?? null);
+  return { assetDivision, division: assetCode ?? assetDivision };
+}
+
+/** `divisionFields` for a new entry, where an unknown division is left out rather than cleared. */
+export function storedDivisions(assetCode: number | undefined, typedDivision: string) {
+  const { assetDivision, division } = divisionFields(assetCode, typedDivision);
+  return { assetDivision: assetDivision ?? undefined, division: division ?? undefined };
+}
+
 /** "4821 - Main St Bridge", or the bare number when the job isn't in the list. */
 export function formatJobLabel(jobNumber: string, jobNames: Map<string, string>): string {
   const number = jobNumber.trim();
@@ -60,7 +81,7 @@ export function buildJobDetails(
     return { error: 'A job needs an asset, division, or job number. Delete the row instead to remove it entirely.' };
   }
 
-  const division = manualDivision ? Number(manualDivision) : (draft.asset?.divisionCode ?? null);
+  const { assetDivision, division } = divisionFields(draft.asset?.divisionCode, manualDivision);
   const assetName = draft.asset ? getAssetDisplayName(draft.asset) : '';
   const label =
     [assetName, jobNumber ? `Job ${jobNumber}` : ''].filter(Boolean).join(' · ') ||
@@ -70,7 +91,7 @@ export function buildJobDetails(
     fields: {
       timeEntry: `${employeeName} - ${label}`,
       asset: draft.asset ? { id: draft.asset.id, asset: assetName } : null,
-      assetDivision: division,
+      assetDivision,
       division,
       jobNumber,
     },

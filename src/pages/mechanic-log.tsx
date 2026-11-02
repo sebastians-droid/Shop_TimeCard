@@ -79,8 +79,9 @@ import { useJobTimeEdits } from '@/hooks/use-job-time-edits';
 import { useDayNoLunch } from '@/hooks/use-day-no-lunch';
 import { JobTimeFields } from '@/components/job-time-fields';
 import { JobNameHint, JobNamesNotice } from '@/components/job-names-notice';
+import { JobPicker } from '@/components/job-picker';
 import { NoLunchCheckbox } from '@/components/no-lunch-checkbox';
-import { buildJobDetails, formatJobLabel } from '@/lib/job-details';
+import { buildJobDetails, formatJobLabel, storedDivisions } from '@/lib/job-details';
 import { apiFetch } from '@/lib/api';
 import { queryKeys } from '@/lib/query-keys';
 import type { EquipmentAsset } from '@/models/equipment-asset';
@@ -342,8 +343,7 @@ export default function MechanicLogPage() {
       timeEntry: `${selectedEmployee.employeeName} - ${entryLabel}`,
       employee: { id: selectedEmployee.id, autoNumber: selectedEmployee.autoNumber },
       asset: selectedAssetForEntry ? { id: selectedAssetForEntry.id, asset: selectedAssetName } : undefined,
-      assetDivision: divisionNumber,
-      division: divisionNumber,
+      ...storedDivisions(selectedAssetForEntry?.divisionCode, manualDivision),
       jobNumber: manualJobNumber || undefined,
       clockIn: startedAt,
       clockOut: endedAt,
@@ -723,12 +723,7 @@ export default function MechanicLogPage() {
                                       </div>
                                       <div className="space-y-2">
                                         <Label htmlFor={`job-num-${d.dateKey}`}>Job number (optional)</Label>
-                                        <Input
-                                          id={`job-num-${d.dateKey}`}
-                                          className="bg-background"
-                                          value={jobNumber}
-                                          onChange={(event: React.ChangeEvent<HTMLInputElement>) => setJobNumber(event.target.value)}
-                                        />
+                                        <JobPicker id={`job-num-${d.dateKey}`} value={jobNumber} onChange={setJobNumber} />
                                         <JobNameHint jobNumber={jobNumber} jobNames={jobNames} />
                                       </div>
                                     </div>
@@ -830,15 +825,7 @@ export default function MechanicLogPage() {
                                         </div>
                                         <div className="space-y-2">
                                           <Label htmlFor={`edit-job-${entry.id}`}>Job number</Label>
-                                          <Input
-                                            id={`edit-job-${entry.id}`}
-                                            className="bg-background"
-                                            value={editingJobNumber}
-                                            onChange={(event: React.ChangeEvent<HTMLInputElement>) =>
-                                              setEditingJobNumber(event.target.value)
-                                            }
-                                            placeholder="Optional job number"
-                                          />
+                                          <JobPicker id={`edit-job-${entry.id}`} value={editingJobNumber} onChange={setEditingJobNumber} />
                                           <JobNameHint jobNumber={editingJobNumber} jobNames={jobNames} />
                                         </div>
                                       </div>

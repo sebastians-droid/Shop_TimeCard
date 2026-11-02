@@ -226,6 +226,17 @@ describe('getEntryDivision', () => {
     expect(getEntryDivision(noRecorded, assets)).toBe('34');
   });
 
+  it('keeps a division typed over the asset code, even in the open payroll week', () => {
+    const overridden = entry({
+      id: 'e',
+      clockIn: at(THIS_WEEK, '08:00'),
+      asset: { id: 'asset-1', asset: 'EX-140' },
+      assetDivision: 700,
+      division: 34,
+    });
+    expect(getEntryDivision(overridden, assets)).toBe('700');
+  });
+
   it('returns an empty string when no division is known', () => {
     expect(getEntryDivision(entry({ id: 'e', clockIn: at(THIS_WEEK, '08:00') }), assets)).toBe('');
   });

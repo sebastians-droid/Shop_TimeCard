@@ -47,6 +47,7 @@ import { PtoApprovalPanel } from '@/components/manager/pto-approval-panel';
 import { PayrollExportCard } from '@/components/manager/payroll-export-card';
 import { useAllEquipmentAssets, useJobNames, useScheduleList, useShopEmployeeList, useShopTimeEntryList } from '@/hooks/use-shop-data';
 import { JobNameHint, JobNamesNotice } from '@/components/job-names-notice';
+import { JobPicker } from '@/components/job-picker';
 import { formatJobLabel } from '@/lib/job-details';
 import { useManagerEntryActions } from '@/hooks/use-manager-entry-actions';
 import { useReloadTables } from '@/hooks/use-reload-tables';
@@ -885,14 +886,10 @@ export default function ManagerDashboardPage() {
                   </div>
                   <div className="space-y-2">
                     <Label htmlFor="missed-job">Job number</Label>
-                    <Input
+                    <JobPicker
                       id="missed-job"
-                      className="bg-background"
                       value={newEntryDraft.jobNumber}
-                      onChange={(event: React.ChangeEvent<HTMLInputElement>) =>
-                        setNewEntryDraft({ ...newEntryDraft, jobNumber: event.target.value })
-                      }
-                      placeholder="Optional job number"
+                      onChange={(jobNumber: string) => setNewEntryDraft({ ...newEntryDraft, jobNumber })}
                     />
                     <JobNameHint jobNumber={newEntryDraft.jobNumber} jobNames={jobNames} />
                   </div>
@@ -1070,13 +1067,10 @@ export default function ManagerDashboardPage() {
                                         </div>
                                         <div className="space-y-2">
                                           <Label htmlFor={`job-number-${entry.id}`}>Job Number</Label>
-                                          <Input
+                                          <JobPicker
                                             id={`job-number-${entry.id}`}
                                             value={editValues.jobNumber}
-                                            onChange={(event: React.ChangeEvent<HTMLInputElement>) =>
-                                              setEditValues({ ...editValues, jobNumber: event.target.value })
-                                            }
-                                            placeholder="Optional job number"
+                                            onChange={(jobNumber: string) => setEditValues({ ...editValues, jobNumber })}
                                           />
                                           <JobNameHint jobNumber={editValues.jobNumber} jobNames={jobNames} />
                                         </div>
@@ -1289,14 +1283,10 @@ export default function ManagerDashboardPage() {
                               </div>
                               <div className="space-y-2">
                                 <Label htmlFor={`add-job-${summary.employeeKey}`}>Job number</Label>
-                                <Input
+                                <JobPicker
                                   id={`add-job-${summary.employeeKey}`}
-                                  className="bg-background"
                                   value={newEntryDraft.jobNumber}
-                                  onChange={(event: React.ChangeEvent<HTMLInputElement>) =>
-                                    setNewEntryDraft({ ...newEntryDraft, jobNumber: event.target.value })
-                                  }
-                                  placeholder="Optional job number"
+                                  onChange={(jobNumber: string) => setNewEntryDraft({ ...newEntryDraft, jobNumber })}
                                 />
                                 <JobNameHint jobNumber={newEntryDraft.jobNumber} jobNames={jobNames} />
                               </div>
@@ -1585,13 +1575,10 @@ export default function ManagerDashboardPage() {
                                         </div>
                                         <div className="space-y-2">
                                           <Label htmlFor={`range-job-${entry.id}`}>Job Number</Label>
-                                          <Input
+                                          <JobPicker
                                             id={`range-job-${entry.id}`}
                                             value={editValues.jobNumber}
-                                            onChange={(event: React.ChangeEvent<HTMLInputElement>) =>
-                                              setEditValues({ ...editValues, jobNumber: event.target.value })
-                                            }
-                                            placeholder="Optional job number"
+                                            onChange={(jobNumber: string) => setEditValues({ ...editValues, jobNumber })}
                                           />
                                           <JobNameHint jobNumber={editValues.jobNumber} jobNames={jobNames} />
                                         </div>
@@ -1793,14 +1780,10 @@ export default function ManagerDashboardPage() {
                                 </div>
                                 <div className="space-y-2">
                                   <Label htmlFor={`range-add-job-${dayKey}`}>Job number</Label>
-                                  <Input
+                                  <JobPicker
                                     id={`range-add-job-${dayKey}`}
-                                    className="bg-background"
                                     value={newEntryDraft.jobNumber}
-                                    onChange={(event: React.ChangeEvent<HTMLInputElement>) =>
-                                      setNewEntryDraft({ ...newEntryDraft, jobNumber: event.target.value })
-                                    }
-                                    placeholder="Optional job number"
+                                    onChange={(jobNumber: string) => setNewEntryDraft({ ...newEntryDraft, jobNumber })}
                                   />
                                   <JobNameHint jobNumber={newEntryDraft.jobNumber} jobNames={jobNames} />
                                 </div>

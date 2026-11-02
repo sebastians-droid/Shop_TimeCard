@@ -57,7 +57,7 @@ export function useJobNames() {
     retry: false,
   });
   const jobNames = useMemo(() => new Map((query.data ?? []).map((job) => [job.jobNumber.toLowerCase(), job.jobName])), [query.data]);
-  return { jobNames, failed: query.isError, error: query.error, refetch: query.refetch };
+  return { jobs: query.data ?? [], jobNames, failed: query.isError, error: query.error, refetch: query.refetch };
 }
 
 export function useShopTimeEntryList() {

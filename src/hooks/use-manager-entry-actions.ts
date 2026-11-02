@@ -3,7 +3,7 @@ import { addHours, format } from 'date-fns';
 import { toast } from '@/lib/toast';
 
 import { useDayNoLunch } from '@/hooks/use-day-no-lunch';
-import { buildJobDetails } from '@/lib/job-details';
+import { buildJobDetails, divisionFields } from '@/lib/job-details';
 import { useCreateShopTimeEntry, useDeleteShopTimeEntry, useUpdateShopTimeEntry } from '@/hooks/use-shop-data';
 import { fetchPayStart } from '@/hooks/use-employee-scheduled-starts';
 import {
@@ -115,7 +115,7 @@ export function useManagerEntryActions({ employees, assets, timeEntries }: Manag
     const label = selectedAsset
       ? getAssetDisplayName(selectedAsset)
       : manualJobNumber || (manualDivision ? `Division ${manualDivision}` : 'Time entry');
-    const division = selectedAsset ? selectedAsset.divisionCode : manualDivision ? Number(manualDivision) : undefined;
+    const { assetDivision, division } = divisionFields(selectedAsset?.divisionCode, manualDivision);
     // Stored hours use the day's scheduled start, matching every pay total.
     let payStart: string | null | undefined;
     try {
@@ -139,7 +139,8 @@ export function useManagerEntryActions({ employees, assets, timeEntries }: Manag
       timeEntry: `${employee.employeeName} - ${label}`,
       employee: { id: employee.id, autoNumber: employee.autoNumber },
       asset: selectedAsset ? { id: selectedAsset.id, asset: getAssetDisplayName(selectedAsset) } : undefined,
-      assetDivision: division,
+      assetDivision: assetDivision ?? undefined,
+      division: division ?? undefined,
       clockIn,
       clockOut,
       jobNumber: manualJobNumber || undefined,
@@ -158,8 +159,8 @@ export function useManagerEntryActions({ employees, assets, timeEntries }: Manag
         timeEntry: provisionalEntry.timeEntry,
         employee: { id: employee.id, autoNumber: employee.autoNumber },
         asset: provisionalEntry.asset,
-        assetDivision: division,
-        division,
+        assetDivision: provisionalEntry.assetDivision,
+        division: provisionalEntry.division,
         jobNumber: manualJobNumber || undefined,
         payTypeKey: draft.payTypeKey,
         clockIn,
@@ -187,6 +188,11 @@ export function useManagerEntryActions({ employees, assets, timeEntries }: Manag
   }): Promise<boolean> => {
     if (!editValues.clockInTime || !entry.clockIn) {
       toast.error('Clock-in time is required.');
+      return false;
+    }
+
+    if (!editValues.clockOutTime && entry.clockOut) {
+      toast.error(`Clock-out can't be blank on a finished entry. Enter the correct time — it was ${format(new Date(entry.clockOut), 'p')}.`);
       return false;
     }
 
