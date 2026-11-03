@@ -1066,7 +1066,11 @@ export default function TimecardPage() {
                                 <p className="text-sm text-muted-foreground">
                                   {entry.clockIn ? format(new Date(entry.clockIn), 'EEE, MMM d') : 'Today'}
                                 </p>
-                                <p className="text-lg font-semibold">{clockInOnlyCaption}</p>
+                                <p className="text-lg font-semibold">
+                                  {isPtoEntry(entry)
+                                    ? `${entry.pTOTypeKey ? `${ShopTimeEntryPTOTypeKeyToLabel[entry.pTOTypeKey]} ` : ''}PTO · ${getPtoHours(entry) || Math.round(entry.hours ?? 0)} hours submitted`
+                                    : clockInOnlyCaption}
+                                </p>
                               </div>
                               <div className="space-y-2 text-left sm:text-right">
                                 <div>
@@ -1086,81 +1090,79 @@ export default function TimecardPage() {
                 </CardContent>
               </Card>
 
-              {!clockInOnlyTimecard ? (
-                <Card className="bg-card text-card-foreground shadow-sm">
-                  <CardHeader>
-                    <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-                      <div>
-                        <CardTitle className="flex items-center gap-2 text-xl">
-                          <CalendarIcon className="h-5 w-5" /> PTO
-                        </CardTitle>
-                        <p className="mt-1 text-sm text-muted-foreground">Submit 4 or 8 hours of paid time off for a past or future day.</p>
-                      </div>
-                      <Button type="button" variant="outline" onClick={() => setShowPtoForm((currentValue: boolean) => !currentValue)}>
-                        {showPtoForm ? 'Cancel PTO' : 'Submit PTO'}
-                      </Button>
+              <Card className="bg-card text-card-foreground shadow-sm">
+                <CardHeader>
+                  <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                    <div>
+                      <CardTitle className="flex items-center gap-2 text-xl">
+                        <CalendarIcon className="h-5 w-5" /> PTO
+                      </CardTitle>
+                      <p className="mt-1 text-sm text-muted-foreground">Submit 4 or 8 hours of paid time off for a past or future day.</p>
                     </div>
-                  </CardHeader>
-                  {showPtoForm ? (
-                    <CardContent className="grid gap-4 rounded-b-xl border-t border-border bg-muted p-4 text-muted-foreground sm:grid-cols-[1fr_auto] sm:items-end">
-                      <div className="grid gap-4 sm:grid-cols-3">
-                        <div className="space-y-2">
-                          <Label>PTO date</Label>
-                          <Popover>
-                            <PopoverTrigger asChild>
-                              <Button type="button" variant="outline" className="w-full justify-start bg-background text-left font-normal">
-                                <CalendarIcon className="mr-2 h-4 w-4" />
-                                {ptoDate ? format(ptoDate, 'MMM d, yyyy') : 'Pick a date'}
-                              </Button>
-                            </PopoverTrigger>
-                            <PopoverContent className="w-auto p-0" align="start">
-                              <Calendar
-                                mode="single"
-                                selected={ptoDate}
-                                onSelect={(date: Date | undefined) => {
-                                  if (date) setPtoDate(startOfDay(date));
-                                }}
-                                initialFocus
-                              />
-                            </PopoverContent>
-                          </Popover>
-                        </div>
-                        <div className="space-y-2">
-                          <Label htmlFor="pto-type">PTO type</Label>
-                          <Select value={ptoType} onValueChange={(value: ShopTimeEntryPTOTypeKey) => setPtoType(value)}>
-                            <SelectTrigger id="pto-type" className="w-full bg-background">
-                              <SelectValue placeholder="Select PTO type" />
-                            </SelectTrigger>
-                            <SelectContent>
-                              {Object.entries(ShopTimeEntryPTOTypeKeyToLabel)
-                                .filter(([key]: [string, string]) => Boolean(key))
-                                .map(([key, label]: [string, string]) => (
-                                  <SelectItem key={key} value={key}>
-                                    {label}
-                                  </SelectItem>
-                                ))}
-                            </SelectContent>
-                          </Select>
-                        </div>
-                        <div className="space-y-2">
-                          <Label>PTO hours</Label>
-                          <div className="grid grid-cols-2 gap-2">
-                            <Button type="button" variant={ptoHours === 4 ? 'default' : 'outline'} onClick={() => setPtoHours(4)}>
-                              4 hours
+                    <Button type="button" variant="outline" onClick={() => setShowPtoForm((currentValue: boolean) => !currentValue)}>
+                      {showPtoForm ? 'Cancel PTO' : 'Submit PTO'}
+                    </Button>
+                  </div>
+                </CardHeader>
+                {showPtoForm ? (
+                  <CardContent className="grid gap-4 rounded-b-xl border-t border-border bg-muted p-4 text-muted-foreground sm:grid-cols-[1fr_auto] sm:items-end">
+                    <div className="grid gap-4 sm:grid-cols-3">
+                      <div className="space-y-2">
+                        <Label>PTO date</Label>
+                        <Popover>
+                          <PopoverTrigger asChild>
+                            <Button type="button" variant="outline" className="w-full justify-start bg-background text-left font-normal">
+                              <CalendarIcon className="mr-2 h-4 w-4" />
+                              {ptoDate ? format(ptoDate, 'MMM d, yyyy') : 'Pick a date'}
                             </Button>
-                            <Button type="button" variant={ptoHours === 8 ? 'default' : 'outline'} onClick={() => setPtoHours(8)}>
-                              8 hours
-                            </Button>
-                          </div>
+                          </PopoverTrigger>
+                          <PopoverContent className="w-auto p-0" align="start">
+                            <Calendar
+                              mode="single"
+                              selected={ptoDate}
+                              onSelect={(date: Date | undefined) => {
+                                if (date) setPtoDate(startOfDay(date));
+                              }}
+                              initialFocus
+                            />
+                          </PopoverContent>
+                        </Popover>
+                      </div>
+                      <div className="space-y-2">
+                        <Label htmlFor="pto-type">PTO type</Label>
+                        <Select value={ptoType} onValueChange={(value: ShopTimeEntryPTOTypeKey) => setPtoType(value)}>
+                          <SelectTrigger id="pto-type" className="w-full bg-background">
+                            <SelectValue placeholder="Select PTO type" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            {Object.entries(ShopTimeEntryPTOTypeKeyToLabel)
+                              .filter(([key]: [string, string]) => Boolean(key))
+                              .map(([key, label]: [string, string]) => (
+                                <SelectItem key={key} value={key}>
+                                  {label}
+                                </SelectItem>
+                              ))}
+                          </SelectContent>
+                        </Select>
+                      </div>
+                      <div className="space-y-2">
+                        <Label>PTO hours</Label>
+                        <div className="grid grid-cols-2 gap-2">
+                          <Button type="button" variant={ptoHours === 4 ? 'default' : 'outline'} onClick={() => setPtoHours(4)}>
+                            4 hours
+                          </Button>
+                          <Button type="button" variant={ptoHours === 8 ? 'default' : 'outline'} onClick={() => setPtoHours(8)}>
+                            8 hours
+                          </Button>
                         </div>
                       </div>
-                      <Button className="h-12" type="button" onClick={() => void handleSubmitPto()} disabled={createTimeEntry.isPending}>
-                        Submit PTO
-                      </Button>
-                    </CardContent>
-                  ) : null}
-                </Card>
-              ) : null}
+                    </div>
+                    <Button className="h-12" type="button" onClick={() => void handleSubmitPto()} disabled={createTimeEntry.isPending}>
+                      Submit PTO
+                    </Button>
+                  </CardContent>
+                ) : null}
+              </Card>
             </>
           )}
         </section>
